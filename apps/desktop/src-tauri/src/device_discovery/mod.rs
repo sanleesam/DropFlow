@@ -117,7 +117,7 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
 
         let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
         let service_type = "_dropflow._tcp.local.";
-        let instance_name = format!("{}.{}", device_id, service_type);
+        let instance_name = device_id;
         let host_name = format!("{}.local.", device_id);
 
         let mut properties = HashMap::new();
