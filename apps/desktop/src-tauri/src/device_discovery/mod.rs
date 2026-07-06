@@ -8,9 +8,6 @@ use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State, Manager};
 
-const WATCHDOG_TIMEOUT_SECS: u64 = 30;
-const PEER_TIMEOUT_SECS: u64 = 35;
-
 // ─── Data Types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -73,28 +70,19 @@ pub struct MdnsDiscoveryEngine {
     pub is_browsing: Mutex<bool>,
     pub local_uuid: String,
     pub discovered_peers: Arc<Mutex<HashMap<String, DiscoveredDevice>>>,
-    pub peer_last_seen: Arc<Mutex<HashMap<String, u64>>>,
     pub historically_seen_peers: Arc<Mutex<HashSet<String>>>,
-    pub last_activity_time: Arc<Mutex<u64>>,
 }
 
 impl MdnsDiscoveryEngine {
     pub fn new(local_uuid: String) -> Result<Self, String> {
         let daemon = ServiceDaemon::new().map_err(|e| format!("Failed to create mDNS daemon: {}", e))?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
         Ok(Self {
             daemon,
             active_registration: Mutex::new(None),
             is_browsing: Mutex::new(false),
             local_uuid,
             discovered_peers: Arc::new(Mutex::new(HashMap::new())),
-            peer_last_seen: Arc::new(Mutex::new(HashMap::new())),
             historically_seen_peers: Arc::new(Mutex::new(HashSet::new())),
-            last_activity_time: Arc::new(Mutex::new(now)),
         })
     }
 }
@@ -175,24 +163,13 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
         let service_type = "_dropflow._tcp.local.";
         let local_uuid = self.local_uuid.clone();
         let discovered_peers = self.discovered_peers.clone();
-        let peer_last_seen = self.peer_last_seen.clone();
         let historically_seen_peers = self.historically_seen_peers.clone();
-        let last_activity_time = self.last_activity_time.clone();
-
-        // Initialize last activity time to current time
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        *last_activity_time.lock().unwrap() = now;
 
         // Thread 1: Main browser event receiver loop
         let daemon_event = daemon.clone();
         let app_event = app.clone();
         let discovered_peers_event = discovered_peers.clone();
-        let peer_last_seen_event = peer_last_seen.clone();
         let historically_seen_peers_event = historically_seen_peers.clone();
-        let last_activity_event = last_activity_time.clone();
         let local_uuid_event = local_uuid.clone();
 
         std::thread::spawn(move || {
@@ -209,16 +186,9 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
                         }
 
                         while let Ok(event) = rx.recv() {
-                            // Update last activity timestamp on any discovery event
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs();
-                            *last_activity_event.lock().unwrap() = now;
-
                             match event {
                                 ServiceEvent::ServiceFound(_stype, _fullname) => {
-                                    // Kept clean / silent to avoid logs flood
+                                    // Silent to avoid log flooding
                                 }
                                 ServiceEvent::ServiceResolved(info) => {
                                     let ip = info.get_addresses_v4()
@@ -265,9 +235,6 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
                                         port,
                                         version,
                                     };
-
-                                    // Update last seen timestamp
-                                    peer_last_seen_event.lock().unwrap().insert(id.clone(), now);
 
                                     let mut peers = discovered_peers_event.lock().unwrap();
                                     let mut history = historically_seen_peers_event.lock().unwrap();
@@ -322,7 +289,6 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
                                         println!("[Discovery] Peer removed: ID={}", id);
                                         app_event.emit("peer-lost", &id).ok();
                                     }
-                                    peer_last_seen_event.lock().unwrap().remove(&id);
                                 }
                                 ServiceEvent::SearchStopped(_) => {
                                     break;
@@ -337,65 +303,6 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
                 }
                 // Short sleep before attempting to recreate browser receiver
                 std::thread::sleep(std::time::Duration::from_millis(500));
-            }
-        });
-
-        // Thread 2: Watchdog browse restarter (queries LAN active peers ONLY if idle/no activity for 30 seconds)
-        let daemon_trigger = daemon.clone();
-        let last_activity_trigger = last_activity_time.clone();
-        std::thread::spawn(move || {
-            loop {
-                std::thread::sleep(std::time::Duration::from_secs(5));
-
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-
-                let last = *last_activity_trigger.lock().unwrap();
-                if now - last >= WATCHDOG_TIMEOUT_SECS {
-                    println!("[Discovery] Browser restarted (reason: idle timeout)");
-                    // stop_browse closes the browse channel and triggers Thread 1 to browse again, forcing fresh queries
-                    daemon_trigger.stop_browse(service_type).ok();
-                    *last_activity_trigger.lock().unwrap() = now; // reset trigger
-                }
-            }
-        });
-
-        // Thread 3: Heartbeat checking loop (evicts non-responsive peers after 10 seconds of no resolution)
-        let discovered_peers_hb = discovered_peers.clone();
-        let peer_last_seen_hb = peer_last_seen.clone();
-        let app_hb = app.clone();
-        std::thread::spawn(move || {
-            loop {
-                std::thread::sleep(std::time::Duration::from_secs(3));
-                
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-
-                let mut expired_ids = Vec::new();
-                {
-                    let last_seen = peer_last_seen_hb.lock().unwrap();
-                    for (id, &time) in last_seen.iter() {
-                        if now - time > PEER_TIMEOUT_SECS {
-                            expired_ids.push(id.clone());
-                        }
-                    }
-                }
-
-                if !expired_ids.is_empty() {
-                    let mut peers = discovered_peers_hb.lock().unwrap();
-                    let mut last_seen = peer_last_seen_hb.lock().unwrap();
-                    for id in expired_ids {
-                        if peers.remove(&id).is_some() {
-                            println!("[Discovery] Peer removed (timeout): ID={}", id);
-                            app_hb.emit("peer-lost", &id).ok();
-                        }
-                        last_seen.remove(&id);
-                    }
-                }
             }
         });
 
