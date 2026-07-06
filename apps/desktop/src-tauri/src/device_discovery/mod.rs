@@ -8,6 +8,9 @@ use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State, Manager};
 
+const WATCHDOG_TIMEOUT_SECS: u64 = 30;
+const PEER_TIMEOUT_SECS: u64 = 35;
+
 // ─── Data Types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -350,7 +353,7 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
                     .as_secs();
 
                 let last = *last_activity_trigger.lock().unwrap();
-                if now - last >= 30 {
+                if now - last >= WATCHDOG_TIMEOUT_SECS {
                     println!("[Discovery] Browser restarted (reason: idle timeout)");
                     // stop_browse closes the browse channel and triggers Thread 1 to browse again, forcing fresh queries
                     daemon_trigger.stop_browse(service_type).ok();
@@ -376,7 +379,7 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
                 {
                     let last_seen = peer_last_seen_hb.lock().unwrap();
                     for (id, &time) in last_seen.iter() {
-                        if now - time > 10 {
+                        if now - time > PEER_TIMEOUT_SECS {
                             expired_ids.push(id.clone());
                         }
                     }
