@@ -1,7 +1,12 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Header from "../components/Header";
 import DeviceCard, { Device } from "../components/DeviceCard";
 import FileDropZone from "../components/FileDropZone";
+import { TransferProgress } from "../components/TransferProgress";
+import { SettingsModal } from "../components/SettingsModal";
+import { useSettings } from "../components/SettingsProvider";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 // ─── Section wrapper ────────────────────────────────────────────────────────
 
@@ -76,39 +81,102 @@ const IconClock: React.FC = () => (
   </svg>
 );
 
-// ─── Mock devices ────────────────────────────────────────────────────────────
-
-const MOCK_DEVICES: Device[] = [
-  {
-    id: "macbook-pro",
-    name: "Sanlee's MacBook Pro",
-    type: "laptop",
-    status: "online",
-    lastSeen: "Now",
-  },
-  {
-    id: "gaming-pc",
-    name: "Gaming PC",
-    type: "desktop",
-    status: "recently-seen",
-    lastSeen: "Last seen 2 min ago",
-  },
-  {
-    id: "pixel-9-pro",
-    name: "Pixel 9 Pro",
-    type: "phone",
-    status: "offline",
-    lastSeen: "Offline",
-  },
-];
+// Discovered devices are loaded dynamically via Tauri and mDNS
 
 // ─── Home page ────────────────────────────────────────────────────────────────
 
 const Home: React.FC = () => {
+  const { settings } = useSettings();
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [activeTransfer, setActiveTransfer] = useState<{
+    deviceName: string;
+    fileName: string;
+  } | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const wasSettingsOpenRef = useRef(false);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [localUuid, setLocalUuid] = useState<string>("");
+
+  // Restore focus to Settings button after modal is closed
+  useEffect(() => {
+    if (isSettingsOpen) {
+      wasSettingsOpenRef.current = true;
+    } else if (wasSettingsOpenRef.current) {
+      document.getElementById("settings-btn")?.focus();
+      wasSettingsOpenRef.current = false;
+    }
+  }, [isSettingsOpen]);
+
+  // Retrieve persistent local UUID on mount
+  useEffect(() => {
+    invoke<string>("get_local_uuid").then(setLocalUuid).catch(console.error);
+  }, []);
+
+  // Start mDNS discovery and setup listeners on mount
+  useEffect(() => {
+    invoke("start_discovery").catch(console.error);
+
+    let unlistenDiscovered: () => void;
+    let unlistenLost: () => void;
+
+    const setupListeners = async () => {
+      unlistenDiscovered = await listen<Device>("peer-discovered", (event) => {
+        const newDevice = event.payload;
+        setDevices((prev) => {
+          if (prev.some((d) => d.id === newDevice.id)) {
+            return prev.map((d) => (d.id === newDevice.id ? newDevice : d));
+          }
+          return [...prev, newDevice];
+        });
+      });
+
+      unlistenLost = await listen<string>("peer-lost", (event) => {
+        const lostId = event.payload;
+        setDevices((prev) => prev.filter((d) => d.id !== lostId));
+      });
+    };
+
+    setupListeners();
+
+    return () => {
+      if (unlistenDiscovered) unlistenDiscovered();
+      if (unlistenLost) unlistenLost();
+    };
+  }, []);
+
+  // Sync settings visibility and deviceName with mDNS backend advertisement
+  useEffect(() => {
+    if (!localUuid) return;
+
+    if (settings.deviceVisibility) {
+      invoke("update_advertisement", {
+        deviceId: localUuid,
+        deviceName: settings.deviceName,
+        deviceType: "laptop",
+        port: 42382,
+      }).catch(console.error);
+    } else {
+      invoke("update_advertisement", {
+        deviceId: localUuid,
+        deviceName: "",
+        deviceType: "",
+        port: 0,
+      }).catch(console.error);
+    }
+  }, [settings.deviceName, settings.deviceVisibility, localUuid]);
+
+  const handleSend = (fileName: string) => {
+    const device = devices.find((d) => d.id === selectedDeviceId);
+    const deviceName = device ? device.name : "Unknown Device";
+    setActiveTransfer({
+      deviceName,
+      fileName,
+    });
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-950 text-white overflow-hidden">
-      <Header />
+      <Header onSettingsClick={() => setIsSettingsOpen(true)} />
 
       <main
         id="main-content"
@@ -137,14 +205,22 @@ const Home: React.FC = () => {
             aria-label="Nearby devices"
             className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-4"
           >
-            {MOCK_DEVICES.map((device) => (
-              <DeviceCard
-                key={device.id}
-                device={device}
-                selected={selectedDeviceId === device.id}
-                onSelect={setSelectedDeviceId}
-              />
-            ))}
+            {devices.length > 0 ? (
+              devices.map((device) => (
+                <DeviceCard
+                  key={device.id}
+                  device={device}
+                  selected={selectedDeviceId === device.id}
+                  onSelect={setSelectedDeviceId}
+                />
+              ))
+            ) : (
+              <div className="col-span-full py-8 text-center select-none">
+                <p className="text-sm text-slate-500 tracking-wide">
+                  No nearby DropFlow devices found.
+                </p>
+              </div>
+            )}
           </div>
         </Section>
 
@@ -155,8 +231,17 @@ const Home: React.FC = () => {
           icon={<IconUpload />}
           accent="bg-gradient-to-br from-indigo-500 to-purple-500"
         >
-          <FileDropZone selectedDeviceId={selectedDeviceId} />
+          <FileDropZone selectedDeviceId={selectedDeviceId} onSend={handleSend} />
         </Section>
+
+        {/* ── Active Transfer Progress ── */}
+        {activeTransfer && (
+          <TransferProgress
+            deviceName={activeTransfer.deviceName}
+            fileName={activeTransfer.fileName}
+            onClose={() => setActiveTransfer(null)}
+          />
+        )}
 
         {/* ── Recent Transfers ── */}
         <Section
@@ -166,6 +251,9 @@ const Home: React.FC = () => {
           accent="bg-gradient-to-br from-purple-500 to-pink-500"
         />
       </main>
+
+      {/* ── Settings Modal ── */}
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </div>
   );
 };

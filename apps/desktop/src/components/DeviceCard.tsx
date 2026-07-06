@@ -1,4 +1,5 @@
 import React from "react";
+import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -58,9 +59,9 @@ const DEVICE_TYPE_LABELS: Record<DeviceType, string> = {
 
 // ─── Checkmark badge ──────────────────────────────────────────────────────────
 
-const CheckBadge: React.FC = () => (
+const CheckBadge: React.FC<{ bgClass: string }> = ({ bgClass }) => (
   <span
-    className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center shadow-lg shadow-blue-500/40 animate-[badge-pop_0.2s_ease-out]"
+    className={`absolute top-2.5 right-2.5 w-5 h-5 rounded-full ${bgClass} flex items-center justify-center shadow-lg animate-[badge-pop_0.2s_ease-out]`}
     aria-hidden="true"
   >
     <svg viewBox="0 0 12 12" className="w-3 h-3" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -100,6 +101,8 @@ const STATUS_CONFIG: Record<
 const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) => {
   const Icon = DEVICE_ICONS[device.type];
   const status = STATUS_CONFIG[device.status];
+  const { settings } = useSettings();
+  const accent = ACCENT_COLOR_MAPS[settings.accentColor];
 
   return (
     <button
@@ -115,25 +118,25 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
         "transition-all duration-200 ease-out",
         // Border / background
         selected
-          ? "bg-blue-500/10 border border-blue-500/60 shadow-[0_0_0_1px_rgba(59,130,246,0.3),0_0_20px_rgba(59,130,246,0.15)]"
+          ? accent.deviceSelected
           : "bg-slate-800/60 border border-white/6 hover:border-white/12 hover:bg-slate-800/80",
         // Lift on hover
         "hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.35)]",
         // Scale on select
         selected ? "scale-[1.02]" : "scale-100",
         // Focus ring for keyboard
-        "focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
+        selected ? accent.deviceFocus : "focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
       ].join(" ")}
     >
       {/* Checkmark badge */}
-      {selected && <CheckBadge />}
+      {selected && <CheckBadge bgClass={accent.deviceBadgeBg} />}
 
       {/* Icon */}
       <span
         className={[
           "flex items-center justify-center w-10 h-10 rounded-xl",
           selected
-            ? "bg-blue-500/20 text-blue-400"
+            ? accent.deviceIconBg
             : "bg-slate-700/60 text-slate-300",
           "transition-colors duration-200",
         ].join(" ")}

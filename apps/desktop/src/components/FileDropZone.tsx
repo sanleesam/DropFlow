@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useToast } from "./ToastProvider";
+import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,8 @@ interface SelectedFile {
 interface FileDropZoneProps {
   /** ID of the currently selected device (null = none) */
   selectedDeviceId: string | null;
+  /** Callback fired when user initiates file sending */
+  onSend?: (fileName: string) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -82,8 +85,10 @@ const IconUploadLarge: React.FC = () => (
 
 // ─── FileDropZone ─────────────────────────────────────────────────────────────
 
-const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId }) => {
+const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend }) => {
   const { addToast } = useToast();
+  const { settings } = useSettings();
+  const accent = ACCENT_COLOR_MAPS[settings.accentColor];
   const [files, setFiles] = useState<SelectedFile[]>([]);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -103,8 +108,12 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId }) => {
       addToast("Choose one or more files first.", "error");
     } else {
       addToast("Preparing transfer...", "info");
+      if (onSend) {
+        const firstFileName = files[0]?.file.name || "movie.mp4";
+        onSend(firstFileName);
+      }
     }
-  }, [hasDevice, hasFiles, addToast]);
+  }, [hasDevice, hasFiles, addToast, onSend, files]);
 
   // ── File ingestion ──────────────────────────────────────────────────────────
 
@@ -297,12 +306,12 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId }) => {
           className={[
             "w-full max-w-xs py-2.5 px-6 rounded-xl text-sm font-semibold",
             "transition-all duration-200 ease-out",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
+            accent.deviceFocus,
             canSend
               ? [
-                  "bg-gradient-to-r from-indigo-500 to-purple-500 text-white",
-                  "hover:from-indigo-400 hover:to-purple-400",
-                  "hover:shadow-[0_0_20px_rgba(99,102,241,0.35)]",
+                  accent.buttonGrad,
+                  "text-white",
                   "active:scale-[0.98]",
                   "cursor-pointer",
                 ].join(" ")

@@ -1,13 +1,21 @@
 import React from "react";
+import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
 
-const Header: React.FC = () => {
+interface HeaderProps {
+  /** Callback fired when the user clicks the Settings button */
+  onSettingsClick?: () => void;
+}
+
+const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
+  const { settings } = useSettings();
+  const accent = ACCENT_COLOR_MAPS[settings.accentColor];
   return (
     <header className="flex items-center justify-between px-6 py-4 border-b border-white/5 backdrop-blur-xl bg-slate-950/60 sticky top-0 z-50">
       {/* Logo + Title */}
       <div className="flex items-center gap-3 select-none">
         {/* Icon mark */}
         <div className="relative w-8 h-8 flex-shrink-0">
-          <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 opacity-90 shadow-lg shadow-blue-500/30" />
+          <div className={`absolute inset-0 rounded-lg bg-gradient-to-br ${accent.headerLogoGrad} opacity-90 shadow-lg`} />
           <svg
             viewBox="0 0 32 32"
             className="absolute inset-0 w-full h-full p-1.5"
@@ -41,7 +49,9 @@ const Header: React.FC = () => {
       {/* Right: Settings */}
       <button
         id="settings-btn"
+        type="button"
         aria-label="Open settings"
+        onClick={onSettingsClick}
         className="group relative w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 transition-all duration-200 hover:text-white hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
       >
         <svg
