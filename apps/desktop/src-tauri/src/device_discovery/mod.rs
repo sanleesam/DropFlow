@@ -70,6 +70,7 @@ pub struct MdnsDiscoveryEngine {
     pub is_browsing: Mutex<bool>,
     pub local_uuid: String,
     pub discovered_peers: Arc<Mutex<HashMap<String, DiscoveredDevice>>>,
+    pub peer_last_seen: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 impl MdnsDiscoveryEngine {
@@ -81,6 +82,7 @@ impl MdnsDiscoveryEngine {
             is_browsing: Mutex::new(false),
             local_uuid,
             discovered_peers: Arc::new(Mutex::new(HashMap::new())),
+            peer_last_seen: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 }
@@ -161,92 +163,163 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
         let service_type = "_dropflow._tcp.local.";
         let local_uuid = self.local_uuid.clone();
         let discovered_peers = self.discovered_peers.clone();
-
-        let receiver = daemon.browse(service_type)
-            .map_err(|e| format!("Failed to browse mDNS services: {}", e))?;
+        let peer_last_seen = self.peer_last_seen.clone();
 
         println!("[Browser] Started mDNS browsing for {}", service_type);
 
+        // Thread 1: Main browser event receiver loop
+        let daemon_event = daemon.clone();
+        let app_event = app.clone();
+        let discovered_peers_event = discovered_peers.clone();
+        let peer_last_seen_event = peer_last_seen.clone();
+        let local_uuid_event = local_uuid.clone();
         std::thread::spawn(move || {
-            while let Ok(event) = receiver.recv() {
-                match event {
-                    ServiceEvent::ServiceFound(service_type, fullname) => {
-                        println!("[Browser] Service discovered: {} of type {}", fullname, service_type);
-                    }
-                    ServiceEvent::ServiceResolved(info) => {
-                        println!("[Browser] Service resolved: {}", info.get_fullname());
+            loop {
+                let receiver = daemon_event.browse(service_type);
+                match receiver {
+                    Ok(rx) => {
+                        while let Ok(event) = rx.recv() {
+                            match event {
+                                ServiceEvent::ServiceFound(stype, fullname) => {
+                                    println!("[Browser] Service discovered: {} of type {}", fullname, stype);
+                                }
+                                ServiceEvent::ServiceResolved(info) => {
+                                    let ip = info.get_addresses_v4()
+                                        .iter()
+                                        .next()
+                                        .map(|addr| addr.to_string())
+                                        .unwrap_or_else(|| "127.0.0.1".to_string());
+                                    let port = info.get_port();
+                                    println!("[Browser] Service resolved: {} at {}:{}", info.get_fullname(), ip, port);
 
-                        let discovered_uuid = info.get_property_val_str("device_uuid")
-                            .unwrap_or("")
-                            .to_string();
+                                    let discovered_uuid = info.get_property_val_str("device_uuid")
+                                        .unwrap_or("")
+                                        .to_string();
 
-                        // Strict filter: ignore our own advertised instance
-                        if !discovered_uuid.is_empty() && discovered_uuid == local_uuid {
-                            println!("[Browser] Self device ignored: UUID={}", discovered_uuid);
-                            continue;
+                                    // Filter out self-peer
+                                    if !discovered_uuid.is_empty() && discovered_uuid == local_uuid_event {
+                                        println!("[Browser] Self device ignored: UUID={}", discovered_uuid);
+                                        continue;
+                                    }
+
+                                    let id = if discovered_uuid.is_empty() {
+                                        info.get_property_val_str("device_id")
+                                            .unwrap_or_else(|| info.get_fullname())
+                                            .to_string()
+                                    } else {
+                                        discovered_uuid
+                                    };
+
+                                    let name = info.get_property_val_str("device_name")
+                                        .unwrap_or_else(|| info.get_fullname())
+                                        .to_string();
+                                    let device_type = info.get_property_val_str("device_type")
+                                        .unwrap_or("laptop")
+                                        .to_string();
+                                    let version = info.get_property_val_str("version")
+                                        .unwrap_or("DFP/1")
+                                        .to_string();
+
+                                    let device = DiscoveredDevice {
+                                        id: id.clone(),
+                                        name,
+                                        device_type,
+                                        status: "online".to_string(),
+                                        last_seen: "Now".to_string(),
+                                        ip,
+                                        port,
+                                        version,
+                                    };
+
+                                    // Update last seen timestamp
+                                    let now = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap()
+                                        .as_secs();
+                                    peer_last_seen_event.lock().unwrap().insert(id.clone(), now);
+
+                                    let mut peers = discovered_peers_event.lock().unwrap();
+                                    if peers.contains_key(&id) {
+                                        println!("[Browser] Peer updated: {} (UUID={})", device.name, id);
+                                        peers.insert(id, device.clone());
+                                        app_event.emit("peer-discovered", &device).ok();
+                                    } else {
+                                        println!("[Browser] Peer added: {} (UUID={})", device.name, id);
+                                        peers.insert(id, device.clone());
+                                        app_event.emit("peer-discovered", &device).ok();
+                                    }
+                                }
+                                ServiceEvent::ServiceRemoved(_stype, fullname) => {
+                                    println!("[Browser] Service removed: {}", fullname);
+                                    let id = fullname.split('.').next().unwrap_or(&fullname).to_string();
+
+                                    let mut peers = discovered_peers_event.lock().unwrap();
+                                    if peers.remove(&id).is_some() {
+                                        println!("[Browser] Peer removed: ID={}", id);
+                                        app_event.emit("peer-lost", &id).ok();
+                                    }
+                                    peer_last_seen_event.lock().unwrap().remove(&id);
+                                }
+                                ServiceEvent::SearchStopped(_) => {
+                                    println!("[Browser] Search stopped");
+                                    break;
+                                }
+                                _ => {}
+                            }
                         }
-
-                        let id = if discovered_uuid.is_empty() {
-                            info.get_property_val_str("device_id")
-                                .unwrap_or_else(|| info.get_fullname())
-                                .to_string()
-                        } else {
-                            discovered_uuid
-                        };
-
-                        let name = info.get_property_val_str("device_name")
-                            .unwrap_or_else(|| info.get_fullname())
-                            .to_string();
-                        let device_type = info.get_property_val_str("device_type")
-                            .unwrap_or("laptop")
-                            .to_string();
-                        let version = info.get_property_val_str("version")
-                            .unwrap_or("DFP/1")
-                            .to_string();
-                        let ip = info.get_addresses_v4()
-                            .iter()
-                            .next()
-                            .map(|addr| addr.to_string())
-                            .unwrap_or_else(|| "127.0.0.1".to_string());
-                        let port = info.get_port();
-
-                        let device = DiscoveredDevice {
-                            id: id.clone(),
-                            name,
-                            device_type,
-                            status: "online".to_string(),
-                            last_seen: "Now".to_string(),
-                            ip,
-                            port,
-                            version,
-                        };
-
-                        let mut peers = discovered_peers.lock().unwrap();
-                        if peers.contains_key(&id) {
-                            println!("[Browser] Peer updated: {} (UUID={})", device.name, id);
-                        } else {
-                            println!("[Browser] Peer added: {} (UUID={})", device.name, id);
-                        }
-                        peers.insert(id, device.clone());
-
-                        app.emit("peer-discovered", &device).ok();
                     }
-                    ServiceEvent::ServiceRemoved(_service_type, fullname) => {
-                        println!("[Browser] Service removed: {}", fullname);
-                        let id = fullname.split('.').next().unwrap_or(&fullname).to_string();
+                    Err(e) => {
+                        println!("[Browser] Browse query connection failed: {}", e);
+                    }
+                }
+                // Short sleep before attempting to recreate browser receiver
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        });
 
-                        let mut peers = discovered_peers.lock().unwrap();
+        // Thread 2: Periodic browse restarter (queries LAN active peers every 8 seconds)
+        let daemon_trigger = daemon.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(8));
+                // stop_browse closes the browse channel and triggers Thread 1 to browse again, forcing fresh queries
+                daemon_trigger.stop_browse(service_type).ok();
+            }
+        });
+
+        // Thread 3: Heartbeat checking loop (evicts non-responsive peers after 10 seconds of no resolution)
+        let discovered_peers_hb = discovered_peers.clone();
+        let peer_last_seen_hb = peer_last_seen.clone();
+        let app_hb = app.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+
+                let mut expired_ids = Vec::new();
+                {
+                    let last_seen = peer_last_seen_hb.lock().unwrap();
+                    for (id, &time) in last_seen.iter() {
+                        if now - time > 10 {
+                            expired_ids.push(id.clone());
+                        }
+                    }
+                }
+
+                if !expired_ids.is_empty() {
+                    let mut peers = discovered_peers_hb.lock().unwrap();
+                    let mut last_seen = peer_last_seen_hb.lock().unwrap();
+                    for id in expired_ids {
                         if peers.remove(&id).is_some() {
-                            println!("[Browser] Peer removed: ID={}", id);
+                            println!("[Browser] Peer removed (timeout): ID={}", id);
+                            app_hb.emit("peer-lost", &id).ok();
                         }
-
-                        app.emit("peer-lost", &id).ok();
+                        last_seen.remove(&id);
                     }
-                    ServiceEvent::SearchStopped(_) => {
-                        println!("[Browser] Search stopped");
-                        break;
-                    }
-                    _ => {}
                 }
             }
         });
@@ -286,4 +359,33 @@ pub fn start_discovery(
     state: State<'_, DiscoveryState>,
 ) -> Result<(), String> {
     state.engine.start_browsing(app)
+}
+
+#[tauri::command]
+pub fn get_system_computer_name() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("scutil")
+            .args(&["--get", "ComputerName"])
+            .output()
+        {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !name.is_empty() {
+                return name;
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(name) = std::env::var("COMPUTERNAME") {
+            if !name.is_empty() {
+                return name;
+            }
+        }
+    }
+
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .unwrap_or_else(|_| "DropFlow Device".to_string())
 }

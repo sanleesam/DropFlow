@@ -270,7 +270,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       id="device-name-input"
                       type="text"
                       value={settings.deviceName}
-                      onChange={(e) => updateSetting("deviceName", e.target.value)}
+                      onChange={(e) => {
+                        updateSetting("deviceName", e.target.value);
+                        updateSetting("deviceNameMode", "custom");
+                      }}
                       className={[
                         "w-full mt-1 text-sm text-slate-200 bg-slate-950/40 border border-white/5 rounded-xl px-3 py-2.5",
                         "focus:outline-none focus:ring-1",

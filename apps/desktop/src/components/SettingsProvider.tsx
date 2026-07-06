@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext, useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 // ─── Types & Interfaces ──────────────────────────────────────────────────────
 
@@ -9,6 +10,7 @@ export interface Settings {
   askBeforeOverwrite: boolean;
   autoOpenCompleted: boolean;
   deviceName: string;
+  deviceNameMode: "auto" | "custom";
   deviceVisibility: boolean;
   requireConfirmation: boolean;
   darkTheme: boolean;
@@ -137,12 +139,31 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     accentColor: "indigo",
     askBeforeOverwrite: true,
     autoOpenCompleted: false,
-    deviceName: "Sanlee's MacBook Pro",
+    deviceName: "",
+    deviceNameMode: "auto",
     deviceVisibility: true,
     requireConfirmation: true,
     darkTheme: true,
     reduceAnimations: false,
   });
+
+  useEffect(() => {
+    if (settings.deviceNameMode === "auto") {
+      invoke<string>("get_system_computer_name")
+        .then((sysName) => {
+          setSettings((prev) => {
+            if (prev.deviceNameMode === "auto") {
+              return {
+                ...prev,
+                deviceName: sysName,
+              };
+            }
+            return prev;
+          });
+        })
+        .catch(console.error);
+    }
+  }, [settings.deviceNameMode]);
 
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((prev) => ({

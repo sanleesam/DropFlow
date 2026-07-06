@@ -28,6 +28,7 @@ pub fn run() {
             device_discovery::start_discovery,
             device_discovery::update_advertisement,
             device_discovery::get_local_uuid,
+            device_discovery::get_system_computer_name,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
