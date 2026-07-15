@@ -200,17 +200,15 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
           "rounded-[16px] border border-dashed px-6 py-10",
           "cursor-pointer select-none outline-none",
           "transition-all duration-200 ease-out",
-          isDraggingOver
-            ? "scale-[1.01] border-blue-400/70 bg-blue-500/10 shadow-[0_0_0_4px_rgba(59,130,246,.1)]"
-            : "border-white/[.14] bg-white/[.015] hover:border-blue-400/45 hover:bg-blue-500/[.035]",
-          "focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#080b12]",
+          isDraggingOver ? accent.dropZoneActive : accent.dropZoneHover,
+          accent.ringFocus,
         ].join(" ")}
       >
         {/* Icon */}
         <span
           className={[
             "transition-colors duration-200",
-            isDraggingOver ? "text-blue-400" : "text-slate-500",
+            isDraggingOver ? accent.dropZoneIcon : "text-slate-500",
           ].join(" ")}
         >
           <IconUploadLarge />
@@ -221,7 +219,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
           <span
             className={[
               "text-sm font-semibold transition-colors duration-200",
-              isDraggingOver ? "text-blue-300" : "text-slate-200",
+              isDraggingOver ? accent.dropZoneTitle : "text-slate-200",
             ].join(" ")}
           >
             {isDraggingOver ? "Release to add files" : "Drop files here"}
@@ -234,7 +232,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
         {/* Drag-over overlay glow */}
         {isDraggingOver && (
           <div
-            className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-br from-blue-500/10 to-transparent"
+            className={`pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-br ${accent.dropZoneOverlay}`}
             aria-hidden="true"
           />
         )}
@@ -275,7 +273,6 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
                   }}
                   className="
                     flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg
-                    flex items-center justify-center
                     text-slate-500 opacity-0 group-hover:opacity-100
                     hover:text-red-400 hover:bg-red-500/10
                     transition-all duration-150
@@ -306,12 +303,11 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
           className={[
             "w-full max-w-xs rounded-[12px] px-6 py-3 text-sm font-semibold",
             "transition-all duration-200 ease-out",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
-            accent.deviceFocus,
+            "focus-visible:outline-none " + accent.ringFocus,
             canSend
               ? [
                   accent.buttonGrad,
-                  "text-white shadow-[0_8px_22px_rgba(37,99,235,.22)]",
+                  "text-white " + accent.buttonShadow,
                   "active:scale-[0.98]",
                   "cursor-pointer",
                 ].join(" ")
@@ -330,7 +326,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
           <p
             role="status"
             aria-live="polite"
-            className="text-xs text-slate-600 text-center select-none"
+            className="text-xs text-slate-400 text-center select-none"
           >
             {!hasDevice && !hasFiles
               ? "Select a device and choose files."

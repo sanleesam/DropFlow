@@ -25,10 +25,17 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
   const { addToast } = useToast();
   const { settings } = useSettings();
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
+
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<TransferStatus>("Preparing...");
   const [speed, setSpeed] = useState("125 MB/s");
   const [timeRemaining, setTimeRemaining] = useState("12 seconds");
+  const [isDismissing, setIsDismissing] = useState(false);
+
+  const handleDismiss = () => {
+    setIsDismissing(true);
+    setTimeout(onClose, 200);
+  };
 
   useEffect(() => {
     // Reset state whenever file or device changes
@@ -87,21 +94,22 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
   return (
     <div
-      className="
-        relative flex w-full flex-col gap-4 overflow-hidden rounded-[18px] border border-blue-400/20
+      className={`
+        relative flex w-full flex-col gap-4 overflow-hidden rounded-[18px] border border-[var(--df-accent)]/20
         bg-[#111927] p-5 shadow-[0_18px_44px_rgba(0,0,0,.25)]
-        transition-all duration-300
+        transition-all duration-200 ease-in-out
+        ${isDismissing ? "opacity-0 translate-y-2 scale-95" : "opacity-100 translate-y-0 scale-100"}
         animate-slide-in-up
-      "
+      `}
     >
       {/* Subtle top-left gradient sheen */}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-blue-400/[.06] to-transparent" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[var(--df-accent)]/[0.06] to-transparent" />
 
       {/* Header Info & Close Button */}
       <div className="flex items-start justify-between z-10">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-blue-400 shadow-[0_0_12px_rgba(96,165,250,.75)]" />
+            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--df-accent)] shadow-[0_0_12px_var(--df-accent-shadow)]" />
             <h3 className="text-sm font-semibold tracking-tight text-slate-100">Sending file</h3>
           </div>
           <p className="text-xs text-slate-500">
@@ -128,7 +136,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
           {/* Close Button */}
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleDismiss}
             className="
               w-6 h-6 rounded-lg
               flex items-center justify-center
