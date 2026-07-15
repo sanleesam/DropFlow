@@ -14,38 +14,33 @@ interface SectionProps {
   id: string;
   title: string;
   icon: React.ReactNode;
-  accent: string;
   children?: React.ReactNode;
 }
 
-const Section: React.FC<SectionProps> = ({ id, title, icon, accent, children }) => (
-  <section id={id} aria-labelledby={`${id}-heading`} className="flex flex-col gap-4">
+const Section: React.FC<SectionProps> = ({ id, title, icon, children }) => (
+  <section id={id} aria-labelledby={`${id}-heading`} className="df-section">
     {/* Section header */}
-    <div className="flex items-center gap-2.5">
-      <span className={`flex items-center justify-center w-7 h-7 rounded-lg ${accent} text-white shadow-sm`}>
+    <div className="df-section-heading">
+      <div className="df-section-title">
+      <span className="df-section-icon">
         {icon}
       </span>
       <h2
         id={`${id}-heading`}
-        className="text-sm font-semibold uppercase tracking-widest text-slate-400 select-none"
+        className="df-section-label"
       >
         {title}
       </h2>
+      </div>
+      <span className="df-section-hint">{id === "nearby-devices" ? "On your local network" : id === "send-files" ? "Fast, private, local" : "Your latest activity"}</span>
     </div>
 
     {/* Card container */}
     <div
-      className="
-        relative rounded-2xl border border-white/6 overflow-hidden
-        bg-slate-900/50 backdrop-blur-md
-        shadow-[0_8px_32px_rgba(0,0,0,0.4)]
-        min-h-[148px]
-        flex items-center justify-center
-        transition-all duration-300
-      "
+      className="df-panel"
     >
       {/* Subtle gradient sheen */}
-      <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] to-transparent pointer-events-none" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.035] to-transparent" />
       {/* Placeholder content */}
       {children ?? (
         <p className="text-sm text-slate-600 select-none tracking-wide">
@@ -175,22 +170,27 @@ const Home: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-950 text-white overflow-hidden">
+    <div className="df-app-shell flex h-screen w-screen flex-col overflow-hidden text-white">
       <Header onSettingsClick={() => setIsSettingsOpen(true)} />
 
       <main
         id="main-content"
-        className="flex-1 overflow-y-auto px-6 py-8 space-y-8"
+        className="df-main flex-1 overflow-y-auto"
         style={{
           scrollbarWidth: "none",
           msOverflowStyle: "none",
         }}
       >
-        {/* Ambient background blobs */}
-        <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
-          <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-blue-600/10 blur-3xl" />
-          <div className="absolute top-1/2 -right-24 w-72 h-72 rounded-full bg-purple-600/10 blur-3xl" />
-          <div className="absolute -bottom-24 left-1/3 w-64 h-64 rounded-full bg-indigo-600/8 blur-3xl" />
+        <div className="mb-8 flex items-end justify-between gap-4" aria-label="Welcome">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[.16em] text-blue-400">Local workspace</p>
+            <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-100 sm:text-3xl">Send something anywhere.</h1>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">Choose a nearby device, drop in your files, and let DropFlow handle the rest.</p>
+          </div>
+          <div className="hidden rounded-full border border-emerald-400/15 bg-emerald-400/8 px-3 py-1.5 text-xs font-medium text-emerald-300 sm:flex sm:items-center sm:gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,.75)]" />
+            Ready to transfer
+          </div>
         </div>
 
         {/* ── Nearby Devices ── */}
@@ -198,7 +198,6 @@ const Home: React.FC = () => {
           id="nearby-devices"
           title="Nearby Devices"
           icon={<IconRadar />}
-          accent="bg-gradient-to-br from-blue-500 to-cyan-500"
         >
           <div
             role="radiogroup"
@@ -229,7 +228,6 @@ const Home: React.FC = () => {
           id="send-files"
           title="Send Files"
           icon={<IconUpload />}
-          accent="bg-gradient-to-br from-indigo-500 to-purple-500"
         >
           <FileDropZone selectedDeviceId={selectedDeviceId} onSend={handleSend} />
         </Section>
@@ -248,7 +246,6 @@ const Home: React.FC = () => {
           id="recent-transfers"
           title="Recent Transfers"
           icon={<IconClock />}
-          accent="bg-gradient-to-br from-purple-500 to-pink-500"
         />
       </main>
 

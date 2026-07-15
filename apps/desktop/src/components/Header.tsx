@@ -1,5 +1,4 @@
 import React from "react";
-import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
 
 interface HeaderProps {
   /** Callback fired when the user clicks the Settings button */
@@ -7,18 +6,15 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
-  const { settings } = useSettings();
-  const accent = ACCENT_COLOR_MAPS[settings.accentColor];
   return (
-    <header className="flex items-center justify-between px-6 py-4 border-b border-white/5 backdrop-blur-xl bg-slate-950/60 sticky top-0 z-50">
+    <header className="df-header sticky top-0 z-50 flex items-center justify-between px-6 py-4">
       {/* Logo + Title */}
       <div className="flex items-center gap-3 select-none">
         {/* Icon mark */}
-        <div className="relative w-8 h-8 flex-shrink-0">
-          <div className={`absolute inset-0 rounded-lg bg-gradient-to-br ${accent.headerLogoGrad} opacity-90 shadow-lg`} />
+        <div className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] bg-gradient-to-br from-blue-400 to-blue-700 shadow-[0_8px_20px_rgba(37,99,235,.28)]">
           <svg
             viewBox="0 0 32 32"
-            className="absolute inset-0 w-full h-full p-1.5"
+            className="absolute inset-0 h-full w-full p-1.5"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
             aria-hidden="true"
@@ -41,9 +37,12 @@ const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
         </div>
 
         {/* Wordmark */}
-        <span className="text-xl font-bold tracking-tight bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400 bg-clip-text text-transparent">
+        <div>
+          <span className="block text-[17px] font-semibold tracking-tight text-slate-100">
           DropFlow
-        </span>
+          </span>
+          <span className="hidden text-[11px] font-medium tracking-wide text-slate-500 sm:block">Private file transfer</span>
+        </div>
       </div>
 
       {/* Right: Settings */}
@@ -52,11 +51,11 @@ const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
         type="button"
         aria-label="Open settings"
         onClick={onSettingsClick}
-        className="group relative w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 transition-all duration-200 hover:text-white hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+        className="df-icon-button group"
       >
         <svg
           viewBox="0 0 24 24"
-          className="w-5 h-5 transition-transform duration-300 group-hover:rotate-45"
+          className="h-5 w-5 transition-transform duration-300 group-hover:rotate-45"
           fill="none"
           stroke="currentColor"
           strokeWidth="1.75"
