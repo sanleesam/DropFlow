@@ -4,7 +4,7 @@ import DeviceCard, { Device } from "../components/DeviceCard";
 import FileDropZone from "../components/FileDropZone";
 import { TransferProgress } from "../components/TransferProgress";
 import { SettingsModal } from "../components/SettingsModal";
-import { useSettings } from "../components/SettingsProvider";
+import { useSettings, ACCENT_COLOR_MAPS } from "../components/SettingsProvider";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -43,7 +43,7 @@ const Section: React.FC<SectionProps> = ({ id, title, icon, children }) => (
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.035] to-transparent" />
       {/* Placeholder content */}
       {children ?? (
-        <p className="text-sm text-slate-600 select-none tracking-wide">
+        <p className="text-sm text-slate-500 select-none tracking-wide">
           Nothing here yet
         </p>
       )}
@@ -80,8 +80,18 @@ const IconClock: React.FC = () => (
 
 // ─── Home page ────────────────────────────────────────────────────────────────
 
+interface RecentTransfer {
+  id: string;
+  fileName: string;
+  deviceName: string;
+  size: string;
+  timestamp: string;
+  status: "completed" | "failed";
+}
+
 const Home: React.FC = () => {
   const { settings } = useSettings();
+  const accent = ACCENT_COLOR_MAPS[settings.accentColor];
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [activeTransfer, setActiveTransfer] = useState<{
     deviceName: string;
@@ -91,6 +101,24 @@ const Home: React.FC = () => {
   const wasSettingsOpenRef = useRef(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [localUuid, setLocalUuid] = useState<string>("");
+  const [recentTransfers, setRecentTransfers] = useState<RecentTransfer[]>([
+    {
+      id: "tx-1",
+      fileName: "IMG_4920.jpg",
+      deviceName: "Pixel 8 Pro",
+      size: "4.2 MB",
+      timestamp: "10 min ago",
+      status: "completed",
+    },
+    {
+      id: "tx-2",
+      fileName: "presentation_draft.pdf",
+      deviceName: "Windows Desktop",
+      size: "18.7 MB",
+      timestamp: "1 hour ago",
+      status: "completed",
+    },
+  ]);
 
   // Restore focus to Settings button after modal is closed
   useEffect(() => {
@@ -169,6 +197,20 @@ const Home: React.FC = () => {
     });
   };
 
+  const handleTransferComplete = () => {
+    if (activeTransfer) {
+      const newTransfer: RecentTransfer = {
+        id: `tx-${Date.now()}`,
+        fileName: activeTransfer.fileName,
+        deviceName: activeTransfer.deviceName,
+        size: "125 MB",
+        timestamp: "Just now",
+        status: "completed",
+      };
+      setRecentTransfers((prev) => [newTransfer, ...prev]);
+    }
+  };
+
   return (
     <div className="df-app-shell flex h-screen w-screen flex-col overflow-hidden text-white">
       <Header onSettingsClick={() => setIsSettingsOpen(true)} />
@@ -183,7 +225,7 @@ const Home: React.FC = () => {
       >
         <div className="mb-8 flex items-end justify-between gap-4" aria-label="Welcome">
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-[.16em] text-blue-400">Local workspace</p>
+            <p className={`mb-2 text-xs font-semibold uppercase tracking-[.16em] ${accent.progressIconText}`}>Local workspace</p>
             <h1 className="m-0 text-2xl font-semibold tracking-tight text-slate-100 sm:text-3xl">Send something anywhere.</h1>
             <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">Choose a nearby device, drop in your files, and let DropFlow handle the rest.</p>
           </div>
@@ -202,10 +244,10 @@ const Home: React.FC = () => {
           <div
             role="radiogroup"
             aria-label="Nearby devices"
-            className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-4"
+            className="w-full"
           >
             {devices.length > 0 ? (
-              <div className="grid w-full grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid w-full grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 animate-[toast-slide-in_0.3s_ease-out]">
                 {devices.map((device) => (
                   <DeviceCard
                     key={device.id}
@@ -222,7 +264,7 @@ const Home: React.FC = () => {
                 </div>
                 <p className="text-sm font-medium text-slate-300">Looking for nearby devices</p>
                 <p className="mt-1 max-w-xs text-xs leading-5 text-slate-500">Keep DropFlow open on another device connected to this network.</p>
-                <span className="mt-4 flex items-center gap-2 text-[11px] font-medium text-blue-400"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />Scanning local network</span>
+                <span className={`mt-4 flex items-center gap-2 text-[11px] font-medium ${accent.progressIconText}`}><span className={`h-1.5 w-1.5 animate-pulse rounded-full ${accent.progressBgDot}`} />Scanning local network</span>
               </div>
             )}
           </div>
@@ -243,6 +285,7 @@ const Home: React.FC = () => {
             deviceName={activeTransfer.deviceName}
             fileName={activeTransfer.fileName}
             onClose={() => setActiveTransfer(null)}
+            onComplete={handleTransferComplete}
           />
         )}
 
@@ -251,7 +294,53 @@ const Home: React.FC = () => {
           id="recent-transfers"
           title="Recent Transfers"
           icon={<IconClock />}
-        />
+        >
+          {recentTransfers.length > 0 ? (
+            <div className="w-full flex flex-col divide-y divide-white/[.04] p-1.5 animate-[toast-slide-in_0.3s_ease-out]">
+              {recentTransfers.map((tx) => (
+                <div key={tx.id} className="flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] rounded-xl transition-colors duration-150">
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    {/* File Icon */}
+                    <span className={`flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.05] ${
+                      tx.status === "completed" ? "text-emerald-400" : "text-red-400"
+                    }`}>
+                      <svg viewBox="0 0 24 24" className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                      </svg>
+                    </span>
+                    {/* Name + Target */}
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[14px] font-semibold text-slate-200 truncate leading-normal">{tx.fileName}</span>
+                      <span className="text-[11px] text-slate-500 mt-0.5 leading-normal">
+                        {tx.status === "completed" ? "Sent to" : "Failed sending to"} <span className="text-slate-400 font-semibold">{tx.deviceName}</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Stats & Status */}
+                  <div className="flex items-center gap-5 flex-shrink-0 text-right select-none">
+                    <div className="flex flex-col items-end">
+                      <span className="text-[12px] text-slate-400 font-mono font-medium">{tx.size}</span>
+                      <span className="text-[10px] text-slate-500 mt-0.5">{tx.timestamp}</span>
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+                      tx.status === "completed" 
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/15" 
+                        : "bg-red-500/10 text-red-400 border-red-500/15"
+                    }`}>
+                      {tx.status === "completed" ? "Completed" : "Failed"}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex w-full flex-col items-center py-8 text-center">
+              <p className="text-sm text-slate-500">No transfers recorded</p>
+            </div>
+          )}
+        </Section>
       </main>
 
       {/* ── Settings Modal ── */}
