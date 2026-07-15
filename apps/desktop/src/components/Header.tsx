@@ -1,4 +1,5 @@
 import React from "react";
+import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
 
 interface HeaderProps {
   /** Callback fired when the user clicks the Settings button */
@@ -6,12 +7,15 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
+  const { settings } = useSettings();
+  const accent = ACCENT_COLOR_MAPS[settings.accentColor];
+
   return (
     <header className="df-header sticky top-0 z-50 flex items-center justify-between px-6 py-4">
       {/* Logo + Title */}
       <div className="flex items-center gap-3 select-none">
         {/* Icon mark */}
-        <div className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] bg-gradient-to-br from-blue-400 to-blue-700 shadow-[0_8px_20px_rgba(37,99,235,.28)]">
+        <div className={`relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] bg-gradient-to-br ${accent.headerLogoGrad} shadow-[0_8px_20px_rgba(0,0,0,0.15)]`}>
           <svg
             viewBox="0 0 32 32"
             className="absolute inset-0 h-full w-full p-1.5"
