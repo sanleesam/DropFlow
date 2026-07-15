@@ -37,7 +37,7 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
       {/* Toast container - fixed top-right */}
       <div
         aria-label="Notifications"
-        className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"
+        className="pointer-events-none fixed right-4 top-4 z-50 flex flex-col gap-2"
       >
         {toasts.map((toast) => (
           <div key={toast.id} className="pointer-events-auto">

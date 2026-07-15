@@ -88,25 +88,24 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
   return (
     <div
       className="
-        w-full relative rounded-2xl border border-white/6 overflow-hidden
-        bg-slate-900/50 backdrop-blur-md
-        shadow-[0_8px_32px_rgba(0,0,0,0.4)]
-        p-5 flex flex-col gap-4
+        relative flex w-full flex-col gap-4 overflow-hidden rounded-[18px] border border-blue-400/20
+        bg-[#111927] p-5 shadow-[0_18px_44px_rgba(0,0,0,.25)]
         transition-all duration-300
         animate-slide-in-up
       "
     >
       {/* Subtle top-left gradient sheen */}
-      <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-blue-400/[.06] to-transparent" />
 
       {/* Header Info & Close Button */}
       <div className="flex items-start justify-between z-10">
-        <div className="flex flex-col gap-0.5">
-          <h3 className="text-sm font-semibold uppercase tracking-widest text-slate-400 select-none">
-            Sending Files
-          </h3>
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-blue-400 shadow-[0_0_12px_rgba(96,165,250,.75)]" />
+            <h3 className="text-sm font-semibold tracking-tight text-slate-100">Sending file</h3>
+          </div>
           <p className="text-xs text-slate-500">
-            To <span className="text-slate-300 font-medium">{deviceName}</span>
+            To <span className="font-medium text-slate-300">{deviceName}</span>
           </p>
         </div>
 
@@ -115,7 +114,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-white/5 border border-white/5 select-none">
             {!isCompleted ? (
               <>
-                <span className={`w-1.5 h-1.5 rounded-full ${accent.progressBgDot} animate-pulse`} />
+                <span className={`h-1.5 w-1.5 rounded-full ${accent.progressBgDot} animate-pulse`} />
                 <span className={accent.progressText}>{status}</span>
               </>
             ) : (
@@ -146,12 +145,12 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
       </div>
 
       {/* File Progress Details Card */}
-      <div className="flex items-center gap-3 bg-white/[0.02] border border-white/5 rounded-xl p-3.5 z-10">
+      <div className="z-10 flex items-center gap-3 rounded-[14px] border border-white/[.08] bg-[#0d121b] p-3.5">
         {/* File icon */}
-        <div className={`flex items-center justify-center w-9 h-9 rounded-lg ${accent.progressIconBg} ${accent.progressIconText}`}>
+        <div className={`flex h-10 w-10 items-center justify-center rounded-[11px] ${accent.progressIconBg} ${accent.progressIconText}`}>
           <svg
             viewBox="0 0 24 24"
-            className="w-5 h-5 flex-shrink-0"
+            className="h-5 w-5 flex-shrink-0"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.8"
@@ -166,8 +165,8 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
         {/* Text Details */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-slate-200 truncate">{fileName}</p>
-          <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 select-none">
+          <p className="truncate text-sm font-medium text-slate-200">{fileName}</p>
+          <div className="mt-1 flex items-center gap-2 text-xs text-slate-500 select-none">
             <span>{speed}</span>
             <span>•</span>
             <span>{timeRemaining} remaining</span>
@@ -176,7 +175,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
         {/* Progress Percent */}
         <div className="text-right select-none">
-          <span className="text-lg font-semibold tracking-tight text-slate-100">
+          <span className="text-xl font-semibold tracking-tight text-slate-100">
             {progress}%
           </span>
         </div>
@@ -185,9 +184,9 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
       {/* Progress Bar / Success State Replacement */}
       <div className="relative w-full z-10">
         {!isCompleted ? (
-          <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800/90">
             <div
-              className={`h-full bg-gradient-to-r ${accent.progressFrom} ${accent.progressTo} rounded-full transition-all duration-75 ease-out`}
+              className={`h-full rounded-full bg-gradient-to-r ${accent.progressFrom} ${accent.progressTo} transition-all duration-75 ease-out`}
               style={{ width: `${progress}%` }}
             />
           </div>

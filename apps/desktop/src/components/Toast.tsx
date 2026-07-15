@@ -81,19 +81,19 @@ const Toast: React.FC<ToastProps> = ({ toast, onDismiss }) => {
     <div
       role="alert"
       className={[
-        "group relative flex items-center gap-3 px-4 py-3 rounded-xl",
-        "bg-slate-900/80 backdrop-blur-xl",
+        "group relative flex items-center gap-3 overflow-hidden rounded-[14px] border px-4 py-3",
+        "bg-[#111824]/95 backdrop-blur-xl",
         "border backdrop-saturate-150",
         style.border,
-        "shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
+        "shadow-[0_16px_40px_rgba(0,0,0,.34)]",
         "animate-[toast-slide-in_0.3s_ease-out]",
-        "min-w-[300px] max-w-[400px]",
+        "min-w-[280px] max-w-[400px]",
       ].join(" ")}
     >
       {/* Variant indicator bar */}
       <div
         className={[
-          "absolute left-0 top-0 bottom-0 w-1 rounded-l-xl",
+          "absolute bottom-0 left-0 top-0 w-1",
           variant === "info" && "bg-blue-500",
           variant === "success" && "bg-emerald-500",
           variant === "warning" && "bg-amber-500",
@@ -105,7 +105,7 @@ const Toast: React.FC<ToastProps> = ({ toast, onDismiss }) => {
       <span className={`flex-shrink-0 ${style.icon}`}>{icon}</span>
 
       {/* Message */}
-      <p className="flex-1 text-sm text-slate-100 leading-relaxed">{message}</p>
+      <p className="flex-1 text-sm leading-5 text-slate-100">{message}</p>
 
       {/* Close button */}
       <button
