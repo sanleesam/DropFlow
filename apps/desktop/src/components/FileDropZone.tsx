@@ -172,7 +172,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="w-full flex flex-col gap-4 p-4">
+    <div className="flex w-full flex-col gap-4 p-4">
       {/* Hidden file input */}
       <input
         ref={inputRef}
@@ -196,21 +196,21 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         className={[
-          "relative flex flex-col items-center justify-center gap-3",
-          "rounded-xl border-2 border-dashed px-6 py-10",
+          "relative flex min-h-[220px] flex-col items-center justify-center gap-4 overflow-hidden",
+          "rounded-[16px] border border-dashed px-6 py-10",
           "cursor-pointer select-none outline-none",
           "transition-all duration-200 ease-out",
           isDraggingOver
-            ? "border-indigo-400/70 bg-indigo-500/10 scale-[1.01] shadow-[0_0_0_4px_rgba(99,102,241,0.12)]"
-            : "border-white/10 hover:border-white/20 hover:bg-white/[0.02]",
-          "focus-visible:ring-2 focus-visible:ring-indigo-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
+            ? "scale-[1.01] border-blue-400/70 bg-blue-500/10 shadow-[0_0_0_4px_rgba(59,130,246,.1)]"
+            : "border-white/[.14] bg-white/[.015] hover:border-blue-400/45 hover:bg-blue-500/[.035]",
+          "focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#080b12]",
         ].join(" ")}
       >
         {/* Icon */}
         <span
           className={[
             "transition-colors duration-200",
-            isDraggingOver ? "text-indigo-400" : "text-slate-600",
+            isDraggingOver ? "text-blue-400" : "text-slate-500",
           ].join(" ")}
         >
           <IconUploadLarge />
@@ -221,20 +221,20 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
           <span
             className={[
               "text-sm font-semibold transition-colors duration-200",
-              isDraggingOver ? "text-indigo-300" : "text-slate-300",
+              isDraggingOver ? "text-blue-300" : "text-slate-200",
             ].join(" ")}
           >
             {isDraggingOver ? "Release to add files" : "Drop files here"}
           </span>
-          <span className="text-xs text-slate-600">
-            or click to browse
+          <span className="text-xs text-slate-500">
+            or click to browse · Files stay on your network
           </span>
         </div>
 
         {/* Drag-over overlay glow */}
         {isDraggingOver && (
           <div
-            className="absolute inset-0 rounded-xl bg-gradient-to-br from-indigo-500/5 to-purple-500/5 pointer-events-none"
+            className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-br from-blue-500/10 to-transparent"
             aria-hidden="true"
           />
         )}
@@ -242,15 +242,15 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
 
       {/* ── Selected files panel ── */}
       {hasFiles && (
-        <div className="flex flex-col gap-1 rounded-xl border border-white/6 bg-slate-900/40 overflow-hidden">
+        <div className="flex flex-col gap-1 overflow-hidden rounded-[14px] border border-white/[.09] bg-[#0d121b]">
           <ul
             aria-label="Selected files"
-            className="divide-y divide-white/[0.04]"
+            className="divide-y divide-white/[.06]"
           >
             {files.map(({ uid: id, file }) => (
               <li
                 key={id}
-                className="flex items-center gap-3 px-4 py-3 transition-colors duration-150 hover:bg-white/[0.03] group"
+                className="group flex items-center gap-3 px-4 py-3 transition-colors duration-150 hover:bg-white/[.04]"
               >
                 {/* File icon */}
                 <IconFile name={file.name} />
@@ -274,7 +274,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
                     removeFile(id);
                   }}
                   className="
-                    flex-shrink-0 w-6 h-6 rounded-md
+                    flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg
                     flex items-center justify-center
                     text-slate-500 opacity-0 group-hover:opacity-100
                     hover:text-red-400 hover:bg-red-500/10
@@ -304,19 +304,19 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
           onClick={handleSend}
           aria-disabled={!canSend}
           className={[
-            "w-full max-w-xs py-2.5 px-6 rounded-xl text-sm font-semibold",
+            "w-full max-w-xs rounded-[12px] px-6 py-3 text-sm font-semibold",
             "transition-all duration-200 ease-out",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
             accent.deviceFocus,
             canSend
               ? [
                   accent.buttonGrad,
-                  "text-white",
+                  "text-white shadow-[0_8px_22px_rgba(37,99,235,.22)]",
                   "active:scale-[0.98]",
                   "cursor-pointer",
                 ].join(" ")
               : [
-                  "bg-slate-800/60 text-slate-600",
+                  "border-white/[.08] bg-white/[.05] text-slate-500",
                   "border border-white/6",
                   "cursor-not-allowed",
                 ].join(" "),

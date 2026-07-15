@@ -205,19 +205,24 @@ const Home: React.FC = () => {
             className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-4"
           >
             {devices.length > 0 ? (
-              devices.map((device) => (
-                <DeviceCard
-                  key={device.id}
-                  device={device}
-                  selected={selectedDeviceId === device.id}
-                  onSelect={setSelectedDeviceId}
-                />
-              ))
+              <div className="grid w-full grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                {devices.map((device) => (
+                  <DeviceCard
+                    key={device.id}
+                    device={device}
+                    selected={selectedDeviceId === device.id}
+                    onSelect={setSelectedDeviceId}
+                  />
+                ))}
+              </div>
             ) : (
-              <div className="col-span-full py-8 text-center select-none">
-                <p className="text-sm text-slate-500 tracking-wide">
-                  No nearby DropFlow devices found.
-                </p>
+              <div className="flex w-full flex-col items-center px-6 py-10 text-center">
+                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-[14px] border border-white/[.08] bg-white/[.04] text-slate-500">
+                  <IconRadar />
+                </div>
+                <p className="text-sm font-medium text-slate-300">Looking for nearby devices</p>
+                <p className="mt-1 max-w-xs text-xs leading-5 text-slate-500">Keep DropFlow open on another device connected to this network.</p>
+                <span className="mt-4 flex items-center gap-2 text-[11px] font-medium text-blue-400"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />Scanning local network</span>
               </div>
             )}
           </div>

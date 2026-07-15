@@ -112,20 +112,11 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
       aria-label={`${device.name}, ${DEVICE_TYPE_LABELS[device.type]}, ${status.label}`}
       onClick={() => onSelect(device.id)}
       className={[
-        // Base
-        "relative flex flex-col gap-3 p-4 rounded-xl text-left w-full",
-        "cursor-pointer select-none outline-none",
-        "transition-all duration-200 ease-out",
-        // Border / background
-        selected
-          ? accent.deviceSelected
-          : "bg-slate-800/60 border border-white/6 hover:border-white/12 hover:bg-slate-800/80",
-        // Lift on hover
-        "hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.35)]",
-        // Scale on select
-        selected ? "scale-[1.02]" : "scale-100",
-        // Focus ring for keyboard
-        selected ? accent.deviceFocus : "focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
+        "group relative flex min-h-[178px] w-full cursor-pointer select-none flex-col gap-4 rounded-[16px] border p-4 text-left outline-none",
+        "transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(0,0,0,.24)]",
+        selected ? accent.deviceSelected : "border-white/[.09] bg-[#151c29] hover:border-white/[.18] hover:bg-[#192231]",
+        selected ? "scale-[1.01]" : "scale-100",
+        selected ? accent.deviceFocus : "focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#080b12]",
       ].join(" ")}
     >
       {/* Checkmark badge */}
@@ -134,10 +125,10 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
       {/* Icon */}
       <span
         className={[
-          "flex items-center justify-center w-10 h-10 rounded-xl",
+          "flex h-11 w-11 items-center justify-center rounded-[13px]",
           selected
             ? accent.deviceIconBg
-            : "bg-slate-700/60 text-slate-300",
+            : "bg-white/[.06] text-slate-300 group-hover:bg-white/[.1]",
           "transition-colors duration-200",
         ].join(" ")}
       >
@@ -148,25 +139,25 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
       <div className="flex flex-col gap-0.5">
         <span
           className={[
-            "text-sm font-semibold leading-tight truncate",
+            "truncate text-[15px] font-semibold leading-tight",
             selected ? "text-white" : "text-slate-200",
           ].join(" ")}
         >
           {device.name}
         </span>
-        <span className="text-xs text-slate-500 leading-tight">
+        <span className="text-xs leading-tight text-slate-500">
           {DEVICE_TYPE_LABELS[device.type]}
         </span>
       </div>
 
       {/* Status row */}
-      <div className="flex items-center gap-1.5 mt-auto">
+      <div className="mt-auto flex items-center gap-2">
         {/* Status dot */}
         <span
-          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${status.dot} ${status.glow}`}
+          className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${status.dot} ${status.glow}`}
           aria-hidden="true"
         />
-        <span className={`text-xs ${status.text}`}>
+        <span className={`text-xs font-medium ${status.text}`}>
           {status.label}
         </span>
       </div>
