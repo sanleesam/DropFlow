@@ -2,32 +2,32 @@
 
 :root {
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif;
-  color: #f8fafc;
-  background: #080b12;
+  color: #f3f4f6;
+  background: #0b0c0e;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --df-bg: #080b12;
-  --df-surface: #10151f;
-  --df-surface-raised: #151c29;
-  --df-surface-muted: #0d121b;
-  --df-border: rgba(148, 163, 184, 0.14);
-  --df-border-strong: rgba(148, 163, 184, 0.24);
-  --df-text: #f8fafc;
-  --df-text-muted: #94a3b8;
-  --df-text-subtle: #64748b;
-  --df-accent: #3b82f6;
-  --df-accent-strong: #2563eb;
-  --df-accent-soft: rgba(59, 130, 246, 0.14);
-  --df-success: #34d399;
-  --df-warning: #fbbf24;
-  --df-danger: #f87171;
-  --df-radius-sm: 10px;
-  --df-radius-md: 14px;
-  --df-radius-lg: 18px;
-  --df-shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.18);
-  --df-shadow-md: 0 18px 50px rgba(0, 0, 0, 0.28);
+  --df-bg: #0b0c0e;
+  --df-surface: #141619;
+  --df-surface-raised: #1a1c21;
+  --df-surface-muted: #101114;
+  --df-border: rgba(255, 255, 255, 0.08);
+  --df-border-strong: rgba(255, 255, 255, 0.14);
+  --df-text: #f3f4f6;
+  --df-text-muted: #9ca3af;
+  --df-text-subtle: #6b7280;
+  --df-accent: #2563eb;
+  --df-accent-strong: #1d4ed8;
+  --df-accent-soft: rgba(37, 99, 235, 0.12);
+  --df-success: #10b981;
+  --df-warning: #f59e0b;
+  --df-danger: #ef4444;
+  --df-radius-sm: 6px;
+  --df-radius-md: 8px;
+  --df-radius-lg: 12px;
+  --df-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --df-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
 * { box-sizing: border-box; }
@@ -40,70 +40,65 @@ button:disabled { cursor: not-allowed; }
 
 .df-app-shell {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 15% -10%, var(--df-accent-soft), transparent 32rem),
-    radial-gradient(circle at 100% 95%, var(--df-accent-soft), transparent 28rem),
-    var(--df-bg);
+  background: var(--df-bg);
 }
 
 .df-header {
-  background: rgba(8, 11, 18, 0.82);
+  background: rgba(16, 17, 20, 0.8);
   border-bottom: 1px solid var(--df-border);
-  box-shadow: 0 1px 0 rgba(255,255,255,0.02);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .df-main {
-  width: min(1120px, 100%);
+  width: min(1040px, 100%);
   margin: 0 auto;
-  padding: 32px 28px 56px;
+  padding: 28px 24px 48px;
 }
 
-.df-section { display: flex; flex-direction: column; gap: 14px; }
-.df-section + .df-section { margin-top: 28px; }
+.df-section { display: flex; flex-direction: column; gap: 12px; }
+.df-section + .df-section { margin-top: 32px; }
 .df-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.df-section-title { display: flex; align-items: center; gap: 10px; }
+.df-section-title { display: flex; align-items: center; gap: 8px; }
 .df-section-icon {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; border: 1px solid rgba(96,165,250,0.24);
-  border-radius: 10px; color: #93c5fd; background: var(--df-accent-soft);
+  width: 26px; height: 26px; border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-sm); color: var(--df-text-muted); background: rgba(255, 255, 255, 0.03);
 }
-.df-section-label { margin: 0; color: var(--df-text-muted); font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.df-section-label { margin: 0; color: var(--df-text-muted); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
 .df-section-hint { color: var(--df-text-subtle); font-size: 12px; }
 .df-panel {
-  position: relative; overflow: hidden; min-height: 148px; display: flex; align-items: center; justify-content: center;
-  border: 1px solid var(--df-border); border-radius: var(--df-radius-lg); background: rgba(16, 21, 31, 0.65);
-  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-  box-shadow: var(--df-shadow-sm);
+  position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--df-border); border-radius: var(--df-radius-lg); background: rgba(20, 22, 25, 0.6);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
 }
 
 .df-icon-button {
-  display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px;
-  color: var(--df-text-muted); border: 1px solid transparent; border-radius: 11px; background: transparent;
-  transition: color .2s ease, background .2s ease, border-color .2s ease, transform .2s ease;
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  color: var(--df-text-muted); border: 1px solid transparent; border-radius: var(--df-radius-sm); background: transparent;
+  transition: color .15s ease, background .15s ease, border-color .15s ease;
 }
-.df-icon-button:hover { color: var(--df-text); border-color: var(--df-border); background: rgba(148,163,184,.1); }
-.df-icon-button:active { transform: scale(.96); }
+.df-icon-button:hover { color: var(--df-text); border-color: var(--df-border); background: rgba(255, 255, 255, 0.05); }
+.df-icon-button:active { background: rgba(255, 255, 255, 0.08); }
 .df-focus:focus-visible, .df-icon-button:focus-visible, button:focus-visible, input:focus-visible {
-  outline: 2px solid rgba(96, 165, 250, .9); outline-offset: 3px;
+  outline: 2px solid var(--df-accent); outline-offset: 2px;
 }
 
-@keyframes toast-slide-in { from { opacity: 0; transform: translate3d(24px, 0, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
-@keyframes slide-in-up { from { opacity: 0; transform: translate3d(0, 16px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
+@keyframes toast-slide-in { from { opacity: 0; transform: translate3d(16px, 0, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
+@keyframes slide-in-up { from { opacity: 0; transform: translate3d(0, 12px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
 @keyframes backdrop-fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes modal-scale-in { from { opacity: 0; transform: scale(.97) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
-@keyframes df-pulse { 0%, 100% { opacity: .45; transform: scale(.92); } 50% { opacity: 1; transform: scale(1); } }
+@keyframes modal-scale-in { from { opacity: 0; transform: scale(.98) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes df-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 @keyframes badge-pop {
-  0% { transform: scale(0.6); opacity: 0; }
-  80% { transform: scale(1.1); }
+  0% { transform: scale(0.7); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }
 }
-.animate-slide-in-up { animation: slide-in-up .4s cubic-bezier(.16,1,.3,1) both; }
-.animate-backdrop-fade-in { animation: backdrop-fade-in .2s ease-out both; }
-.animate-modal-scale-in { animation: modal-scale-in .3s cubic-bezier(.16,1,.3,1) both; }
+.animate-slide-in-up { animation: slide-in-up .25s cubic-bezier(.16,1,.3,1) both; }
+.animate-backdrop-fade-in { animation: backdrop-fade-in .15s ease-out both; }
+.animate-modal-scale-in { animation: modal-scale-in .2s cubic-bezier(.16,1,.3,1) both; }
 
 @media (max-width: 640px) {
-  .df-main { padding: 24px 16px 40px; }
+  .df-main { padding: 20px 16px 36px; }
   .df-section-heading { align-items: flex-start; }
   .df-section-hint { display: none; }
 }
@@ -112,7 +107,7 @@ button:disabled { cursor: not-allowed; }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 
-::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: rgba(100,116,139,.35); background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.5); background-clip: padding-box; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: rgba(255, 255, 255, 0.15); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); background-clip: padding-box; }
