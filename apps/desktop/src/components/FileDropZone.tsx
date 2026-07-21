@@ -297,7 +297,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
           onClick={handleSend}
           aria-disabled={!canSend}
           className={[
-            "w-full max-w-xs rounded-lg px-4 py-2 text-xs font-medium",
+            "w-[150px] rounded-lg px-4 py-2 text-xs font-medium",
             "transition-all duration-150 ease-out",
             "focus-visible:outline-none " + accent.ringFocus,
             canSend

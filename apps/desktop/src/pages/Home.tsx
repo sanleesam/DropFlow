@@ -21,9 +21,9 @@ const Section: React.FC<SectionProps> = ({ id, title, icon, children }) => (
   <section id={id} aria-labelledby={`${id}-heading`} className="df-section">
     {/* Section header */}
     <div className="df-section-heading">
-      <div className="df-section-title">
+      <div className="flex items-center gap-2">
         {icon && (
-          <span className="df-section-icon">
+          <span className="text-neutral-400 flex items-center">
             {icon}
           </span>
         )}
@@ -220,9 +220,9 @@ const Home: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <div className="flex w-full flex-col items-center justify-center rounded-xl border border-white/[0.07] bg-neutral-900/30 px-4 py-5 text-center select-none">
-                <p className="text-xs font-medium text-neutral-300">Looking for devices…</p>
-                <p className="mt-1 text-[11px] text-neutral-500">
+              <div className="py-2.5 text-left select-none">
+                <p className="text-xs font-medium text-neutral-400">Looking for devices…</p>
+                <p className="mt-0.5 text-[11px] text-neutral-500">
                   Make sure DropFlow is open on your other device.
                 </p>
               </div>
@@ -258,9 +258,9 @@ const Home: React.FC = () => {
           {recentTransfers.length > 0 ? (
             <div className="w-full flex flex-col divide-y divide-white/[0.06] rounded-xl border border-white/[0.07] bg-neutral-900/40 overflow-hidden">
               {recentTransfers.map((tx) => (
-                <div key={tx.id} className="flex items-center justify-between px-3.5 py-2.5 hover:bg-white/[0.02] transition-colors duration-150">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-md bg-neutral-800 border border-white/[0.06] ${
+                <div key={tx.id} className="flex items-center justify-between px-3 py-2 hover:bg-white/[0.02] transition-colors duration-150">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-neutral-800 border border-white/[0.06] ${
                       tx.status === "completed" ? "text-emerald-400" : "text-red-400"
                     }`}>
                       <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -293,9 +293,8 @@ const Home: React.FC = () => {
               ))}
             </div>
           ) : (
-            <div className="flex w-full flex-col items-center justify-center rounded-xl border border-white/[0.07] bg-neutral-900/20 py-5 text-center select-none">
-              <p className="text-xs font-medium text-neutral-400">No transfers yet</p>
-              <p className="mt-0.5 text-[11px] text-neutral-500">Completed transfers will appear here.</p>
+            <div className="py-1 select-none">
+              <p className="text-xs text-neutral-500">No transfers yet</p>
             </div>
           )}
         </Section>
