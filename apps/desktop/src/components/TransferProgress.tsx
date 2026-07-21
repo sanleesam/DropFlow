@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { X, CheckCircle2 } from "lucide-react";
 import { useToast } from "./ToastProvider";
 import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
+import { listen } from "@tauri-apps/api/event";
 
 interface TransferProgressProps {
   /** Name of the destination device */
@@ -11,10 +12,32 @@ interface TransferProgressProps {
   /** Callback fired when the user closes/dismisses the card */
   onClose: () => void;
   /** Callback fired when transfer reaches 100% */
-  onComplete?: () => void;
+  onComplete?: (payload?: any) => void;
 }
 
-type TransferStatus = "Preparing..." | "Sending..." | "Finishing..." | "Completed";
+type TransferStatus = "Preparing..." | "Sending..." | "Finishing..." | "Completed" | "Failed";
+
+interface ProgressPayload {
+  sessionId: string;
+  fileName: string;
+  bytesSent: number;
+  totalBytes: number;
+  percentage: number;
+  speedBytesPerSec: number;
+}
+
+interface CompletedPayload {
+  sessionId: string;
+  fileName: string;
+  deviceName: string;
+  size: string;
+  timestamp: string;
+}
+
+interface FailedPayload {
+  sessionId: string;
+  error: string;
+}
 
 export const TransferProgress: React.FC<TransferProgressProps> = ({
   deviceName,
@@ -28,11 +51,11 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<TransferStatus>("Preparing...");
-  const [speed, setSpeed] = useState("125 MB/s");
-  const [timeRemaining, setTimeRemaining] = useState("12 seconds");
+  const [speed, setSpeed] = useState("0 MB/s");
+  const [timeRemaining, setTimeRemaining] = useState("Calculating...");
   const [isDismissing, setIsDismissing] = useState(false);
 
-  // Keep a stable ref to onComplete to prevent prop identity changes from restarting the timer
+  // Keep a stable ref to onComplete to prevent prop identity changes from restarting listeners
   const onCompleteRef = useRef(onComplete);
   useEffect(() => {
     onCompleteRef.current = onComplete;
@@ -50,58 +73,64 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
     hasCompletedRef.current = false;
     setProgress(0);
     setStatus("Preparing...");
-    setSpeed("125 MB/s");
-    setTimeRemaining("12 seconds");
+    setSpeed("0 MB/s");
+    setTimeRemaining("Calculating...");
 
-    let currentProgress = 0;
-    const duration = 4000;
-    const intervalTime = 40;
-    const totalSteps = duration / intervalTime;
-    const stepIncrement = 100 / totalSteps;
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenCompleted: (() => void) | undefined;
+    let unlistenFailed: (() => void) | undefined;
 
-    const timer = setInterval(() => {
-      currentProgress += stepIncrement;
-      
-      if (currentProgress >= 100) {
-        currentProgress = 100;
+    const setupListeners = async () => {
+      unlistenProgress = await listen<ProgressPayload>("transfer-progress", (event) => {
+        const payload = event.payload;
+        const rounded = Math.min(100, Math.max(0, Math.round(payload.percentage)));
+        setProgress(rounded);
+
+        const mbps = (payload.speedBytesPerSec / (1024 * 1024)).toFixed(1);
+        setSpeed(`${mbps} MB/s`);
+
+        if (rounded < 100) {
+          setStatus("Sending...");
+          const remainingBytes = Math.max(0, payload.totalBytes - payload.bytesSent);
+          const remainingSecs = payload.speedBytesPerSec > 0
+            ? Math.ceil(remainingBytes / payload.speedBytesPerSec)
+            : 0;
+          setTimeRemaining(`${remainingSecs} second${remainingSecs !== 1 ? "s" : ""}`);
+        }
+      });
+
+      unlistenCompleted = await listen<CompletedPayload>("transfer-completed", (event) => {
         setProgress(100);
         setStatus("Completed");
         setSpeed("0 MB/s");
         setTimeRemaining("0 seconds");
-        clearInterval(timer);
 
         if (!hasCompletedRef.current) {
           hasCompletedRef.current = true;
-          addToast("Transfer completed.", "success");
+          addToast("Transfer completed successfully.", "success");
           if (onCompleteRef.current) {
-            onCompleteRef.current();
+            onCompleteRef.current(event.payload);
           }
         }
-      } else {
-        const roundedProgress = Math.round(currentProgress);
-        setProgress(roundedProgress);
+      });
 
-        if (roundedProgress < 15) {
-          setStatus("Preparing...");
-          setSpeed("125 MB/s");
-          setTimeRemaining("12 seconds");
-        } else if (roundedProgress < 85) {
-          setStatus("Sending...");
-          setSpeed("125 MB/s");
-          const remainingSecs = Math.max(1, Math.round(((100 - roundedProgress) / 85) * 12));
-          setTimeRemaining(`${remainingSecs} second${remainingSecs !== 1 ? "s" : ""}`);
-        } else {
-          setStatus("Finishing...");
-          setSpeed("125 MB/s");
-          setTimeRemaining("1 second");
-        }
-      }
-    }, intervalTime);
+      unlistenFailed = await listen<FailedPayload>("transfer-failed", (event) => {
+        setStatus("Failed");
+        addToast(`Transfer failed: ${event.payload.error}`, "error");
+      });
+    };
 
-    return () => clearInterval(timer);
-  }, [deviceName, fileName, addToast]);
+    setupListeners();
+
+    return () => {
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenCompleted) unlistenCompleted();
+      if (unlistenFailed) unlistenFailed();
+    };
+  }, [addToast]);
 
   const isCompleted = progress === 100;
+  const isFailed = status === "Failed";
 
   return (
     <div
@@ -126,15 +155,20 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         <div className="flex items-center gap-2">
           {/* Status Label */}
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-neutral-800 border border-white/[0.06] select-none">
-            {!isCompleted ? (
+            {!isCompleted && !isFailed ? (
               <>
                 <span className={`h-1.5 w-1.5 rounded-full ${accent.progressBgDot} animate-pulse`} />
                 <span className={accent.progressText}>{status}</span>
               </>
-            ) : (
+            ) : isCompleted ? (
               <>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                 <span className="text-emerald-400">{status}</span>
+              </>
+            ) : (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                <span className="text-red-400">{status}</span>
               </>
             )}
           </div>
@@ -197,17 +231,21 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
       {/* Progress Bar / Success State */}
       <div className="relative w-full">
-        {!isCompleted ? (
+        {!isCompleted && !isFailed ? (
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
             <div
               className={`h-full rounded-full ${accent.switchBg} transition-all duration-75 ease-out`}
               style={{ width: `${progress}%` }}
             />
           </div>
-        ) : (
+        ) : isCompleted ? (
           <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium py-0.5 select-none">
             <CheckCircle2 size={14} strokeWidth={2} />
             <span>Transfer completed successfully.</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-red-400 font-medium py-0.5 select-none">
+            <span>Transfer failed.</span>
           </div>
         )}
       </div>

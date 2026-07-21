@@ -5,6 +5,7 @@ import FileDropZone from "../components/FileDropZone";
 import { TransferProgress } from "../components/TransferProgress";
 import { SettingsModal } from "../components/SettingsModal";
 import { useSettings } from "../components/SettingsProvider";
+import { useToast } from "../components/ToastProvider";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -81,6 +82,7 @@ interface RecentTransfer {
 
 const Home: React.FC = () => {
   const { settings } = useSettings();
+  const { addToast } = useToast();
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [activeTransfer, setActiveTransfer] = useState<{
     id: string;
@@ -233,26 +235,53 @@ const Home: React.FC = () => {
     }
   }, [settings.deviceName, settings.deviceVisibility, localUuid]);
 
-  const handleSend = useCallback((fileName: string) => {
-    const device = devices.find((d) => d.id === selectedDeviceId);
-    const deviceName = device ? device.name : "Unknown Device";
-    setActiveTransfer({
-      id: `tx-${Date.now()}`,
-      deviceName,
-      fileName,
-    });
-  }, [devices, selectedDeviceId]);
+  const handleSend = useCallback(
+    (selectedFiles: File[]) => {
+      if (selectedFiles.length === 0) return;
 
-  const handleTransferComplete = useCallback(() => {
+      const targetDevice = devices.find((d) => d.id === selectedDeviceId);
+      if (!targetDevice) {
+        addToast("Selected device is no longer available.", "error");
+        return;
+      }
+
+      const peerAddress = targetDevice.addresses[0]?.address || "127.0.0.1";
+      const peerPort = targetDevice.port > 0 ? targetDevice.port : 42382;
+
+      const filePaths = selectedFiles.map((f) => (f as any).path || f.name);
+      const mainFileName = selectedFiles[0].name;
+
+      const txId = `tx-${Date.now()}`;
+      setActiveTransfer({
+        id: txId,
+        deviceName: targetDevice.name,
+        fileName: mainFileName,
+      });
+
+      invoke<string>("send_files", {
+        peerAddress,
+        peerPort,
+        localUuid,
+        localDeviceName: settings.deviceName || "DropFlow Device",
+        filePaths,
+      }).catch((err) => {
+        console.error("[Home] Send failed:", err);
+        addToast(`Transfer error: ${err}`, "error");
+      });
+    },
+    [devices, selectedDeviceId, localUuid, settings.deviceName, addToast],
+  );
+
+  const handleTransferComplete = useCallback((payload?: any) => {
     setActiveTransfer((currentActive) => {
       if (currentActive && !completedTransferIdsRef.current.has(currentActive.id)) {
         completedTransferIdsRef.current.add(currentActive.id);
         const newTransfer: RecentTransfer = {
           id: currentActive.id,
-          fileName: currentActive.fileName,
-          deviceName: currentActive.deviceName,
-          size: "Complete",
-          timestamp: "Just now",
+          fileName: payload?.fileName || currentActive.fileName,
+          deviceName: payload?.deviceName || currentActive.deviceName,
+          size: payload?.size || "Complete",
+          timestamp: payload?.timestamp || "Just now",
           status: "completed",
         };
         setRecentTransfers((prev) => [newTransfer, ...prev]);

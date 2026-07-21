@@ -1,8 +1,9 @@
 pub mod device_discovery;
+pub mod transfer_manager;
 
+use std::sync::Mutex;
 use tauri::Manager;
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -17,10 +18,21 @@ pub fn run() {
             let discovery_engine = device_discovery::MdnsDiscoveryEngine::new(local_uuid.clone())
                 .expect("Failed to initialize mDNS engine");
 
+            // Start TCP transfer receiver on dynamic OS port
+            let receiver = transfer_manager::TransferReceiver::start(app.handle().clone())
+                .expect("Failed to start TCP transfer receiver");
+            let bound_port = receiver.port();
+            println!("[Lib] TCP Receiver successfully bound on port {bound_port}");
+
             app.manage(device_discovery::DiscoveryState {
                 engine: Box::new(discovery_engine),
                 local_uuid,
             });
+
+            app.manage(transfer_manager::TransferState {
+                receiver: Mutex::new(Some(receiver)),
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -30,6 +42,8 @@ pub fn run() {
             device_discovery::get_local_uuid,
             device_discovery::get_current_peers,
             device_discovery::get_system_computer_name,
+            transfer_manager::engine::send_files,
+            transfer_manager::engine::get_receive_dir,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
