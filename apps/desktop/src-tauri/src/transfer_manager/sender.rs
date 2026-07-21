@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -8,8 +8,8 @@ use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use super::protocol::{
-    write_frame_header, write_transfer_request, FrameTag, DEFAULT_CHUNK_SIZE, FileMetadata,
-    TransferMetadata,
+    read_frame_header, write_frame_header, write_transfer_request, FrameTag, DEFAULT_CHUNK_SIZE,
+    FileMetadata, TransferMetadata,
 };
 use super::receiver::{TransferCompletedPayload, TransferFailedPayload, TransferProgressPayload};
 
@@ -64,7 +64,6 @@ pub fn send_files_over_tcp(
     };
 
     let target_socket_addr = format!("{}:{}", peer_address, peer_port);
-    println!("[Sender] Connecting to peer TCP endpoint at {target_socket_addr}...");
 
     let mut stream = TcpStream::connect_timeout(
         &target_socket_addr
@@ -74,21 +73,22 @@ pub fn send_files_over_tcp(
     )
     .map_err(|e| format!("Failed to connect to peer at {target_socket_addr}: {e}"))?;
 
+    println!("[Sender] CONNECTED to {target_socket_addr}");
+
     stream
         .set_read_timeout(Some(Duration::from_secs(30)))
         .map_err(|e| format!("Failed to set stream timeout: {e}"))?;
 
     // 1. Send TransferRequest metadata frame
     write_transfer_request(&mut stream, &transfer_meta)?;
+    println!("[Sender] REQUEST_SENT");
 
-    // 2. Read acceptance frame
-    let mut response_buf = [0u8; 128];
-    let bytes_read = stream
-        .read(&mut response_buf)
-        .map_err(|e| format!("Failed to read peer response: {e}"))?;
+    // 2. Read acceptance frame header & payload
+    let (resp_tag, resp_len) = read_frame_header(&mut stream)
+        .map_err(|e| format!("Failed to read peer acceptance response header: {e}"))?;
 
-    if bytes_read < 10 {
-        let err_msg = "Peer rejected transfer or closed connection prematurely".to_string();
+    if resp_tag != FrameTag::TransferAccept {
+        let err_msg = format!("Peer rejected transfer with frame tag {:?}", resp_tag);
         let _ = app.emit("transfer-failed", TransferFailedPayload {
             session_id: session_id.clone(),
             error: err_msg.clone(),
@@ -96,10 +96,19 @@ pub fn send_files_over_tcp(
         return Err(err_msg);
     }
 
+    let mut resp_payload = vec![0u8; resp_len as usize];
+    if resp_len > 0 {
+        stream
+            .read_exact(&mut resp_payload)
+            .map_err(|e| format!("Failed to read peer response payload: {e}"))?;
+    }
+    println!("[Sender] ACCEPT_RECEIVED");
+
     let start_time = Instant::now();
     let mut total_sent_bytes: u64 = 0;
 
     // 3. Stream data chunks for each file
+    println!("[Sender] STREAMING");
     for (idx, path_str) in file_paths.iter().enumerate() {
         let mut file = File::open(path_str)
             .map_err(|e| format!("Failed to open file for reading {path_str}: {e}"))?;
@@ -149,6 +158,40 @@ pub fn send_files_over_tcp(
     }
 
     stream.flush().map_err(|e| format!("Failed to flush TCP stream: {e}"))?;
+
+    // 4. Send TransferComplete frame
+    let session_bytes = session_id.as_bytes();
+    write_frame_header(&mut stream, FrameTag::TransferComplete, session_bytes.len() as u32)?;
+    stream
+        .write_all(session_bytes)
+        .map_err(|e| format!("Failed writing TransferComplete payload: {e}"))?;
+    stream.flush().map_err(|e| format!("Failed flushing TransferComplete frame: {e}"))?;
+    println!("[Sender] TRANSFER_COMPLETE_SENT");
+
+    // 5. Wait for TransferAck frame from receiver
+    let (ack_tag, ack_len) = read_frame_header(&mut stream)
+        .map_err(|e| format!("Failed waiting for TransferAck from receiver: {e}"))?;
+
+    if ack_tag != FrameTag::TransferAck {
+        let err_msg = format!("Expected TransferAck, received {:?}", ack_tag);
+        let _ = app.emit("transfer-failed", TransferFailedPayload {
+            session_id: session_id.clone(),
+            error: err_msg.clone(),
+        });
+        return Err(err_msg);
+    }
+
+    if ack_len > 0 {
+        let mut ack_buf = vec![0u8; ack_len as usize];
+        let _ = stream.read_exact(&mut ack_buf);
+    }
+    println!("[Sender] ACK_RECEIVED");
+
+    // 6. Graceful shutdown
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|e| format!("Failed to shutdown TCP write stream: {e}"))?;
+    println!("[Sender] SHUTDOWN");
 
     let size_mb = (total_size_bytes as f64) / (1024.0 * 1024.0);
     let formatted_size = if size_mb >= 1.0 {

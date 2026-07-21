@@ -18,6 +18,7 @@ pub enum FrameTag {
     DataChunk = 0x05,
     TransferComplete = 0x06,
     Cancel = 0x07,
+    TransferAck = 0x08,
 }
 
 impl TryFrom<u8> for FrameTag {
@@ -32,6 +33,7 @@ impl TryFrom<u8> for FrameTag {
             0x05 => Ok(FrameTag::DataChunk),
             0x06 => Ok(FrameTag::TransferComplete),
             0x07 => Ok(FrameTag::Cancel),
+            0x08 => Ok(FrameTag::TransferAck),
             _ => Err(format!("Unknown frame tag: 0x{value:02X}")),
         }
     }
@@ -135,7 +137,7 @@ pub fn read_transfer_request<R: Read>(reader: &mut R) -> Result<TransferMetadata
     Ok(metadata)
 }
 
-/// Sends a simple status response frame (`TransferAccept` or `TransferReject`).
+/// Sends a simple status response frame (`TransferAccept`, `TransferReject`, or `TransferAck`).
 pub fn write_response_frame<W: Write>(writer: &mut W, tag: FrameTag, message: &str) -> Result<(), String> {
     let msg_bytes = message.as_bytes();
     write_frame_header(writer, tag, msg_bytes.len() as u32)?;
@@ -172,5 +174,219 @@ mod tests {
         let decoded = read_transfer_request(&mut cursor).unwrap();
 
         assert_eq!(meta, decoded);
+    }
+
+    #[test]
+    fn test_successful_completion_handshake() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let req = read_transfer_request(&mut stream).unwrap();
+            assert_eq!(req.total_size_bytes, 12);
+            write_response_frame(&mut stream, FrameTag::TransferAccept, "ACCEPTED").unwrap();
+
+            let (tag, len) = read_frame_header(&mut stream).unwrap();
+            assert_eq!(tag, FrameTag::DataChunk);
+            let mut chunk = vec![0u8; len as usize];
+            stream.read_exact(&mut chunk).unwrap();
+            assert_eq!(&chunk, b"Hello World!");
+
+            let (comp_tag, comp_len) = read_frame_header(&mut stream).unwrap();
+            assert_eq!(comp_tag, FrameTag::TransferComplete);
+            let mut comp_buf = vec![0u8; comp_len as usize];
+            stream.read_exact(&mut comp_buf).unwrap();
+
+            write_response_frame(&mut stream, FrameTag::TransferAck, "ACK").unwrap();
+        });
+
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        let meta = TransferMetadata {
+            session_id: "s1".to_string(),
+            sender_id: "u1".to_string(),
+            sender_name: "test".to_string(),
+            total_files: 1,
+            total_size_bytes: 12,
+            files: vec![FileMetadata {
+                file_index: 0,
+                relative_path: "f.txt".to_string(),
+                size_bytes: 12,
+            }],
+        };
+
+        write_transfer_request(&mut client, &meta).unwrap();
+        let (resp_tag, resp_len) = read_frame_header(&mut client).unwrap();
+        assert_eq!(resp_tag, FrameTag::TransferAccept);
+        let mut resp_buf = vec![0u8; resp_len as usize];
+        client.read_exact(&mut resp_buf).unwrap();
+
+        write_frame_header(&mut client, FrameTag::DataChunk, 12).unwrap();
+        client.write_all(b"Hello World!").unwrap();
+
+        write_frame_header(&mut client, FrameTag::TransferComplete, 2).unwrap();
+        client.write_all(b"s1").unwrap();
+
+        let (ack_tag, ack_len) = read_frame_header(&mut client).unwrap();
+        assert_eq!(ack_tag, FrameTag::TransferAck);
+        let mut ack_buf = vec![0u8; ack_len as usize];
+        client.read_exact(&mut ack_buf).unwrap();
+
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_missing_ack() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = read_transfer_request(&mut stream).unwrap();
+            write_response_frame(&mut stream, FrameTag::TransferAccept, "ACCEPTED").unwrap();
+            let _ = read_frame_header(&mut stream).unwrap();
+            let mut chunk = vec![0u8; 5];
+            let _ = stream.read_exact(&mut chunk);
+            let _ = read_frame_header(&mut stream).unwrap();
+            // Server drops stream without sending TransferAck
+        });
+
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        let meta = TransferMetadata {
+            session_id: "s2".to_string(),
+            sender_id: "u1".to_string(),
+            sender_name: "test".to_string(),
+            total_files: 1,
+            total_size_bytes: 5,
+            files: vec![FileMetadata {
+                file_index: 0,
+                relative_path: "f.txt".to_string(),
+                size_bytes: 5,
+            }],
+        };
+
+        write_transfer_request(&mut client, &meta).unwrap();
+        let (resp_tag, resp_len) = read_frame_header(&mut client).unwrap();
+        assert_eq!(resp_tag, FrameTag::TransferAccept);
+        let mut resp_buf = vec![0u8; resp_len as usize];
+        client.read_exact(&mut resp_buf).unwrap();
+
+        write_frame_header(&mut client, FrameTag::DataChunk, 5).unwrap();
+        client.write_all(b"12345").unwrap();
+
+        write_frame_header(&mut client, FrameTag::TransferComplete, 2).unwrap();
+        client.write_all(b"s2").unwrap();
+
+        let res = read_frame_header(&mut client);
+        assert!(res.is_err(), "Reading ACK should fail because server closed socket without ACK");
+
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_premature_disconnect() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = read_transfer_request(&mut stream).unwrap();
+            write_response_frame(&mut stream, FrameTag::TransferAccept, "ACCEPTED").unwrap();
+
+            // Client disconnects before sending complete frame header
+            let res = read_frame_header(&mut stream);
+            assert!(res.is_err(), "Receiver should detect premature disconnect");
+        });
+
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        let meta = TransferMetadata {
+            session_id: "s3".to_string(),
+            sender_id: "u1".to_string(),
+            sender_name: "test".to_string(),
+            total_files: 1,
+            total_size_bytes: 10,
+            files: vec![FileMetadata {
+                file_index: 0,
+                relative_path: "f.txt".to_string(),
+                size_bytes: 10,
+            }],
+        };
+
+        write_transfer_request(&mut client, &meta).unwrap();
+        let (resp_tag, resp_len) = read_frame_header(&mut client).unwrap();
+        assert_eq!(resp_tag, FrameTag::TransferAccept);
+        let mut resp_buf = vec![0u8; resp_len as usize];
+        client.read_exact(&mut resp_buf).unwrap();
+
+        // Client drops stream prematurely
+        drop(client);
+
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_incorrect_byte_count() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let meta = read_transfer_request(&mut stream).unwrap();
+            write_response_frame(&mut stream, FrameTag::TransferAccept, "ACCEPTED").unwrap();
+
+            let (tag, len) = read_frame_header(&mut stream).unwrap();
+            assert_eq!(tag, FrameTag::DataChunk);
+            let mut chunk = vec![0u8; len as usize];
+            stream.read_exact(&mut chunk).unwrap();
+
+            let received_bytes = len as u64;
+            let (comp_tag, comp_len) = read_frame_header(&mut stream).unwrap();
+            assert_eq!(comp_tag, FrameTag::TransferComplete);
+            let mut comp_buf = vec![0u8; comp_len as usize];
+            stream.read_exact(&mut comp_buf).unwrap();
+
+            // Byte count check: 5 != 10
+            if received_bytes != meta.total_size_bytes {
+                // Return error without sending TransferAck!
+                return Err::<(), String>("Byte count mismatch".to_string());
+            }
+
+            write_response_frame(&mut stream, FrameTag::TransferAck, "ACK").unwrap();
+            Ok(())
+        });
+
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        let meta = TransferMetadata {
+            session_id: "s4".to_string(),
+            sender_id: "u1".to_string(),
+            sender_name: "test".to_string(),
+            total_files: 1,
+            total_size_bytes: 10, // Metadata claims 10 bytes
+            files: vec![FileMetadata {
+                file_index: 0,
+                relative_path: "f.txt".to_string(),
+                size_bytes: 10,
+            }],
+        };
+
+        write_transfer_request(&mut client, &meta).unwrap();
+        let (resp_tag, resp_len) = read_frame_header(&mut client).unwrap();
+        assert_eq!(resp_tag, FrameTag::TransferAccept);
+        let mut resp_buf = vec![0u8; resp_len as usize];
+        client.read_exact(&mut resp_buf).unwrap();
+
+        // Sender writes only 5 bytes
+        write_frame_header(&mut client, FrameTag::DataChunk, 5).unwrap();
+        client.write_all(b"12345").unwrap();
+
+        write_frame_header(&mut client, FrameTag::TransferComplete, 2).unwrap();
+        client.write_all(b"s4").unwrap();
+
+        let ack_res = read_frame_header(&mut client);
+        assert!(ack_res.is_err(), "Client should fail to read ACK because server detected byte count mismatch");
+
+        let handle_res = handle.join().unwrap();
+        assert!(handle_res.is_err());
     }
 }

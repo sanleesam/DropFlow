@@ -1,12 +1,13 @@
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use super::protocol::{
@@ -14,36 +15,27 @@ use super::protocol::{
 };
 use super::security::{get_default_receive_dir, sanitize_relative_path, verify_safe_target_path};
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TransferProgressPayload {
-    #[serde(rename = "sessionId")]
     pub session_id: String,
-    #[serde(rename = "fileName")]
     pub file_name: String,
-    #[serde(rename = "bytesSent")]
     pub bytes_sent: u64,
-    #[serde(rename = "totalBytes")]
     pub total_bytes: u64,
     pub percentage: f32,
-    #[serde(rename = "speedBytesPerSec")]
     pub speed_bytes_per_sec: u64,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TransferCompletedPayload {
-    #[serde(rename = "sessionId")]
     pub session_id: String,
-    #[serde(rename = "fileName")]
     pub file_name: String,
-    #[serde(rename = "deviceName")]
     pub device_name: String,
     pub size: String,
     pub timestamp: String,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TransferFailedPayload {
-    #[serde(rename = "sessionId")]
     pub session_id: String,
     pub error: String,
 }
@@ -56,7 +48,7 @@ pub struct TransferReceiver {
 impl TransferReceiver {
     /// Binds TCP listener on dynamic port `0.0.0.0:0` and starts background server task.
     pub fn start(app_handle: AppHandle) -> Result<Self, String> {
-        let listener = TcpListener::bind("0.0.0.0:0")
+        let listener = std::net::TcpListener::bind("0.0.0.0:0")
             .map_err(|e| format!("Failed to bind TCP transfer receiver: {e}"))?;
 
         let bound_port = listener
@@ -64,7 +56,6 @@ impl TransferReceiver {
             .map_err(|e| format!("Failed to query bound TCP port: {e}"))?
             .port();
 
-        // 30 second read/write socket timeout
         listener
             .set_nonblocking(false)
             .map_err(|e| format!("Failed to set blocking mode: {e}"))?;
@@ -110,44 +101,88 @@ impl TransferReceiver {
     }
 }
 
+fn cleanup_files(files: &[PathBuf]) {
+    for path in files {
+        if path.exists() {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
 fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result<(), String> {
     stream
         .set_read_timeout(Some(Duration::from_secs(30)))
         .map_err(|e| format!("Failed to set socket read timeout: {e}"))?;
 
     // 1. Read TransferRequest metadata frame
-    let metadata = read_transfer_request(stream)?;
-    println!(
-        "[Receiver] Incoming transfer request from '{}' ({} bytes, {} files)",
-        metadata.sender_name, metadata.total_size_bytes, metadata.total_files
-    );
+    let metadata = match read_transfer_request(stream) {
+        Ok(m) => m,
+        Err(e) => return Err(e),
+    };
+    println!("[Receiver] REQUEST_RECEIVED from '{}'", metadata.sender_name);
 
     // 2. Accept transfer
     write_response_frame(stream, FrameTag::TransferAccept, "ACCEPTED")?;
+    println!("[Receiver] ACCEPT_SENT");
 
     let receive_dir = get_default_receive_dir()?;
     let mut total_received_bytes: u64 = 0;
     let start_time = Instant::now();
+    let mut created_files: Vec<PathBuf> = Vec::new();
 
-    // 3. Receive file headers and data chunks
+    println!("[Receiver] STREAMING");
     for file_meta in &metadata.files {
-        let safe_rel_path = sanitize_relative_path(&file_meta.relative_path)?;
-        let target_file_path = verify_safe_target_path(&receive_dir, &safe_rel_path)?;
+        let safe_rel_path = match sanitize_relative_path(&file_meta.relative_path) {
+            Ok(p) => p,
+            Err(e) => {
+                cleanup_files(&created_files);
+                return Err(e);
+            }
+        };
+
+        let target_file_path = match verify_safe_target_path(&receive_dir, &safe_rel_path) {
+            Ok(p) => p,
+            Err(e) => {
+                cleanup_files(&created_files);
+                return Err(e);
+            }
+        };
 
         if let Some(parent) = target_file_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory structure {:?}: {e}", parent))?;
+            if let Err(e) = fs::create_dir_all(parent) {
+                cleanup_files(&created_files);
+                return Err(format!("Failed to create directory structure {:?}: {e}", parent));
+            }
         }
 
-        let mut out_file = File::create(&target_file_path)
-            .map_err(|e| format!("Failed to create destination file {:?}: {e}", target_file_path))?;
+        let mut out_file = match File::create(&target_file_path) {
+            Ok(f) => {
+                created_files.push(target_file_path.clone());
+                f
+            }
+            Err(e) => {
+                cleanup_files(&created_files);
+                return Err(format!("Failed to create destination file {:?}: {e}", target_file_path));
+            }
+        };
 
         let mut file_bytes_received: u64 = 0;
 
         while file_bytes_received < file_meta.size_bytes {
-            let (tag, payload_len) = read_frame_header(stream)?;
+            let (tag, payload_len) = match read_frame_header(stream) {
+                Ok(res) => res,
+                Err(e) => {
+                    cleanup_files(&created_files);
+                    let _ = app.emit("transfer-failed", TransferFailedPayload {
+                        session_id: metadata.session_id.clone(),
+                        error: format!("Failed to read frame header: {e}"),
+                    });
+                    return Err(format!("Failed to read frame header: {e}"));
+                }
+            };
 
             if tag == FrameTag::Cancel {
+                cleanup_files(&created_files);
                 let _ = app.emit("transfer-failed", TransferFailedPayload {
                     session_id: metadata.session_id.clone(),
                     error: "Transfer cancelled by sender".to_string(),
@@ -156,18 +191,25 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
             }
 
             if tag != FrameTag::DataChunk {
+                cleanup_files(&created_files);
                 return Err(format!("Expected DataChunk frame tag, received {:?}", tag));
             }
 
             // Read payload length bytes
             let mut chunk_buf = vec![0u8; payload_len as usize];
-            stream
-                .read_exact(&mut chunk_buf)
-                .map_err(|e| format!("Failed to read DataChunk payload: {e}"))?;
+            if let Err(e) = stream.read_exact(&mut chunk_buf) {
+                cleanup_files(&created_files);
+                let _ = app.emit("transfer-failed", TransferFailedPayload {
+                    session_id: metadata.session_id.clone(),
+                    error: format!("Failed to read DataChunk payload: {e}"),
+                });
+                return Err(format!("Failed to read DataChunk payload: {e}"));
+            }
 
-            out_file
-                .write_all(&chunk_buf)
-                .map_err(|e| format!("Failed to write chunk to disk: {e}"))?;
+            if let Err(e) = out_file.write_all(&chunk_buf) {
+                cleanup_files(&created_files);
+                return Err(format!("Failed to write chunk to disk: {e}"));
+            }
 
             file_bytes_received += payload_len as u64;
             total_received_bytes += payload_len as u64;
@@ -194,8 +236,57 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
                 speed_bytes_per_sec: speed,
             });
         }
-        out_file.flush().map_err(|e| format!("Failed to flush file to disk: {e}"))?;
+
+        if let Err(e) = out_file.flush() {
+            cleanup_files(&created_files);
+            return Err(format!("Failed to flush file to disk: {e}"));
+        }
     }
+
+    // 3. Receive TransferComplete frame
+    let (comp_tag, comp_len) = match read_frame_header(stream) {
+        Ok(res) => res,
+        Err(e) => {
+            cleanup_files(&created_files);
+            return Err(format!("Failed to read TransferComplete frame header: {e}"));
+        }
+    };
+
+    if comp_tag != FrameTag::TransferComplete {
+        cleanup_files(&created_files);
+        return Err(format!("Expected TransferComplete tag, received {:?}", comp_tag));
+    }
+
+    let mut comp_payload = vec![0u8; comp_len as usize];
+    if comp_len > 0 {
+        if let Err(e) = stream.read_exact(&mut comp_payload) {
+            cleanup_files(&created_files);
+            return Err(format!("Failed reading TransferComplete payload: {e}"));
+        }
+    }
+    println!("[Receiver] FILE_COMPLETE");
+
+    // 4. Verify byte count match
+    if total_received_bytes != metadata.total_size_bytes {
+        cleanup_files(&created_files);
+        let err_msg = format!(
+            "Byte count mismatch: expected {} bytes, received {} bytes",
+            metadata.total_size_bytes, total_received_bytes
+        );
+        let _ = app.emit("transfer-failed", TransferFailedPayload {
+            session_id: metadata.session_id.clone(),
+            error: err_msg.clone(),
+        });
+        return Err(err_msg);
+    }
+
+    // 5. Send TransferAck response
+    if let Err(e) = write_response_frame(stream, FrameTag::TransferAck, "ACK") {
+        cleanup_files(&created_files);
+        return Err(format!("Failed to send TransferAck: {e}"));
+    }
+    println!("[Receiver] ACK_SENT");
+    println!("[Receiver] CONNECTION_CLOSED");
 
     // Format human-readable file size string
     let size_mb = (metadata.total_size_bytes as f64) / (1024.0 * 1024.0);
