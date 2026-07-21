@@ -34,19 +34,18 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
   const handleDismiss = () => {
     setIsDismissing(true);
-    setTimeout(onClose, 200);
+    setTimeout(onClose, 150);
   };
 
   useEffect(() => {
-    // Reset state whenever file or device changes
     setProgress(0);
     setStatus("Preparing...");
     setSpeed("125 MB/s");
     setTimeRemaining("12 seconds");
 
     let currentProgress = 0;
-    const duration = 5000; // 5 seconds duration
-    const intervalTime = 50; // Update every 50ms
+    const duration = 4000;
+    const intervalTime = 40;
     const totalSteps = duration / intervalTime;
     const stepIncrement = 100 / totalSteps;
 
@@ -68,7 +67,6 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         const roundedProgress = Math.round(currentProgress);
         setProgress(roundedProgress);
 
-        // Update status text based on progress
         if (roundedProgress < 15) {
           setStatus("Preparing...");
           setSpeed("125 MB/s");
@@ -76,12 +74,11 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         } else if (roundedProgress < 85) {
           setStatus("Sending...");
           setSpeed("125 MB/s");
-          // Calculate mock countdown from 12 seconds remaining
           const remainingSecs = Math.max(1, Math.round(((100 - roundedProgress) / 85) * 12));
           setTimeRemaining(`${remainingSecs} second${remainingSecs !== 1 ? "s" : ""}`);
         } else {
           setStatus("Finishing...");
-          setSpeed("125 MB/s"); // Keep speed consistent or drop to show finalization
+          setSpeed("125 MB/s");
           setTimeRemaining("1 second");
         }
       }
@@ -95,31 +92,26 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
   return (
     <div
       className={`
-        relative flex w-full flex-col gap-4 overflow-hidden rounded-[18px] border border-[var(--df-accent)]/20
-        bg-[#111927] p-5 shadow-[0_18px_44px_rgba(0,0,0,.25)]
-        transition-all duration-200 ease-in-out
+        relative flex w-full flex-col gap-3.5 overflow-hidden rounded-xl border border-white/[0.08]
+        bg-neutral-900/90 p-4 shadow-lg
+        transition-all duration-150 ease-in-out
         ${isDismissing ? "opacity-0 translate-y-2 scale-95" : "opacity-100 translate-y-0 scale-100"}
         animate-slide-in-up
       `}
     >
-      {/* Subtle top-left gradient sheen */}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[var(--df-accent)]/[0.06] to-transparent" />
-
       {/* Header Info & Close Button */}
-      <div className="flex items-start justify-between z-10">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--df-accent)] shadow-[0_0_12px_var(--df-accent-shadow)]" />
-            <h3 className="text-sm font-semibold tracking-tight text-slate-100">Sending file</h3>
-          </div>
-          <p className="text-xs text-slate-500">
-            To <span className="font-medium text-slate-300">{deviceName}</span>
-          </p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className={`h-2 w-2 rounded-full ${accent.progressBgDot} animate-pulse`} />
+          <h3 className="text-sm font-semibold tracking-tight text-neutral-100">Sending file</h3>
+          <span className="text-xs text-neutral-400">
+            to <span className="font-medium text-neutral-200">{deviceName}</span>
+          </span>
         </div>
 
         <div className="flex items-center gap-2">
           {/* Status Label */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-white/5 border border-white/5 select-none">
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-neutral-800 border border-white/[0.06] select-none">
             {!isCompleted ? (
               <>
                 <span className={`h-1.5 w-1.5 rounded-full ${accent.progressBgDot} animate-pulse`} />
@@ -138,27 +130,27 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
             type="button"
             onClick={handleDismiss}
             className="
-              w-6 h-6 rounded-lg
+              w-6 h-6 rounded-md
               flex items-center justify-center
-              text-slate-500 hover:text-slate-200
-              hover:bg-white/5
+              text-neutral-500 hover:text-neutral-200
+              hover:bg-neutral-800
               transition-all duration-150
-              outline-none focus-visible:ring-1 focus-visible:ring-slate-500
+              outline-none focus-visible:ring-1 focus-visible:ring-neutral-500
             "
             aria-label="Dismiss progress panel"
           >
-            <X size={14} strokeWidth={2.5} />
+            <X size={14} strokeWidth={2} />
           </button>
         </div>
       </div>
 
       {/* File Progress Details Card */}
-      <div className="z-10 flex items-center gap-3 rounded-[14px] border border-white/[.08] bg-[#0d121b] p-3.5">
+      <div className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-neutral-950/60 p-3">
         {/* File icon */}
-        <div className={`flex h-10 w-10 items-center justify-center rounded-[11px] ${accent.progressIconBg} ${accent.progressIconText}`}>
+        <div className={`flex h-9 w-9 items-center justify-center rounded-md ${accent.progressIconBg} ${accent.progressIconText}`}>
           <svg
             viewBox="0 0 24 24"
-            className="h-5 w-5 flex-shrink-0"
+            className="h-4.5 w-4.5 flex-shrink-0"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.8"
@@ -173,8 +165,8 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
         {/* Text Details */}
         <div className="flex-1 min-w-0">
-          <p className="truncate text-sm font-medium text-slate-200">{fileName}</p>
-          <div className="mt-1 flex items-center gap-2 text-xs text-slate-500 select-none">
+          <p className="truncate text-sm font-medium text-neutral-200">{fileName}</p>
+          <div className="mt-0.5 flex items-center gap-2 text-xs text-neutral-500 select-none">
             <span>{speed}</span>
             <span>•</span>
             <span>{timeRemaining} remaining</span>
@@ -183,25 +175,25 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
         {/* Progress Percent */}
         <div className="text-right select-none">
-          <span className="text-xl font-semibold tracking-tight text-slate-100">
+          <span className="text-lg font-semibold tracking-tight text-neutral-100">
             {progress}%
           </span>
         </div>
       </div>
 
-      {/* Progress Bar / Success State Replacement */}
-      <div className="relative w-full z-10">
+      {/* Progress Bar / Success State */}
+      <div className="relative w-full">
         {!isCompleted ? (
-          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800/90">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
             <div
-              className={`h-full rounded-full bg-gradient-to-r ${accent.progressFrom} ${accent.progressTo} transition-all duration-75 ease-out`}
+              className={`h-full rounded-full ${accent.switchBg} transition-all duration-75 ease-out`}
               style={{ width: `${progress}%` }}
             />
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-sm text-emerald-400 font-medium py-0.5 animate-[toast-slide-in_0.3s_ease-out] select-none">
-            <CheckCircle2 size={16} strokeWidth={2.5} />
-            <span>Transfer completed.</span>
+          <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium py-0.5 select-none">
+            <CheckCircle2 size={14} strokeWidth={2} />
+            <span>Transfer completed successfully.</span>
           </div>
         )}
       </div>

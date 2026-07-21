@@ -11,11 +11,11 @@ const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
 
   return (
-    <header className="df-header sticky top-0 z-50 flex items-center justify-between px-6 py-4">
+    <header className="df-header sticky top-0 z-50 flex items-center justify-between px-5 py-3 border-b border-white/[0.07] bg-[#101216]/80 backdrop-blur-xl">
       {/* Logo + Title */}
-      <div className="flex items-center gap-3 select-none">
+      <div className="flex items-center gap-2.5 select-none">
         {/* Icon mark */}
-        <div className={`relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] bg-gradient-to-br ${accent.headerLogoGrad} shadow-[0_8px_20px_rgba(0,0,0,0.15)]`}>
+        <div className={`relative flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${accent.headerLogoGrad} shadow-sm`}>
           <svg
             viewBox="0 0 32 32"
             className="absolute inset-0 h-full w-full p-1.5"
@@ -42,10 +42,10 @@ const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
 
         {/* Wordmark */}
         <div>
-          <span className="block text-[17px] font-semibold tracking-tight text-slate-100">
-          DropFlow
+          <span className="block text-[15px] font-semibold tracking-tight text-neutral-100">
+            DropFlow
           </span>
-          <span className="hidden text-[11px] font-medium tracking-wide text-slate-500 sm:block">Private file transfer</span>
+          <span className="hidden text-[11px] text-neutral-500 sm:block">Private file transfer</span>
         </div>
       </div>
 
@@ -59,7 +59,7 @@ const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
       >
         <svg
           viewBox="0 0 24 24"
-          className="h-5 w-5 transition-transform duration-300 group-hover:rotate-45"
+          className="h-4.5 w-4.5 transition-transform duration-200 group-hover:rotate-45"
           fill="none"
           stroke="currentColor"
           strokeWidth="1.75"
