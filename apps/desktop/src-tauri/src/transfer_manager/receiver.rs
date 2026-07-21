@@ -16,6 +16,7 @@ use super::protocol::{
 use super::security::{get_default_receive_dir, sanitize_relative_path, verify_safe_target_path};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TransferProgressPayload {
     pub session_id: String,
     pub file_name: String,
@@ -26,6 +27,7 @@ pub struct TransferProgressPayload {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TransferCompletedPayload {
     pub session_id: String,
     pub file_name: String,
@@ -35,6 +37,7 @@ pub struct TransferCompletedPayload {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TransferFailedPayload {
     pub session_id: String,
     pub error: String,

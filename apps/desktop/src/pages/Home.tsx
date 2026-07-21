@@ -235,8 +235,26 @@ const Home: React.FC = () => {
     }
   }, [settings.deviceName, settings.deviceVisibility, localUuid]);
 
+  const handleTransferComplete = useCallback((payload?: any) => {
+    setActiveTransfer((currentActive) => {
+      if (currentActive && !completedTransferIdsRef.current.has(currentActive.id)) {
+        completedTransferIdsRef.current.add(currentActive.id);
+        const newTransfer: RecentTransfer = {
+          id: currentActive.id,
+          fileName: payload?.fileName || payload?.file_name || currentActive.fileName,
+          deviceName: payload?.deviceName || payload?.device_name || currentActive.deviceName,
+          size: payload?.size || "Complete",
+          timestamp: payload?.timestamp || "Just now",
+          status: "completed",
+        };
+        setRecentTransfers((prev) => [newTransfer, ...prev]);
+      }
+      return null; // Clear activeTransfer so TransferProgress unmounts cleanly
+    });
+  }, []);
+
   const handleSend = useCallback(
-    (selectedFiles: SelectedFilePayload[]) => {
+    async (selectedFiles: SelectedFilePayload[]) => {
       if (selectedFiles.length === 0) return;
 
       const targetDevice = devices.find((d) => d.id === selectedDeviceId);
@@ -259,37 +277,32 @@ const Home: React.FC = () => {
         fileName: mainFileName,
       });
 
-      invoke<string>("send_files", {
-        peerAddress,
-        peerPort,
-        localUuid,
-        localDeviceName: settings.deviceName || "DropFlow Device",
-        filePaths,
-      }).catch((err) => {
+      try {
+        const sessionId = await invoke<string>("send_files", {
+          peerAddress,
+          peerPort,
+          localUuid,
+          localDeviceName: settings.deviceName || "DropFlow Device",
+          filePaths,
+        });
+
+        // Robust fallback completion: when invoke() resolves, ensure the transfer
+        // completes cleanly even if an event was missed due to timing/IPC delays.
+        handleTransferComplete({
+          sessionId,
+          fileName: mainFileName,
+          deviceName: targetDevice.name,
+          size: "Complete",
+          timestamp: "Just now",
+        });
+      } catch (err: any) {
         console.error("[Home] Send failed:", err);
         addToast(`Transfer error: ${err}`, "error");
-      });
-    },
-    [devices, selectedDeviceId, localUuid, settings.deviceName, addToast],
-  );
-
-  const handleTransferComplete = useCallback((payload?: any) => {
-    setActiveTransfer((currentActive) => {
-      if (currentActive && !completedTransferIdsRef.current.has(currentActive.id)) {
-        completedTransferIdsRef.current.add(currentActive.id);
-        const newTransfer: RecentTransfer = {
-          id: currentActive.id,
-          fileName: payload?.fileName || currentActive.fileName,
-          deviceName: payload?.deviceName || currentActive.deviceName,
-          size: payload?.size || "Complete",
-          timestamp: payload?.timestamp || "Just now",
-          status: "completed",
-        };
-        setRecentTransfers((prev) => [newTransfer, ...prev]);
+        setActiveTransfer(null);
       }
-      return null; // Clear activeTransfer so TransferProgress unmounts
-    });
-  }, []);
+    },
+    [devices, selectedDeviceId, localUuid, settings.deviceName, addToast, handleTransferComplete],
+  );
 
   return (
     <div className="df-app-shell flex h-screen w-screen flex-col overflow-hidden text-neutral-100">

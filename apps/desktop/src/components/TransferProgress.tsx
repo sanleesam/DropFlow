@@ -18,25 +18,34 @@ interface TransferProgressProps {
 type TransferStatus = "Preparing..." | "Sending..." | "Finishing..." | "Completed" | "Failed";
 
 interface ProgressPayload {
-  sessionId: string;
-  fileName: string;
-  bytesSent: number;
-  totalBytes: number;
-  percentage: number;
-  speedBytesPerSec: number;
+  sessionId?: string;
+  session_id?: string;
+  fileName?: string;
+  file_name?: string;
+  bytesSent?: number;
+  bytes_sent?: number;
+  totalBytes?: number;
+  total_bytes?: number;
+  percentage?: number;
+  speedBytesPerSec?: number;
+  speed_bytes_per_sec?: number;
 }
 
 interface CompletedPayload {
-  sessionId: string;
-  fileName: string;
-  deviceName: string;
-  size: string;
-  timestamp: string;
+  sessionId?: string;
+  session_id?: string;
+  fileName?: string;
+  file_name?: string;
+  deviceName?: string;
+  device_name?: string;
+  size?: string;
+  timestamp?: string;
 }
 
 interface FailedPayload {
-  sessionId: string;
-  error: string;
+  sessionId?: string;
+  session_id?: string;
+  error?: string;
 }
 
 export const TransferProgress: React.FC<TransferProgressProps> = ({
@@ -81,43 +90,59 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
     let unlistenFailed: (() => void) | undefined;
 
     const setupListeners = async () => {
-      unlistenProgress = await listen<ProgressPayload>("transfer-progress", (event) => {
-        const payload = event.payload;
-        const rounded = Math.min(100, Math.max(0, Math.round(payload.percentage)));
-        setProgress(rounded);
+      try {
+        unlistenProgress = await listen<ProgressPayload>("transfer-progress", (event) => {
+          const payload = event.payload;
+          const pct = payload.percentage ?? 0;
+          const rounded = Math.min(100, Math.max(0, Math.round(pct)));
+          setProgress(rounded);
 
-        const mbps = (payload.speedBytesPerSec / (1024 * 1024)).toFixed(1);
-        setSpeed(`${mbps} MB/s`);
+          const speedBytes = payload.speedBytesPerSec ?? payload.speed_bytes_per_sec ?? 0;
+          const mbps = (speedBytes / (1024 * 1024)).toFixed(1);
+          setSpeed(`${mbps} MB/s`);
 
-        if (rounded < 100) {
-          setStatus("Sending...");
-          const remainingBytes = Math.max(0, payload.totalBytes - payload.bytesSent);
-          const remainingSecs = payload.speedBytesPerSec > 0
-            ? Math.ceil(remainingBytes / payload.speedBytesPerSec)
-            : 0;
-          setTimeRemaining(`${remainingSecs} second${remainingSecs !== 1 ? "s" : ""}`);
-        }
-      });
+          const bytesSent = payload.bytesSent ?? payload.bytes_sent ?? 0;
+          const totalBytes = payload.totalBytes ?? payload.total_bytes ?? 0;
 
-      unlistenCompleted = await listen<CompletedPayload>("transfer-completed", (event) => {
-        setProgress(100);
-        setStatus("Completed");
-        setSpeed("0 MB/s");
-        setTimeRemaining("0 seconds");
-
-        if (!hasCompletedRef.current) {
-          hasCompletedRef.current = true;
-          addToast("Transfer completed successfully.", "success");
-          if (onCompleteRef.current) {
-            onCompleteRef.current(event.payload);
+          if (rounded < 100) {
+            setStatus("Sending...");
+            const remainingBytes = Math.max(0, totalBytes - bytesSent);
+            const remainingSecs = speedBytes > 0
+              ? Math.ceil(remainingBytes / speedBytes)
+              : 0;
+            setTimeRemaining(`${remainingSecs} second${remainingSecs !== 1 ? "s" : ""}`);
           }
-        }
-      });
+        });
 
-      unlistenFailed = await listen<FailedPayload>("transfer-failed", (event) => {
-        setStatus("Failed");
-        addToast(`Transfer failed: ${event.payload.error}`, "error");
-      });
+        unlistenCompleted = await listen<CompletedPayload>("transfer-completed", (event) => {
+          const payload = event.payload;
+          setProgress(100);
+          setStatus("Completed");
+          setSpeed("0 MB/s");
+          setTimeRemaining("0 seconds");
+
+          if (!hasCompletedRef.current) {
+            hasCompletedRef.current = true;
+            addToast("Transfer completed successfully.", "success");
+            if (onCompleteRef.current) {
+              onCompleteRef.current({
+                sessionId: payload.sessionId ?? payload.session_id,
+                fileName: payload.fileName ?? payload.file_name ?? fileName,
+                deviceName: payload.deviceName ?? payload.device_name ?? deviceName,
+                size: payload.size ?? "Complete",
+                timestamp: payload.timestamp ?? "Just now",
+              });
+            }
+          }
+        });
+
+        unlistenFailed = await listen<FailedPayload>("transfer-failed", (event) => {
+          setStatus("Failed");
+          addToast(`Transfer failed: ${event.payload.error || "Unknown error"}`, "error");
+        });
+      } catch (err) {
+        console.error("[TransferProgress] Failed to register event listeners:", err);
+      }
     };
 
     setupListeners();
@@ -127,7 +152,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
       if (unlistenCompleted) unlistenCompleted();
       if (unlistenFailed) unlistenFailed();
     };
-  }, [addToast]);
+  }, [addToast, fileName, deviceName]);
 
   const isCompleted = progress === 100;
   const isFailed = status === "Failed";
