@@ -1,34 +1,38 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useToast } from "./ToastProvider";
 import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
+import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface SelectedFile {
+export interface SelectedFilePayload {
   /** Unique key for React list rendering */
   uid: string;
-  file: File;
+  /** Absolute filesystem path (e.g., "/Users/name/Desktop/file.png") */
+  path: string;
+  /** Display file name (e.g., "file.png") */
+  name: string;
 }
 
 interface FileDropZoneProps {
   /** ID of the currently selected device (null = none) */
   selectedDeviceId: string | null;
-  /** Callback fired when user initiates file sending */
-  onSend?: (selectedFiles: File[]) => void;
+  /** Callback fired when user initiates file sending with native absolute paths */
+  onSend?: (selectedFiles: SelectedFilePayload[]) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
-
 function uid(): string {
   return Math.random().toString(36).slice(2, 10);
+}
+
+function extractFilename(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, "/");
+  const parts = normalized.split("/");
+  return parts[parts.length - 1] || filePath;
 }
 
 // ─── File type icon ───────────────────────────────────────────────────────────
@@ -85,13 +89,78 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
   const { addToast } = useToast();
   const { settings } = useSettings();
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
-  const [files, setFiles] = useState<SelectedFile[]>([]);
+  const [files, setFiles] = useState<SelectedFilePayload[]>([]);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const hasFiles = files.length > 0;
   const hasDevice = selectedDeviceId !== null;
   const canSend = hasFiles && hasDevice;
+
+  const addFilePaths = useCallback((incomingPaths: string[]) => {
+    if (!incomingPaths || incomingPaths.length === 0) return;
+    const newItems: SelectedFilePayload[] = incomingPaths.map((filePath) => ({
+      uid: uid(),
+      path: filePath,
+      name: extractFilename(filePath),
+    }));
+    setFiles((prev) => [...prev, ...newItems]);
+  }, []);
+
+  const removeFile = useCallback((id: string) => {
+    setFiles((prev) => prev.filter((f) => f.uid !== id));
+  }, []);
+
+  // ── Native Tauri drag-and-drop listener ────────────────────────────────────
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupNativeDragDrop = async () => {
+      try {
+        unlisten = await getCurrentWindow().onDragDropEvent((event) => {
+          if (event.payload.type === "enter" || event.payload.type === "over") {
+            setIsDraggingOver(true);
+          } else if (event.payload.type === "drop") {
+            setIsDraggingOver(false);
+            const paths = event.payload.paths;
+            if (paths && paths.length > 0) {
+              addFilePaths(paths);
+            }
+          } else if (event.payload.type === "leave") {
+            setIsDraggingOver(false);
+          }
+        });
+      } catch (err) {
+        console.error("[FileDropZone] Native drag drop listener error:", err);
+      }
+    };
+
+    setupNativeDragDrop();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [addFilePaths]);
+
+  // ── Click-to-browse via Tauri Native Dialog ────────────────────────────────
+
+  const onZoneClick = useCallback(async () => {
+    try {
+      const selected = await open({
+        multiple: true,
+        directory: false,
+        title: "Select Files to Send",
+      });
+
+      if (selected) {
+        const paths = Array.isArray(selected) ? selected : [selected];
+        addFilePaths(paths);
+      }
+    } catch (err) {
+      console.error("[FileDropZone] Native file dialog error:", err);
+      addToast("Failed to open native file dialog.", "error");
+    }
+  }, [addFilePaths, addToast]);
 
   // ── Send button handler ─────────────────────────────────────────────────────
 
@@ -105,90 +174,21 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
     } else {
       addToast("Preparing transfer...", "info");
       if (onSend) {
-        const rawFiles = files.map((f) => f.file);
-        onSend(rawFiles);
+        onSend(files);
         setFiles([]); // Clear list after initiating transfer
       }
     }
   }, [hasDevice, hasFiles, addToast, onSend, files]);
 
-  // ── File ingestion ──────────────────────────────────────────────────────────
-
-  const addFiles = useCallback((incoming: FileList | null) => {
-    if (!incoming) return;
-    const next: SelectedFile[] = Array.from(incoming).map((file) => ({
-      uid: uid(),
-      file,
-    }));
-    setFiles((prev) => [...prev, ...next]);
-  }, []);
-
-  const removeFile = useCallback((id: string) => {
-    setFiles((prev) => prev.filter((f) => f.uid !== id));
-  }, []);
-
-  // ── Drag handlers ───────────────────────────────────────────────────────────
-
-  const onDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingOver(true);
-  }, []);
-
-  const onDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingOver(false);
-  }, []);
-
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDraggingOver(false);
-      addFiles(e.dataTransfer.files);
-    },
-    [addFiles],
-  );
-
-  // ── Click-to-browse ─────────────────────────────────────────────────────────
-
-  const onZoneClick = useCallback(() => {
-    inputRef.current?.click();
-  }, []);
-
-  const onInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      addFiles(e.target.files);
-      e.target.value = "";
-    },
-    [addFiles],
-  );
-
   return (
     <div className="flex w-full flex-col gap-2.5">
-      {/* Hidden file input */}
-      <input
-        ref={inputRef}
-        id="file-browse-input"
-        type="file"
-        multiple
-        className="sr-only"
-        aria-label="Browse files"
-        onChange={onInputChange}
-        tabIndex={-1}
-      />
-
       {/* ── Drop zone ── */}
       <div
         role="button"
         tabIndex={0}
         aria-label="Drop files here or click to browse"
         onClick={onZoneClick}
-        onKeyDown={(e) => e.key === "Enter" || e.key === " " ? onZoneClick() : undefined}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " " ? onZoneClick() : undefined)}
         className={[
           "relative flex min-h-[130px] flex-col items-center justify-center gap-2 overflow-hidden",
           "rounded-xl border border-dashed px-4 py-5",
@@ -214,7 +214,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
             aria-label="Selected files"
             className="flex w-full flex-col gap-1 max-h-40 overflow-y-auto pr-0.5"
           >
-            {files.map(({ uid: id, file }) => (
+            {files.map(({ uid: id, path, name }) => (
               <li
                 key={id}
                 className="
@@ -224,19 +224,19 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
                 "
               >
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <IconFile name={file.name} />
-                  <span className="truncate font-medium text-neutral-200">
-                    {file.name}
-                  </span>
-                  <span className="flex-shrink-0 text-[11px] text-neutral-500 font-mono">
-                    {formatBytes(file.size)}
-                  </span>
+                  <IconFile name={name} />
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <span className="truncate font-medium text-neutral-200">{name}</span>
+                    <span className="truncate text-[10px] text-neutral-500 font-mono" title={path}>
+                      {path}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Remove button */}
                 <button
                   type="button"
-                  aria-label={`Remove ${file.name}`}
+                  aria-label={`Remove ${name}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     removeFile(id);

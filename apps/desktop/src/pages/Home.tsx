@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Header from "../components/Header";
 import DeviceCard, { Device } from "../components/DeviceCard";
-import FileDropZone from "../components/FileDropZone";
+import FileDropZone, { SelectedFilePayload } from "../components/FileDropZone";
 import { TransferProgress } from "../components/TransferProgress";
 import { SettingsModal } from "../components/SettingsModal";
 import { useSettings } from "../components/SettingsProvider";
@@ -236,7 +236,7 @@ const Home: React.FC = () => {
   }, [settings.deviceName, settings.deviceVisibility, localUuid]);
 
   const handleSend = useCallback(
-    (selectedFiles: File[]) => {
+    (selectedFiles: SelectedFilePayload[]) => {
       if (selectedFiles.length === 0) return;
 
       const targetDevice = devices.find((d) => d.id === selectedDeviceId);
@@ -248,7 +248,8 @@ const Home: React.FC = () => {
       const peerAddress = targetDevice.addresses[0]?.address || "127.0.0.1";
       const peerPort = targetDevice.port > 0 ? targetDevice.port : 42382;
 
-      const filePaths = selectedFiles.map((f) => (f as any).path || f.name);
+      // Extract native absolute filesystem paths directly from SelectedFilePayload
+      const filePaths = selectedFiles.map((f) => f.path);
       const mainFileName = selectedFiles[0].name;
 
       const txId = `tx-${Date.now()}`;
