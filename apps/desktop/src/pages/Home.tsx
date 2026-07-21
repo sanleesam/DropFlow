@@ -83,6 +83,7 @@ const Home: React.FC = () => {
   const { settings } = useSettings();
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [activeTransfer, setActiveTransfer] = useState<{
+    id: string;
     deviceName: string;
     fileName: string;
   } | null>(null);
@@ -94,6 +95,9 @@ const Home: React.FC = () => {
 
   // Production state starts clean with zero mock transfers
   const [recentTransfers, setRecentTransfers] = useState<RecentTransfer[]>([]);
+
+  // Prevent duplicate completion handling across re-renders
+  const completedTransferIdsRef = useRef<Set<string>>(new Set());
 
   // Restore focus to Settings button after modal is closed
   useEffect(() => {
@@ -229,28 +233,33 @@ const Home: React.FC = () => {
     }
   }, [settings.deviceName, settings.deviceVisibility, localUuid]);
 
-  const handleSend = (fileName: string) => {
+  const handleSend = useCallback((fileName: string) => {
     const device = devices.find((d) => d.id === selectedDeviceId);
     const deviceName = device ? device.name : "Unknown Device";
     setActiveTransfer({
+      id: `tx-${Date.now()}`,
       deviceName,
       fileName,
     });
-  };
+  }, [devices, selectedDeviceId]);
 
-  const handleTransferComplete = () => {
-    if (activeTransfer) {
-      const newTransfer: RecentTransfer = {
-        id: `tx-${Date.now()}`,
-        fileName: activeTransfer.fileName,
-        deviceName: activeTransfer.deviceName,
-        size: "Complete",
-        timestamp: "Just now",
-        status: "completed",
-      };
-      setRecentTransfers((prev) => [newTransfer, ...prev]);
-    }
-  };
+  const handleTransferComplete = useCallback(() => {
+    setActiveTransfer((currentActive) => {
+      if (currentActive && !completedTransferIdsRef.current.has(currentActive.id)) {
+        completedTransferIdsRef.current.add(currentActive.id);
+        const newTransfer: RecentTransfer = {
+          id: currentActive.id,
+          fileName: currentActive.fileName,
+          deviceName: currentActive.deviceName,
+          size: "Complete",
+          timestamp: "Just now",
+          status: "completed",
+        };
+        setRecentTransfers((prev) => [newTransfer, ...prev]);
+      }
+      return null; // Clear activeTransfer so TransferProgress unmounts
+    });
+  }, []);
 
   return (
     <div className="df-app-shell flex h-screen w-screen flex-col overflow-hidden text-neutral-100">
@@ -309,6 +318,7 @@ const Home: React.FC = () => {
         {/* ── Active Transfer Progress ── */}
         {activeTransfer && (
           <TransferProgress
+            key={activeTransfer.id}
             deviceName={activeTransfer.deviceName}
             fileName={activeTransfer.fileName}
             onClose={() => setActiveTransfer(null)}

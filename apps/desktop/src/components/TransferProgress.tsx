@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X, CheckCircle2 } from "lucide-react";
 import { useToast } from "./ToastProvider";
 import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
@@ -32,12 +32,22 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
   const [timeRemaining, setTimeRemaining] = useState("12 seconds");
   const [isDismissing, setIsDismissing] = useState(false);
 
+  // Keep a stable ref to onComplete to prevent prop identity changes from restarting the timer
+  const onCompleteRef = useRef(onComplete);
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  // Track if completion logic has already executed for this mounted transfer
+  const hasCompletedRef = useRef(false);
+
   const handleDismiss = () => {
     setIsDismissing(true);
     setTimeout(onClose, 150);
   };
 
   useEffect(() => {
+    hasCompletedRef.current = false;
     setProgress(0);
     setStatus("Preparing...");
     setSpeed("125 MB/s");
@@ -59,9 +69,13 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         setSpeed("0 MB/s");
         setTimeRemaining("0 seconds");
         clearInterval(timer);
-        addToast("Transfer completed.", "success");
-        if (onComplete) {
-          onComplete();
+
+        if (!hasCompletedRef.current) {
+          hasCompletedRef.current = true;
+          addToast("Transfer completed.", "success");
+          if (onCompleteRef.current) {
+            onCompleteRef.current();
+          }
         }
       } else {
         const roundedProgress = Math.round(currentProgress);
@@ -85,7 +99,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, [deviceName, fileName, addToast, onComplete]);
+  }, [deviceName, fileName, addToast]);
 
   const isCompleted = progress === 100;
 
