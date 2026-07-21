@@ -46,19 +46,19 @@ export const Switch: React.FC<SwitchProps> = ({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={[
-        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border border-transparent",
-        "transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2",
+        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border border-transparent",
+        "transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2",
         accent.switchFocus,
-        checked ? accent.switchBg : "bg-slate-700",
-        disabled ? "opacity-30 cursor-not-allowed" : "hover:bg-opacity-95",
+        checked ? accent.switchBg : "bg-neutral-700",
+        disabled ? "opacity-30 cursor-not-allowed" : "hover:opacity-90",
       ].join(" ")}
     >
       <span
         aria-hidden="true"
         className={[
-          "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-[0_2px_6px_rgba(0,0,0,.3)] ring-0",
-          "transition duration-200 ease-in-out",
-          checked ? "translate-x-5" : "translate-x-0",
+          "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0",
+          "transition duration-150 ease-in-out",
+          checked ? "translate-x-4" : "translate-x-0",
         ].join(" ")}
       />
     </button>
@@ -104,50 +104,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   if (!isOpen) return null;
 
   const tabs: { id: TabID; label: string; icon: React.ReactNode }[] = [
-    { id: "transfers", label: "Transfers", icon: <Folder size={16} /> },
-    { id: "network", label: "Network", icon: <Network size={16} /> },
-    { id: "security", label: "Security", icon: <Shield size={16} /> },
-    { id: "appearance", label: "Appearance", icon: <Palette size={16} /> },
-    { id: "about", label: "About", icon: <Info size={16} /> },
+    { id: "transfers", label: "Transfers", icon: <Folder size={15} /> },
+    { id: "network", label: "Network", icon: <Network size={15} /> },
+    { id: "security", label: "Security", icon: <Shield size={15} /> },
+    { id: "appearance", label: "Appearance", icon: <Palette size={15} /> },
+    { id: "about", label: "About", icon: <Info size={15} /> },
   ];
 
   return (
     <div
       ref={overlayRef}
       onClick={handleOverlayClick}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#05070c]/75 p-3 backdrop-blur-md animate-backdrop-fade-in sm:p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-3 backdrop-blur-md animate-backdrop-fade-in sm:p-6"
     >
       {/* Modal Dialog Container */}
       <div
         className="
-          relative flex h-[min(720px,92vh)] w-full max-w-4xl flex-col overflow-hidden rounded-[20px] border border-white/[.12]
-          bg-[#10151f]/98 shadow-[0_28px_80px_rgba(0,0,0,.55)]
+          relative flex h-[min(640px,88vh)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-white/[0.08]
+          bg-[#121418] shadow-2xl
           animate-modal-scale-in
         "
       >
-        {/* Subtle background glow sheen */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[var(--df-accent)]/[0.05] to-transparent" />
-
         {/* Modal Header */}
-        <div className="z-10 flex items-center justify-between border-b border-white/[.08] px-5 py-4 select-none sm:px-6">
+        <div className="z-10 flex items-center justify-between border-b border-white/[0.07] px-5 py-3.5 select-none bg-[#101216]/60 sm:px-6">
           <div>
-            <h2 className="text-base font-semibold tracking-tight text-slate-100">Settings</h2>
-            <p className="mt-0.5 text-xs text-slate-500">Customize how DropFlow works for you.</p>
+            <h2 className="text-sm font-semibold tracking-tight text-neutral-100">Settings</h2>
+            <p className="mt-0.5 text-xs text-neutral-500">Configure application preferences.</p>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="
-              w-7 h-7 rounded-lg
+              w-6 h-6 rounded-md
               flex items-center justify-center
-              text-slate-500 hover:text-slate-200
-              hover:bg-white/5
+              text-neutral-400 hover:text-neutral-200
+              hover:bg-neutral-800
               transition-all duration-150
-              outline-none focus-visible:ring-1 focus-visible:ring-slate-500
+              outline-none focus-visible:ring-1 focus-visible:ring-neutral-500
             "
             aria-label="Close settings"
           >
-            <X size={16} strokeWidth={2.5} />
+            <X size={15} strokeWidth={2} />
           </button>
         </div>
 
@@ -155,8 +152,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden z-10">
           
           {/* Navigation Sidebar */}
-          <div className="w-full flex-shrink-0 border-b border-white/[.08] bg-[#0d121b]/65 md:w-52 md:border-b-0 md:border-r">
-            <nav className="flex gap-1 overflow-x-auto p-2 md:flex-col md:gap-1.5 md:p-3 scrollbar-none">
+          <div className="w-full flex-shrink-0 border-b border-white/[0.07] bg-[#0e1013] md:w-48 md:border-b-0 md:border-r">
+            <nav className="flex gap-1 overflow-x-auto p-2 md:flex-col md:gap-1 md:p-3 scrollbar-none">
               {tabs.map((tab) => {
                 const isActive = activeTab === tab.id;
                 return (
@@ -165,11 +162,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     type="button"
                     onClick={() => setActiveTab(tab.id)}
                     className={[
-                      "flex items-center gap-2.5 rounded-[11px] border px-3 py-2 text-sm font-medium",
-                      "transition-all duration-200 select-none shrink-0 whitespace-nowrap",
+                      "flex items-center gap-2.5 rounded-lg border border-transparent px-3 py-2 text-xs font-medium",
+                      "transition-colors duration-150 select-none shrink-0 whitespace-nowrap",
                       isActive
                         ? accent.sidebarActive
-                        : "border-transparent text-slate-400 hover:bg-white/[.05] hover:text-slate-200",
+                        : "text-neutral-400 hover:bg-neutral-800/50 hover:text-neutral-200",
                     ].join(" ")}
                   >
                     {tab.icon}
@@ -181,7 +178,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </div>
 
           {/* Active Panel Content Pane */}
-          <div className="flex-1 overflow-y-auto p-5 scrollbar-none sm:p-7">
+          <div className="flex-1 overflow-y-auto p-5 scrollbar-none sm:p-6 bg-[#121418]">
             {activeTab === "transfers" && <TransfersTab />}
             {activeTab === "network" && <NetworkTab />}
             {activeTab === "security" && <SecurityTab />}

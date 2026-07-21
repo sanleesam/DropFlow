@@ -6,15 +6,13 @@ export const TransfersTab: React.FC = () => {
   const { settings, updateSetting } = useSettings();
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
   const [concurrentCount, setConcurrentCount] = useState(3);
-  const [downloadPath, setDownloadPath] = useState("/Users/sanleesam/Downloads");
+  const [downloadPath, setDownloadPath] = useState("~/Downloads");
 
   const handleBrowseFolder = () => {
-    // In a real tauri app we would invoke dialog.open.
-    // Here we'll simulate toggle paths to prove interactivity.
     const folders = [
-      "/Users/sanleesam/Downloads",
-      "/Users/sanleesam/Downloads/DropFlow",
-      "/Users/sanleesam/Desktop/DropFlow-Received"
+      "~/Downloads",
+      "~/Downloads/DropFlow",
+      "~/Desktop/Received"
     ];
     const currentIndex = folders.indexOf(downloadPath);
     const nextIndex = (currentIndex + 1) % folders.length;
@@ -22,32 +20,32 @@ export const TransfersTab: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col gap-6 animate-[toast-slide-in_0.2s_ease-out]">
+    <div className="flex flex-col gap-5 animate-[backdrop-fade-in_0.15s_ease-out]">
       <div>
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 select-none">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-4 select-none">
           Transfers Settings
         </h3>
 
         {/* File Download Folder Option */}
-        <div className="flex flex-col gap-2 pb-5 border-b border-white/5">
+        <div className="flex flex-col gap-2 pb-4 border-b border-white/[0.07]">
           <div className="flex flex-col">
-            <label className="text-sm font-semibold text-slate-200">Download folder</label>
-            <span className="text-xs text-slate-500 mt-1 leading-normal">
+            <label className="text-xs font-semibold text-neutral-200">Download folder</label>
+            <span className="text-xs text-neutral-500 mt-0.5">
               Where files received from other devices will be saved.
             </span>
           </div>
-          <div className="flex items-center gap-2 mt-2">
-            <div className="flex-1 text-xs font-mono text-slate-400 bg-slate-950/40 border border-white/5 rounded-xl px-3.5 py-2.5 truncate">
+          <div className="flex items-center gap-2 mt-1.5">
+            <div className="flex-1 text-xs font-mono text-neutral-300 bg-neutral-950/60 border border-white/[0.08] rounded-lg px-3 py-2 truncate">
               {downloadPath}
             </div>
             <button
               type="button"
               onClick={handleBrowseFolder}
-              className={`
-                px-4 py-2.5 rounded-xl text-xs font-semibold
-                bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/5
-                transition-all duration-150 cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[var(--df-accent)]
-              `}
+              className="
+                px-3 py-2 rounded-lg text-xs font-medium
+                bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-white/[0.06]
+                transition-colors duration-150 cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-blue-500
+              "
             >
               Change...
             </button>
@@ -55,10 +53,10 @@ export const TransfersTab: React.FC = () => {
         </div>
 
         {/* Ask Before Overwrite Switch */}
-        <div className="flex items-center justify-between py-4.5 border-b border-white/5">
+        <div className="flex items-center justify-between py-3.5 border-b border-white/[0.07]">
           <div className="flex flex-col pr-4">
-            <span className="text-sm font-semibold text-slate-200">Ask before overwrite</span>
-            <span className="text-xs text-slate-500 mt-1 leading-normal">
+            <span className="text-xs font-semibold text-neutral-200">Ask before overwrite</span>
+            <span className="text-xs text-neutral-500 mt-0.5">
               Prompt for confirmation if a file with the same name already exists.
             </span>
           </div>
@@ -66,10 +64,10 @@ export const TransfersTab: React.FC = () => {
         </div>
 
         {/* Auto-open Switch */}
-        <div className="flex items-center justify-between py-4.5 border-b border-white/5">
+        <div className="flex items-center justify-between py-3.5 border-b border-white/[0.07]">
           <div className="flex flex-col pr-4">
-            <span className="text-sm font-semibold text-slate-200">Auto-open completed transfers</span>
-            <span className="text-xs text-slate-500 mt-1 leading-normal">
+            <span className="text-xs font-semibold text-neutral-200">Auto-open completed transfers</span>
+            <span className="text-xs text-neutral-500 mt-0.5">
               Open the folder or file automatically when the transfer finishes.
             </span>
           </div>
@@ -77,14 +75,14 @@ export const TransfersTab: React.FC = () => {
         </div>
 
         {/* Concurrent Transfers count selector */}
-        <div className="flex items-center justify-between py-4.5">
+        <div className="flex items-center justify-between py-3.5">
           <div className="flex flex-col pr-4">
-            <span className="text-sm font-semibold text-slate-200">Concurrent transfers</span>
-            <span className="text-xs text-slate-500 mt-1 leading-normal">
+            <span className="text-xs font-semibold text-neutral-200">Concurrent transfers</span>
+            <span className="text-xs text-neutral-500 mt-0.5">
               Limit the number of active transfers allowed at the same time.
             </span>
           </div>
-          <div className="flex items-center gap-1 bg-slate-950/40 border border-white/5 rounded-xl p-1 select-none">
+          <div className="flex items-center gap-1 bg-neutral-950/60 border border-white/[0.08] rounded-lg p-1 select-none">
             {[2, 3, 5].map((val) => {
               const isActive = concurrentCount === val;
               return (
@@ -93,8 +91,8 @@ export const TransfersTab: React.FC = () => {
                   type="button"
                   onClick={() => setConcurrentCount(val)}
                   className={`
-                    px-3 py-1 text-xs font-semibold rounded-lg transition-all duration-150 cursor-pointer
-                    ${isActive ? `${accent.switchBg} text-white` : "text-slate-400 hover:text-slate-200"}
+                    px-2.5 py-1 text-xs font-medium rounded transition-colors duration-150 cursor-pointer
+                    ${isActive ? `${accent.switchBg} text-white` : "text-neutral-400 hover:text-neutral-200"}
                   `}
                 >
                   {val}

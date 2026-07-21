@@ -7,34 +7,34 @@ export const SecurityTab: React.FC = () => {
   const { settings, updateSetting } = useSettings();
 
   return (
-    <div className="flex flex-col gap-6 animate-[toast-slide-in_0.2s_ease-out]">
+    <div className="flex flex-col gap-5 animate-[backdrop-fade-in_0.15s_ease-out]">
       <div>
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 select-none">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-4 select-none">
           Security & Trust
         </h3>
 
         {/* Trusted Devices list */}
-        <div className="flex flex-col gap-2 pb-5 border-b border-white/5">
+        <div className="flex flex-col gap-2 pb-4 border-b border-white/[0.07]">
           <div className="flex flex-col">
-            <span className="text-sm font-semibold text-slate-200">Trusted devices</span>
-            <span className="text-xs text-slate-500 mt-1 leading-normal">
+            <span className="text-xs font-semibold text-neutral-200">Trusted devices</span>
+            <span className="text-xs text-neutral-500 mt-0.5">
               Devices that can send files without manual approval.
             </span>
           </div>
-          <div className="flex flex-col items-center justify-center p-8 bg-[#0a0f18]/40 border border-dashed border-white/5 rounded-2xl select-none mt-2">
-            <ShieldCheck className="text-slate-600 mb-2 w-7 h-7" strokeWidth={1.5} />
-            <span className="text-xs font-medium text-slate-400">No trusted devices yet</span>
-            <span className="text-[10px] text-slate-650 mt-0.5 leading-normal text-center max-w-[200px]">
+          <div className="flex flex-col items-center justify-center p-6 bg-neutral-950/40 border border-dashed border-white/[0.08] rounded-xl select-none mt-2">
+            <ShieldCheck className="text-neutral-500 mb-2 w-6 h-6" strokeWidth={1.5} />
+            <span className="text-xs font-medium text-neutral-300">No trusted devices yet</span>
+            <span className="text-[11px] text-neutral-500 mt-0.5 text-center max-w-[220px]">
               You can trust devices directly from incoming transfer prompts.
             </span>
           </div>
         </div>
 
         {/* Require Confirmation Switch */}
-        <div className="flex items-center justify-between py-4.5 border-b border-white/5">
+        <div className="flex items-center justify-between py-3.5 border-b border-white/[0.07]">
           <div className="flex flex-col pr-4">
-            <span className="text-sm font-semibold text-slate-200">Require confirmation</span>
-            <span className="text-xs text-slate-500 mt-1 leading-normal">
+            <span className="text-xs font-semibold text-neutral-200">Require confirmation</span>
+            <span className="text-xs text-neutral-500 mt-0.5">
               Always ask for approval before accepting incoming transfers.
             </span>
           </div>
@@ -42,10 +42,10 @@ export const SecurityTab: React.FC = () => {
         </div>
 
         {/* Auto accept switch (disabled placeholder) */}
-        <div className="flex items-center justify-between py-4.5 opacity-55 select-none">
+        <div className="flex items-center justify-between py-3.5 opacity-50 select-none">
           <div className="flex flex-col pr-4">
-            <span className="text-sm font-semibold text-slate-200">Auto accept trusted devices</span>
-            <span className="text-xs text-slate-500 mt-1 leading-normal">
+            <span className="text-xs font-semibold text-neutral-200">Auto accept trusted devices</span>
+            <span className="text-xs text-neutral-500 mt-0.5">
               Skip verification prompts for devices you have previously trusted.
             </span>
           </div>

@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { Heart } from "lucide-react";
 import { useSettings, ACCENT_COLOR_MAPS } from "../SettingsProvider";
 
 export const AboutTab: React.FC = () => {
@@ -9,64 +8,64 @@ export const AboutTab: React.FC = () => {
 
   const handleCheckUpdates = () => {
     setUpdateStatus("checking");
-    setTimeout(() => setUpdateStatus("latest"), 1500);
+    setTimeout(() => setUpdateStatus("latest"), 1200);
   };
 
   return (
-    <div className="flex flex-col gap-6 animate-[toast-slide-in_0.2s_ease-out]">
+    <div className="flex flex-col gap-5 animate-[backdrop-fade-in_0.15s_ease-out]">
       <div>
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 select-none">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-4 select-none">
           About DropFlow
         </h3>
 
         {/* Version info list */}
-        <div className="flex flex-col gap-3.5 pb-5 border-b border-white/5 select-none">
-          <div className="grid grid-cols-2 gap-4 text-sm bg-slate-950/20 border border-white/5 rounded-2xl p-4">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">DropFlow</span>
-              <span className="text-slate-200 font-semibold">v0.1.0</span>
+        <div className="flex flex-col gap-3.5 pb-4 border-b border-white/[0.07] select-none">
+          <div className="grid grid-cols-2 gap-3 text-xs bg-neutral-950/40 border border-white/[0.08] rounded-xl p-3.5">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">DropFlow</span>
+              <span className="text-neutral-200 font-medium">v0.1.0</span>
             </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">React</span>
-              <span className="text-slate-200 font-semibold">v19.1.0</span>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">React</span>
+              <span className="text-neutral-200 font-medium">v19.1.0</span>
             </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Tauri</span>
-              <span className="text-slate-200 font-semibold">v2.0.0</span>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">Tauri</span>
+              <span className="text-neutral-200 font-medium">v2.0.0</span>
             </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Platform</span>
-              <span className="text-slate-200 font-semibold">macOS (Tauri)</span>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">Platform</span>
+              <span className="text-neutral-200 font-medium">macOS (Tauri)</span>
             </div>
           </div>
         </div>
 
         {/* Check for updates option */}
-        <div className="flex items-center justify-between py-4.5">
+        <div className="flex items-center justify-between py-3.5">
           <div className="flex flex-col pr-4">
-            <span className="text-sm font-semibold text-slate-200">Check for updates</span>
-            <span className="text-xs text-slate-500 mt-1 leading-normal">
+            <span className="text-xs font-semibold text-neutral-200">Check for updates</span>
+            <span className="text-xs text-neutral-500 mt-0.5">
               Verify if a newer version of DropFlow is available.
             </span>
           </div>
-          <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <div className="flex flex-col items-end gap-1 shrink-0">
             <button
               type="button"
               onClick={handleCheckUpdates}
               disabled={updateStatus === "checking"}
               className={`
-                px-4 py-2.5 rounded-xl text-xs font-semibold select-none transition-all duration-150 border border-white/5
+                px-3 py-1.5 rounded-lg text-xs font-medium select-none transition-colors duration-150 border border-white/[0.06]
                 ${updateStatus === "checking"
-                  ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                  : `${accent.switchBg} hover:bg-opacity-90 text-white cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[var(--df-accent)]`
+                  ? "bg-neutral-800 text-neutral-500 cursor-not-allowed"
+                  : `${accent.switchBg} hover:opacity-90 text-white cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-blue-500`
                 }
               `}
             >
               {updateStatus === "checking" ? "Checking..." : "Check for Updates"}
             </button>
             {updateStatus === "latest" && (
-              <span className="text-[10px] text-emerald-400 font-semibold select-none animate-[toast-slide-in_0.2s_ease-out]">
-                Your app is up to date.
+              <span className="text-[10px] text-emerald-400 font-medium select-none animate-[backdrop-fade-in_0.15s_ease-out]">
+                Up to date.
               </span>
             )}
           </div>
@@ -74,10 +73,8 @@ export const AboutTab: React.FC = () => {
       </div>
 
       {/* Footer Credits */}
-      <div className="mt-8 flex items-center justify-center gap-1.5 text-xs text-slate-600 select-none">
-        <span>Made with</span>
-        <Heart size={10} className="text-red-500/60 fill-current" />
-        <span>locally-first</span>
+      <div className="mt-6 flex items-center justify-center text-xs text-neutral-600 select-none">
+        <span>DropFlow · Local-first file transfer utility</span>
       </div>
     </div>
   );
