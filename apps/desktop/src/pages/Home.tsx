@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Header from "../components/Header";
 import DeviceCard, { Device } from "../components/DeviceCard";
 import FileDropZone from "../components/FileDropZone";
@@ -90,6 +90,7 @@ const Home: React.FC = () => {
   const wasSettingsOpenRef = useRef(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [localUuid, setLocalUuid] = useState<string>("");
+  const discoveryEventRevision = useRef(0);
 
   // Production state starts clean with zero mock transfers
   const [recentTransfers, setRecentTransfers] = useState<RecentTransfer[]>([]);
@@ -109,37 +110,103 @@ const Home: React.FC = () => {
     invoke<string>("get_local_uuid").then(setLocalUuid).catch(console.error);
   }, []);
 
-  // Start mDNS discovery and setup listeners on mount
+  const reconcileDevices = useCallback((nextDevices: Device[]) => {
+    setDevices(nextDevices);
+    setSelectedDeviceId((selectedId) =>
+      selectedId && !nextDevices.some((device) => device.id === selectedId)
+        ? null
+        : selectedId,
+    );
+  }, []);
+
+  // Subscribe before browsing, then hydrate from the backend source of truth.
   useEffect(() => {
-    invoke("start_discovery").catch(console.error);
+    let disposed = false;
+    let unlistenDiscovered: (() => void) | undefined;
+    let unlistenLost: (() => void) | undefined;
 
-    let unlistenDiscovered: () => void;
-    let unlistenLost: () => void;
-
-    const setupListeners = async () => {
-      unlistenDiscovered = await listen<Device>("peer-discovered", (event) => {
-        const newDevice = event.payload;
-        setDevices((prev) => {
-          if (prev.some((d) => d.id === newDevice.id)) {
-            return prev.map((d) => (d.id === newDevice.id ? newDevice : d));
-          }
-          return [...prev, newDevice];
-        });
-      });
-
-      unlistenLost = await listen<string>("peer-lost", (event) => {
-        const lostId = event.payload;
-        setDevices((prev) => prev.filter((d) => d.id !== lostId));
+    const applyDiscoveredPeer = (newDevice: Device) => {
+      discoveryEventRevision.current += 1;
+      setDevices((previousDevices) => {
+        const existingIndex = previousDevices.findIndex((device) => device.id === newDevice.id);
+        if (existingIndex === -1) {
+          return [...previousDevices, newDevice];
+        }
+        return previousDevices.map((device) =>
+          device.id === newDevice.id ? newDevice : device,
+        );
       });
     };
 
-    setupListeners();
+    const applyLostPeer = (lostId: string) => {
+      discoveryEventRevision.current += 1;
+      setDevices((previousDevices) => previousDevices.filter((device) => device.id !== lostId));
+      setSelectedDeviceId((selectedId) => (selectedId === lostId ? null : selectedId));
+    };
+
+    const hydratePeers = async () => {
+      for (let attempt = 0; attempt < 2 && !disposed; attempt += 1) {
+        const revisionBeforeSnapshot = discoveryEventRevision.current;
+        const snapshot = await invoke<Device[]>("get_current_peers");
+        if (disposed) return;
+        if (revisionBeforeSnapshot === discoveryEventRevision.current) {
+          reconcileDevices(snapshot);
+          return;
+        }
+      }
+    };
+
+    const setupDiscovery = async () => {
+      try {
+        const discoveredUnlisten = await listen<Device>(
+          "peer-discovered",
+          (event) => {
+            applyDiscoveredPeer(event.payload);
+          },
+        );
+        unlistenDiscovered = discoveredUnlisten;
+
+        if (disposed) {
+          discoveredUnlisten();
+          unlistenDiscovered = undefined;
+          return;
+        }
+
+        const lostUnlisten = await listen<string>("peer-lost", (event) => {
+          applyLostPeer(event.payload);
+        });
+
+        if (disposed) {
+          discoveredUnlisten();
+          lostUnlisten();
+          unlistenDiscovered = undefined;
+          return;
+        }
+
+        unlistenLost = lostUnlisten;
+        await invoke("start_discovery");
+        await hydratePeers();
+      } catch (error) {
+        unlistenDiscovered?.();
+        unlistenLost?.();
+        unlistenDiscovered = undefined;
+        unlistenLost = undefined;
+        throw error;
+      }
+    };
+
+    setupDiscovery().catch((error) => {
+      if (!disposed) {
+        console.error("Failed to initialize discovery", error);
+      }
+    });
 
     return () => {
-      if (unlistenDiscovered) unlistenDiscovered();
-      if (unlistenLost) unlistenLost();
+      disposed = true;
+      unlistenDiscovered?.();
+      unlistenLost?.();
     };
-  }, []);
+  }, [reconcileDevices]);
 
   // Sync settings visibility and deviceName with mDNS backend advertisement
   useEffect(() => {

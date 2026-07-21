@@ -6,12 +6,21 @@ import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
 export type DeviceType = "laptop" | "desktop" | "phone";
 export type DeviceStatus = "online" | "recently-seen" | "offline";
 
+export interface DeviceAddress {
+  address: string;
+  family: "ipv4" | "ipv6";
+  interface?: string | null;
+}
+
 export interface Device {
   id: string;
   name: string;
-  type: DeviceType;
-  status: DeviceStatus;
+  type: DeviceType | string;
+  status: DeviceStatus | string;
   lastSeen: string;
+  addresses: DeviceAddress[];
+  port: number;
+  version: string;
 }
 
 interface DeviceCardProps {
@@ -45,6 +54,13 @@ const IconPhone: React.FC = () => (
   </svg>
 );
 
+const IconDevice: React.FC = () => (
+  <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="3" y="4" width="18" height="14" rx="2" />
+    <path d="M8 21h8M12 18v3" />
+  </svg>
+);
+
 const DEVICE_ICONS: Record<DeviceType, React.FC> = {
   laptop: IconLaptop,
   desktop: IconDesktop,
@@ -56,6 +72,10 @@ const DEVICE_TYPE_LABELS: Record<DeviceType, string> = {
   desktop: "Desktop",
   phone: "Mobile",
 };
+
+function isKnownDeviceType(type: string): type is DeviceType {
+  return type in DEVICE_ICONS;
+}
 
 // ─── Checkmark badge ──────────────────────────────────────────────────────────
 
@@ -96,8 +116,10 @@ const STATUS_CONFIG: Record<
 // ─── DeviceCard ───────────────────────────────────────────────────────────────
 
 const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) => {
-  const Icon = DEVICE_ICONS[device.type];
-  const status = STATUS_CONFIG[device.status];
+  const deviceType = isKnownDeviceType(device.type) ? device.type : undefined;
+  const Icon = deviceType ? DEVICE_ICONS[deviceType] : IconDevice;
+  const typeLabel = deviceType ? DEVICE_TYPE_LABELS[deviceType] : "Device";
+  const status = STATUS_CONFIG[device.status as DeviceStatus] ?? STATUS_CONFIG.offline;
   const { settings } = useSettings();
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
 
@@ -106,7 +128,7 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
       id={`device-card-${device.id}`}
       role="radio"
       aria-checked={selected}
-      aria-label={`${device.name}, ${DEVICE_TYPE_LABELS[device.type]}, ${status.label}`}
+      aria-label={`${device.name}, ${typeLabel}, ${status.label}`}
       onClick={() => onSelect(device.id)}
       className={[
         "group relative flex min-h-[160px] w-full cursor-pointer select-none flex-col gap-3.5 rounded-xl border p-4 text-left outline-none",
@@ -146,7 +168,7 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
           {device.name}
         </span>
         <span className="text-xs text-neutral-500">
-          {DEVICE_TYPE_LABELS[device.type]}
+          {typeLabel}
         </span>
       </div>
 
