@@ -4,5 +4,5 @@ pub mod receiver;
 pub mod security;
 pub mod sender;
 
-pub use engine::{get_receive_dir, send_files, TransferState};
+pub use engine::{get_receive_dir, get_receiver_port, send_files, TransferState};
 pub use receiver::TransferReceiver;

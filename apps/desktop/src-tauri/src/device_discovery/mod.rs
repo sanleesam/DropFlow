@@ -608,14 +608,27 @@ pub fn get_system_computer_name() -> String {
 #[tauri::command]
 pub fn update_advertisement(
     state: State<'_, DiscoveryState>,
+    transfer_state: State<'_, crate::transfer_manager::TransferState>,
     device_id: String,
     device_name: String,
     device_type: String,
     port: u16,
 ) -> Result<(), String> {
+    let effective_port = if port == 0 {
+        0
+    } else {
+        transfer_state
+            .receiver
+            .lock()
+            .map_err(|e| e.to_string())?
+            .as_ref()
+            .map(|r| r.port())
+            .unwrap_or(port)
+    };
+
     state
         .engine
-        .update_advertisement(&device_id, &device_name, &device_type, port)
+        .update_advertisement(&device_id, &device_name, &device_type, effective_port)
 }
 
 #[tauri::command]

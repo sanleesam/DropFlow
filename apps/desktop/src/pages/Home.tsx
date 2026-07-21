@@ -223,7 +223,7 @@ const Home: React.FC = () => {
         deviceId: localUuid,
         deviceName: settings.deviceName,
         deviceType: "laptop",
-        port: 42382,
+        port: 1, // Non-zero value instructing Rust to advertise bound receiver port
       }).catch(console.error);
     } else {
       invoke("update_advertisement", {
@@ -246,7 +246,7 @@ const Home: React.FC = () => {
       }
 
       const peerAddress = targetDevice.addresses[0]?.address || "127.0.0.1";
-      const peerPort = targetDevice.port > 0 ? targetDevice.port : 42382;
+      const peerPort = targetDevice.port;
 
       // Extract native absolute filesystem paths directly from SelectedFilePayload
       const filePaths = selectedFiles.map((f) => f.path);

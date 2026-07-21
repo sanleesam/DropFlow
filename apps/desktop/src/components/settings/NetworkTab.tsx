@@ -1,9 +1,17 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useSettings } from "../SettingsProvider";
 import { Switch } from "../SettingsModal";
+import { invoke } from "@tauri-apps/api/core";
 
 export const NetworkTab: React.FC = () => {
   const { settings, updateSetting } = useSettings();
+  const [boundPort, setBoundPort] = useState<number | string>("Dynamic");
+
+  useEffect(() => {
+    invoke<number>("get_receiver_port")
+      .then(setBoundPort)
+      .catch(() => setBoundPort("Dynamic"));
+  }, []);
 
   return (
     <div className="flex flex-col gap-5 animate-[backdrop-fade-in_0.15s_ease-out]">
@@ -38,29 +46,16 @@ export const NetworkTab: React.FC = () => {
           />
         </div>
 
-        {/* Local IP Address */}
-        <div className="flex items-center justify-between py-3.5 border-b border-white/[0.07] select-none">
-          <div className="flex flex-col pr-4">
-            <span className="text-xs font-semibold text-neutral-200">Local IP address</span>
-            <span className="text-xs text-neutral-500 mt-0.5">
-              Your local IPv4 address on this network.
-            </span>
-          </div>
-          <div className="font-mono text-xs text-neutral-400 bg-neutral-950/60 border border-white/[0.08] rounded-md px-2.5 py-1">
-            192.168.1.142
-          </div>
-        </div>
-
         {/* Port number */}
         <div className="flex items-center justify-between py-3.5 border-b border-white/[0.07] select-none">
           <div className="flex flex-col pr-4">
-            <span className="text-xs font-semibold text-neutral-200">mDNS Port</span>
+            <span className="text-xs font-semibold text-neutral-200">TCP Transfer Port</span>
             <span className="text-xs text-neutral-500 mt-0.5">
-              The local network port advertised for DropFlow.
+              Dynamic local network port assigned for receiving transfers.
             </span>
           </div>
           <div className="font-mono text-xs text-neutral-400 bg-neutral-950/60 border border-white/[0.08] rounded-md px-2.5 py-1">
-            42382
+            {boundPort}
           </div>
         </div>
 

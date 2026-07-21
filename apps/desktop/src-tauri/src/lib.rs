@@ -45,6 +45,7 @@ pub fn run() {
             device_discovery::get_system_computer_name,
             transfer_manager::engine::send_files,
             transfer_manager::engine::get_receive_dir,
+            transfer_manager::engine::get_receiver_port,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
