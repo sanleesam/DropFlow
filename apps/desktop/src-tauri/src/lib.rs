@@ -14,6 +14,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let local_uuid = device_discovery::get_or_create_uuid(app.handle());
             let discovery_engine = device_discovery::MdnsDiscoveryEngine::new(local_uuid.clone())

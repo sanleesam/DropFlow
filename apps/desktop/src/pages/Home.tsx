@@ -78,6 +78,7 @@ interface RecentTransfer {
   size: string;
   timestamp: string;
   status: "completed" | "failed";
+  direction: "send" | "receive";
 }
 
 const Home: React.FC = () => {
@@ -88,6 +89,7 @@ const Home: React.FC = () => {
     id: string;
     deviceName: string;
     fileName: string;
+    direction: "send" | "receive";
   } | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const wasSettingsOpenRef = useRef(false);
@@ -123,6 +125,41 @@ const Home: React.FC = () => {
         ? null
         : selectedId,
     );
+  }, []);
+
+  // Auto-detect incoming receive transfers to display active receiving card
+  useEffect(() => {
+    let unlistenProgress: (() => void) | undefined;
+    const setupReceiveListener = async () => {
+      try {
+        unlistenProgress = await listen<any>("transfer-progress", (event) => {
+          const payload = event.payload;
+          const fileName = payload.fileName ?? payload.file_name ?? "Incoming File";
+          const deviceName = payload.deviceName ?? payload.device_name ?? "Peer Device";
+          const sessionId = payload.sessionId ?? payload.session_id ?? `rx-${Date.now()}`;
+
+          setActiveTransfer((current) => {
+            if (!current) {
+              return {
+                id: sessionId,
+                deviceName,
+                fileName,
+                direction: "receive",
+              };
+            }
+            return current;
+          });
+        });
+      } catch (err) {
+        console.error("[Home] Failed to setup receive listener:", err);
+      }
+    };
+
+    setupReceiveListener();
+
+    return () => {
+      if (unlistenProgress) unlistenProgress();
+    };
   }, []);
 
   // Subscribe before browsing, then hydrate from the backend source of truth.
@@ -239,6 +276,7 @@ const Home: React.FC = () => {
     setActiveTransfer((currentActive) => {
       if (currentActive && !completedTransferIdsRef.current.has(currentActive.id)) {
         completedTransferIdsRef.current.add(currentActive.id);
+        const direction = payload?.direction || currentActive.direction || "send";
         const newTransfer: RecentTransfer = {
           id: currentActive.id,
           fileName: payload?.fileName || payload?.file_name || currentActive.fileName,
@@ -246,6 +284,7 @@ const Home: React.FC = () => {
           size: payload?.size || "Complete",
           timestamp: payload?.timestamp || "Just now",
           status: "completed",
+          direction,
         };
         setRecentTransfers((prev) => [newTransfer, ...prev]);
       }
@@ -275,6 +314,7 @@ const Home: React.FC = () => {
         id: txId,
         deviceName: targetDevice.name,
         fileName: mainFileName,
+        direction: "send",
       });
 
       try {
@@ -294,6 +334,7 @@ const Home: React.FC = () => {
           deviceName: targetDevice.name,
           size: "Complete",
           timestamp: "Just now",
+          direction: "send",
         });
       } catch (err: any) {
         console.error("[Home] Send failed:", err);
@@ -364,6 +405,7 @@ const Home: React.FC = () => {
             key={activeTransfer.id}
             deviceName={activeTransfer.deviceName}
             fileName={activeTransfer.fileName}
+            direction={activeTransfer.direction}
             onClose={() => setActiveTransfer(null)}
             onComplete={handleTransferComplete}
           />
@@ -381,7 +423,9 @@ const Home: React.FC = () => {
                 <div key={tx.id} className="flex items-center justify-between px-3 py-2 hover:bg-white/[0.02] transition-colors duration-150">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-neutral-800 border border-white/[0.06] ${
-                      tx.status === "completed" ? "text-emerald-400" : "text-red-400"
+                      tx.status === "completed" 
+                        ? tx.direction === "receive" ? "text-blue-400" : "text-emerald-400" 
+                        : "text-red-400"
                     }`}>
                       <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
@@ -390,8 +434,9 @@ const Home: React.FC = () => {
                     </span>
                     <div className="flex flex-col min-w-0">
                       <span className="text-xs font-medium text-neutral-200 truncate leading-tight">{tx.fileName}</span>
-                      <span className="text-[11px] text-neutral-500 mt-0.5 leading-tight">
-                        {tx.status === "completed" ? "Sent to" : "Failed sending to"} <span className="text-neutral-300 font-medium">{tx.deviceName}</span>
+                      <span className="text-[11px] text-neutral-500 mt-0.5 leading-tight flex items-center gap-1">
+                        <span>{tx.direction === "receive" ? "↓ Received from" : "↑ Sent to"}</span>
+                        <span className="text-neutral-300 font-medium">{tx.deviceName}</span>
                       </span>
                     </div>
                   </div>
@@ -403,7 +448,9 @@ const Home: React.FC = () => {
                     </div>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
                       tx.status === "completed" 
-                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                        ? tx.direction === "receive"
+                          ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                          : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
                         : "bg-red-500/10 text-red-400 border-red-500/20"
                     }`}>
                       {tx.status === "completed" ? "Completed" : "Failed"}
