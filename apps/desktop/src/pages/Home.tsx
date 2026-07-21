@@ -4,7 +4,7 @@ import DeviceCard, { Device } from "../components/DeviceCard";
 import FileDropZone from "../components/FileDropZone";
 import { TransferProgress } from "../components/TransferProgress";
 import { SettingsModal } from "../components/SettingsModal";
-import { useSettings, ACCENT_COLOR_MAPS } from "../components/SettingsProvider";
+import { useSettings } from "../components/SettingsProvider";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -13,19 +13,20 @@ import { listen } from "@tauri-apps/api/event";
 interface SectionProps {
   id: string;
   title: string;
-  icon: React.ReactNode;
-  hint?: string;
+  icon?: React.ReactNode;
   children?: React.ReactNode;
 }
 
-const Section: React.FC<SectionProps> = ({ id, title, icon, hint, children }) => (
+const Section: React.FC<SectionProps> = ({ id, title, icon, children }) => (
   <section id={id} aria-labelledby={`${id}-heading`} className="df-section">
     {/* Section header */}
     <div className="df-section-heading">
       <div className="df-section-title">
-        <span className="df-section-icon">
-          {icon}
-        </span>
+        {icon && (
+          <span className="df-section-icon">
+            {icon}
+          </span>
+        )}
         <h2
           id={`${id}-heading`}
           className="df-section-label"
@@ -33,7 +34,6 @@ const Section: React.FC<SectionProps> = ({ id, title, icon, hint, children }) =>
           {title}
         </h2>
       </div>
-      {hint && <span className="df-section-hint">{hint}</span>}
     </div>
 
     {/* Section content */}
@@ -81,7 +81,6 @@ interface RecentTransfer {
 
 const Home: React.FC = () => {
   const { settings } = useSettings();
-  const accent = ACCENT_COLOR_MAPS[settings.accentColor];
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [activeTransfer, setActiveTransfer] = useState<{
     deviceName: string;
@@ -198,29 +197,10 @@ const Home: React.FC = () => {
           msOverflowStyle: "none",
         }}
       >
-        <div className="mb-7 flex items-end justify-between gap-4 select-none" aria-label="Workspace overview">
-          <div>
-            <p className={`mb-1.5 text-[11px] font-semibold uppercase tracking-wider ${accent.progressIconText}`}>
-              Local network
-            </p>
-            <h1 className="m-0 text-2xl font-semibold tracking-tight text-neutral-100 sm:text-3xl">
-              Send files instantly.
-            </h1>
-            <p className="mt-1.5 max-w-xl text-xs leading-5 text-neutral-400">
-              Select a device on your local network, add your files, and start transferring directly.
-            </p>
-          </div>
-          <div className="hidden rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400 sm:flex sm:items-center sm:gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            Ready
-          </div>
-        </div>
-
         {/* ── Nearby Devices ── */}
         <Section
           id="nearby-devices"
-          title="Nearby Devices"
-          hint="On your local network"
+          title="Nearby devices"
           icon={<IconRadar />}
         >
           <div
@@ -229,7 +209,7 @@ const Home: React.FC = () => {
             className="w-full"
           >
             {devices.length > 0 ? (
-              <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
                 {devices.map((device) => (
                   <DeviceCard
                     key={device.id}
@@ -240,18 +220,11 @@ const Home: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <div className="flex w-full flex-col items-center justify-center rounded-xl border border-white/[0.07] bg-neutral-900/40 px-6 py-10 text-center">
-                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-neutral-400">
-                  <IconRadar />
-                </div>
-                <p className="text-sm font-medium text-neutral-200">Looking for nearby devices</p>
-                <p className="mt-1 max-w-xs text-xs text-neutral-500 leading-relaxed">
-                  Keep DropFlow open on another device connected to this Wi-Fi network.
+              <div className="flex w-full flex-col items-center justify-center rounded-xl border border-white/[0.07] bg-neutral-900/30 px-4 py-5 text-center select-none">
+                <p className="text-xs font-medium text-neutral-300">Looking for devices…</p>
+                <p className="mt-1 text-[11px] text-neutral-500">
+                  Make sure DropFlow is open on your other device.
                 </p>
-                <span className={`mt-4 flex items-center gap-2 text-[11px] font-medium ${accent.progressIconText}`}>
-                  <span className={`h-1.5 w-1.5 animate-pulse rounded-full ${accent.progressBgDot}`} />
-                  Scanning local network
-                </span>
               </div>
             )}
           </div>
@@ -260,8 +233,7 @@ const Home: React.FC = () => {
         {/* ── Send Files ── */}
         <Section
           id="send-files"
-          title="Send Files"
-          hint="Fast & encrypted locally"
+          title="Send files"
           icon={<IconUpload />}
         >
           <FileDropZone selectedDeviceId={selectedDeviceId} onSend={handleSend} />
@@ -280,32 +252,31 @@ const Home: React.FC = () => {
         {/* ── Recent Transfers ── */}
         <Section
           id="recent-transfers"
-          title="Recent Transfers"
-          hint="Latest session activity"
+          title="Recent transfers"
           icon={<IconClock />}
         >
           {recentTransfers.length > 0 ? (
             <div className="w-full flex flex-col divide-y divide-white/[0.06] rounded-xl border border-white/[0.07] bg-neutral-900/40 overflow-hidden">
               {recentTransfers.map((tx) => (
-                <div key={tx.id} className="flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors duration-150">
+                <div key={tx.id} className="flex items-center justify-between px-3.5 py-2.5 hover:bg-white/[0.02] transition-colors duration-150">
                   <div className="flex items-center gap-3 min-w-0">
-                    <span className={`flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg bg-neutral-800 border border-white/[0.06] ${
+                    <span className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-md bg-neutral-800 border border-white/[0.06] ${
                       tx.status === "completed" ? "text-emerald-400" : "text-red-400"
                     }`}>
-                      <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                         <polyline points="14 2 14 8 20 8" />
                       </svg>
                     </span>
                     <div className="flex flex-col min-w-0">
-                      <span className="text-sm font-medium text-neutral-200 truncate leading-tight">{tx.fileName}</span>
+                      <span className="text-xs font-medium text-neutral-200 truncate leading-tight">{tx.fileName}</span>
                       <span className="text-[11px] text-neutral-500 mt-0.5 leading-tight">
                         {tx.status === "completed" ? "Sent to" : "Failed sending to"} <span className="text-neutral-300 font-medium">{tx.deviceName}</span>
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4 flex-shrink-0 text-right select-none">
+                  <div className="flex items-center gap-3 flex-shrink-0 text-right select-none">
                     <div className="flex flex-col items-end">
                       <span className="text-xs text-neutral-400 font-mono">{tx.size}</span>
                       <span className="text-[10px] text-neutral-500 mt-0.5">{tx.timestamp}</span>
@@ -322,9 +293,9 @@ const Home: React.FC = () => {
               ))}
             </div>
           ) : (
-            <div className="flex w-full flex-col items-center justify-center rounded-xl border border-white/[0.07] bg-neutral-900/20 py-8 text-center select-none">
-              <p className="text-sm font-medium text-neutral-400">No transfers yet</p>
-              <p className="mt-1 text-xs text-neutral-500">Completed transfers will appear here.</p>
+            <div className="flex w-full flex-col items-center justify-center rounded-xl border border-white/[0.07] bg-neutral-900/20 py-5 text-center select-none">
+              <p className="text-xs font-medium text-neutral-400">No transfers yet</p>
+              <p className="mt-0.5 text-[11px] text-neutral-500">Completed transfers will appear here.</p>
             </div>
           )}
         </Section>

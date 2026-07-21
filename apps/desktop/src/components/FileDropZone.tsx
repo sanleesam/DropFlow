@@ -50,7 +50,7 @@ function fileIconColor(name: string): string {
 const IconFile: React.FC<{ name: string }> = ({ name }) => (
   <svg
     viewBox="0 0 24 24"
-    className={`w-4.5 h-4.5 flex-shrink-0 ${fileIconColor(name)}`}
+    className={`w-4 h-4 flex-shrink-0 ${fileIconColor(name)}`}
     fill="none"
     stroke="currentColor"
     strokeWidth="1.6"
@@ -68,7 +68,7 @@ const IconFile: React.FC<{ name: string }> = ({ name }) => (
 const IconUploadLarge: React.FC = () => (
   <svg
     viewBox="0 0 48 48"
-    className="w-10 h-10"
+    className="w-8 h-8"
     fill="none"
     stroke="currentColor"
     strokeWidth="1.5"
@@ -168,7 +168,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
   );
 
   return (
-    <div className="flex w-full flex-col gap-3">
+    <div className="flex w-full flex-col gap-2.5">
       {/* Hidden file input */}
       <input
         ref={inputRef}
@@ -192,8 +192,8 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         className={[
-          "relative flex min-h-[190px] flex-col items-center justify-center gap-3 overflow-hidden",
-          "rounded-xl border border-dashed px-6 py-8",
+          "relative flex min-h-[130px] flex-col items-center justify-center gap-2 overflow-hidden",
+          "rounded-xl border border-dashed px-4 py-5",
           "cursor-pointer select-none outline-none",
           "transition-all duration-150 ease-out",
           isDraggingOver ? accent.dropZoneActive : accent.dropZoneHover,
@@ -211,18 +211,26 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
         </span>
 
         {/* Copy */}
-        <div className="flex flex-col items-center gap-0.5 text-center">
+        <div className="flex items-center gap-1.5 text-center text-xs">
           <span
             className={[
-              "text-sm font-medium transition-colors duration-150",
+              "font-medium transition-colors duration-150",
               isDraggingOver ? accent.dropZoneTitle : "text-neutral-200",
             ].join(" ")}
           >
             {isDraggingOver ? "Release to add files" : "Drop files here"}
           </span>
-          <span className="text-xs text-neutral-500">
-            or click to browse · Files stay on your local network
-          </span>
+          <span className="text-neutral-500">or</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onZoneClick();
+            }}
+            className="text-blue-400 hover:text-blue-300 font-medium underline underline-offset-2 cursor-pointer outline-none"
+          >
+            choose files
+          </button>
         </div>
       </div>
 
@@ -236,17 +244,17 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
             {files.map(({ uid: id, file }) => (
               <li
                 key={id}
-                className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors duration-150 hover:bg-white/[0.03]"
+                className="group flex items-center gap-3 px-3 py-2 transition-colors duration-150 hover:bg-white/[0.03]"
               >
                 {/* File icon */}
                 <IconFile name={file.name} />
 
                 {/* Name + size */}
                 <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                  <span className="text-sm text-neutral-200 font-medium truncate leading-tight">
+                  <span className="text-xs text-neutral-200 font-medium truncate leading-tight">
                     {file.name}
                   </span>
-                  <span className="text-xs text-neutral-500 leading-tight">
+                  <span className="text-[10px] text-neutral-500 leading-tight">
                     {formatBytes(file.size)}
                   </span>
                 </div>
@@ -260,7 +268,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
                     removeFile(id);
                   }}
                   className="
-                    flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md
+                    flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md
                     text-neutral-500 opacity-0 group-hover:opacity-100
                     hover:text-red-400 hover:bg-red-500/10
                     transition-all duration-150
@@ -269,7 +277,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
                   "
                 >
                   <X
-                    size={13}
+                    size={12}
                     strokeWidth={2}
                     aria-hidden="true"
                     className="block"
@@ -282,14 +290,14 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
       )}
 
       {/* ── Send button + helper ── */}
-      <div className="flex flex-col items-center gap-2 pt-1">
+      <div className="flex flex-col items-center gap-1.5 pt-0.5">
         <button
           id="send-files-btn"
           type="button"
           onClick={handleSend}
           aria-disabled={!canSend}
           className={[
-            "w-full max-w-xs rounded-lg px-5 py-2.5 text-sm font-medium",
+            "w-full max-w-xs rounded-lg px-4 py-2 text-xs font-medium",
             "transition-all duration-150 ease-out",
             "focus-visible:outline-none " + accent.ringFocus,
             canSend
@@ -313,13 +321,9 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
           <p
             role="status"
             aria-live="polite"
-            className="text-xs text-neutral-400 text-center select-none"
+            className="text-[11px] text-neutral-400 text-center select-none"
           >
-            {!hasDevice && !hasFiles
-              ? "Select a device and choose files."
-              : !hasDevice
-              ? "Select a device above to continue."
-              : "Choose at least one file to send."}
+            Select a device and files to continue
           </p>
         )}
       </div>
