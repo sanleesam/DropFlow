@@ -62,7 +62,9 @@ pub fn sanitize_relative_path(raw_path: &str) -> Result<PathBuf, String> {
                 safe_path.push(clean_name);
             }
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(format!("Illegal path component in relative path: {trimmed}"));
+                return Err(format!(
+                    "Illegal path component in relative path: {trimmed}"
+                ));
             }
             Component::CurDir => {}
         }
@@ -106,6 +108,40 @@ pub fn verify_safe_target_path(base_dir: &Path, rel_path: &Path) -> Result<PathB
     Ok(target)
 }
 
+/// Resolves filename collision if a file already exists, appending ` (1)`, ` (2)`, etc.
+pub fn resolve_collision_path(target_path: &Path) -> PathBuf {
+    if !target_path.exists() {
+        return target_path.to_path_buf();
+    }
+    let parent = target_path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = target_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
+
+    let (stem, ext) = match file_name.rfind('.') {
+        Some(idx) if idx > 0 => (&file_name[..idx], &file_name[idx..]),
+        _ => (file_name, ""),
+    };
+
+    let mut counter = 1;
+    loop {
+        let candidate_name = format!("{stem} ({counter}){ext}");
+        let candidate_path = parent.join(candidate_name);
+        if !candidate_path.exists() {
+            return candidate_path;
+        }
+        counter += 1;
+    }
+}
+
+/// Appends `.dropflow-part` to target file path for temporary partial writes.
+pub fn get_part_file_path(target_path: &Path) -> PathBuf {
+    let mut os_string = target_path.as_os_str().to_os_string();
+    os_string.push(".dropflow-part");
+    PathBuf::from(os_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,7 +150,10 @@ mod tests {
     fn test_sanitize_filename_basic() {
         assert_eq!(sanitize_filename("test.png"), "test.png");
         assert_eq!(sanitize_filename("../../etc/passwd"), "passwd");
-        assert_eq!(sanitize_filename("C:\\Windows\\system32\\cmd.exe"), "cmd.exe");
+        assert_eq!(
+            sanitize_filename("C:\\Windows\\system32\\cmd.exe"),
+            "cmd.exe"
+        );
         assert_eq!(sanitize_filename("  "), "unnamed_file");
         assert_eq!(sanitize_filename("bad:name?.txt"), "bad_name_.txt");
     }
@@ -127,7 +166,10 @@ mod tests {
         assert!(sanitize_relative_path("folder/../../secret.txt").is_err());
 
         let clean = sanitize_relative_path("photos/2026/vacation.jpg").unwrap();
-        assert_eq!(clean, PathBuf::from("photos").join("2026").join("vacation.jpg"));
+        assert_eq!(
+            clean,
+            PathBuf::from("photos").join("2026").join("vacation.jpg")
+        );
     }
 
     #[test]
@@ -136,5 +178,12 @@ mod tests {
         let safe_rel = PathBuf::from("docs/report.pdf");
         let target = verify_safe_target_path(&base, &safe_rel).unwrap();
         assert_eq!(target, base.join("docs/report.pdf"));
+    }
+
+    #[test]
+    fn test_part_file_path() {
+        let target = PathBuf::from("/tmp/test.jpg");
+        let part = get_part_file_path(&target);
+        assert_eq!(part, PathBuf::from("/tmp/test.jpg.dropflow-part"));
     }
 }

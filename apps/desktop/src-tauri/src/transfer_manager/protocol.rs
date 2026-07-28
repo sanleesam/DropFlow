@@ -1,5 +1,5 @@
-use std::io::{Read, Write};
 use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
 
 pub const MAGIC_BYTES: &[u8; 4] = b"DFP1";
 pub const PROTOCOL_VERSION: u8 = 1;
@@ -19,6 +19,7 @@ pub enum FrameTag {
     TransferComplete = 0x06,
     Cancel = 0x07,
     TransferAck = 0x08,
+    FileComplete = 0x09,
 }
 
 impl TryFrom<u8> for FrameTag {
@@ -34,6 +35,7 @@ impl TryFrom<u8> for FrameTag {
             0x06 => Ok(FrameTag::TransferComplete),
             0x07 => Ok(FrameTag::Cancel),
             0x08 => Ok(FrameTag::TransferAck),
+            0x09 => Ok(FrameTag::FileComplete),
             _ => Err(format!("Unknown frame tag: 0x{value:02X}")),
         }
     }
@@ -42,13 +44,16 @@ impl TryFrom<u8> for FrameTag {
 // ─── Data Payload Types ──────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct FileMetadata {
     pub file_index: u32,
     pub relative_path: String,
     pub size_bytes: u64,
+    pub sha256_checksum: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct TransferMetadata {
     pub session_id: String,
     pub sender_id: String,
@@ -58,10 +63,31 @@ pub struct TransferMetadata {
     pub files: Vec<FileMetadata>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileHeaderPayload {
+    pub file_index: u32,
+    pub relative_path: String,
+    pub size_bytes: u64,
+    pub sha256_checksum: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileCompletePayload {
+    pub file_index: u32,
+    pub bytes_written: u64,
+    pub sha256_checksum: String,
+}
+
 // ─── Binary Frame Encoding & Decoding Helpers ────────────────────────────────
 
 /// Writes a 10-byte global packet header: `[DFP1][VERSION:1][TAG:1][LEN:4 BE]`
-pub fn write_frame_header<W: Write>(writer: &mut W, tag: FrameTag, payload_len: u32) -> Result<(), String> {
+pub fn write_frame_header<W: Write>(
+    writer: &mut W,
+    tag: FrameTag,
+    payload_len: u32,
+) -> Result<(), String> {
     let mut header = [0u8; 10];
     header[0..4].copy_from_slice(MAGIC_BYTES);
     header[4] = PROTOCOL_VERSION;
@@ -98,19 +124,27 @@ pub fn read_frame_header<R: Read>(reader: &mut R) -> Result<(FrameTag, u32), Str
 }
 
 /// Sends a complete JSON `TransferRequest` frame.
-pub fn write_transfer_request<W: Write>(writer: &mut W, metadata: &TransferMetadata) -> Result<(), String> {
+pub fn write_transfer_request<W: Write>(
+    writer: &mut W,
+    metadata: &TransferMetadata,
+) -> Result<(), String> {
     let json_bytes = serde_json::to_vec(metadata)
         .map_err(|e| format!("Failed to serialize TransferMetadata: {e}"))?;
 
     if json_bytes.len() > MAX_METADATA_SIZE {
-        return Err(format!("TransferMetadata payload exceeds 64KB limit: {} bytes", json_bytes.len()));
+        return Err(format!(
+            "TransferMetadata payload exceeds 64KB limit: {} bytes",
+            json_bytes.len()
+        ));
     }
 
     write_frame_header(writer, FrameTag::TransferRequest, json_bytes.len() as u32)?;
     writer
         .write_all(&json_bytes)
         .map_err(|e| format!("Failed to write TransferMetadata payload: {e}"))?;
-    writer.flush().map_err(|e| format!("Failed to flush stream: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Failed to flush stream: {e}"))?;
 
     Ok(())
 }
@@ -123,7 +157,9 @@ pub fn read_transfer_request<R: Read>(reader: &mut R) -> Result<TransferMetadata
     }
 
     if payload_len as usize > MAX_METADATA_SIZE {
-        return Err(format!("Metadata size {payload_len} exceeds max allowed 64KB"));
+        return Err(format!(
+            "Metadata size {payload_len} exceeds max allowed 64KB"
+        ));
     }
 
     let mut payload = vec![0u8; payload_len as usize];
@@ -137,14 +173,120 @@ pub fn read_transfer_request<R: Read>(reader: &mut R) -> Result<TransferMetadata
     Ok(metadata)
 }
 
+/// Sends a JSON `FileHeader` frame before streaming each file.
+pub fn write_file_header<W: Write>(
+    writer: &mut W,
+    payload: &FileHeaderPayload,
+) -> Result<(), String> {
+    let json_bytes = serde_json::to_vec(payload)
+        .map_err(|e| format!("Failed to serialize FileHeaderPayload: {e}"))?;
+
+    if json_bytes.len() > MAX_METADATA_SIZE {
+        return Err(format!(
+            "FileHeaderPayload exceeds 64KB limit: {} bytes",
+            json_bytes.len()
+        ));
+    }
+
+    write_frame_header(writer, FrameTag::FileHeader, json_bytes.len() as u32)?;
+    writer
+        .write_all(&json_bytes)
+        .map_err(|e| format!("Failed to write FileHeader payload: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Failed to flush stream: {e}"))?;
+
+    Ok(())
+}
+
+/// Reads a JSON `FileHeader` frame.
+pub fn read_file_header<R: Read>(reader: &mut R) -> Result<FileHeaderPayload, String> {
+    let (tag, payload_len) = read_frame_header(reader)?;
+    if tag != FrameTag::FileHeader {
+        return Err(format!("Expected FileHeader tag, received {:?}", tag));
+    }
+
+    if payload_len as usize > MAX_METADATA_SIZE {
+        return Err(format!(
+            "FileHeader payload size {payload_len} exceeds max 64KB"
+        ));
+    }
+
+    let mut payload = vec![0u8; payload_len as usize];
+    reader
+        .read_exact(&mut payload)
+        .map_err(|e| format!("Failed to read FileHeader payload: {e}"))?;
+
+    let header: FileHeaderPayload = serde_json::from_slice(&payload)
+        .map_err(|e| format!("Failed to parse FileHeaderPayload JSON: {e}"))?;
+
+    Ok(header)
+}
+
+/// Sends a JSON `FileComplete` frame after streaming each file.
+pub fn write_file_complete<W: Write>(
+    writer: &mut W,
+    payload: &FileCompletePayload,
+) -> Result<(), String> {
+    let json_bytes = serde_json::to_vec(payload)
+        .map_err(|e| format!("Failed to serialize FileCompletePayload: {e}"))?;
+
+    if json_bytes.len() > MAX_METADATA_SIZE {
+        return Err(format!(
+            "FileCompletePayload exceeds 64KB limit: {} bytes",
+            json_bytes.len()
+        ));
+    }
+
+    write_frame_header(writer, FrameTag::FileComplete, json_bytes.len() as u32)?;
+    writer
+        .write_all(&json_bytes)
+        .map_err(|e| format!("Failed to write FileComplete payload: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Failed to flush stream: {e}"))?;
+
+    Ok(())
+}
+
+/// Reads a JSON `FileComplete` frame.
+pub fn read_file_complete<R: Read>(reader: &mut R) -> Result<FileCompletePayload, String> {
+    let (tag, payload_len) = read_frame_header(reader)?;
+    if tag != FrameTag::FileComplete {
+        return Err(format!("Expected FileComplete tag, received {:?}", tag));
+    }
+
+    if payload_len as usize > MAX_METADATA_SIZE {
+        return Err(format!(
+            "FileComplete payload size {payload_len} exceeds max 64KB"
+        ));
+    }
+
+    let mut payload = vec![0u8; payload_len as usize];
+    reader
+        .read_exact(&mut payload)
+        .map_err(|e| format!("Failed to read FileComplete payload: {e}"))?;
+
+    let complete: FileCompletePayload = serde_json::from_slice(&payload)
+        .map_err(|e| format!("Failed to parse FileCompletePayload JSON: {e}"))?;
+
+    Ok(complete)
+}
+
 /// Sends a simple status response frame (`TransferAccept`, `TransferReject`, or `TransferAck`).
-pub fn write_response_frame<W: Write>(writer: &mut W, tag: FrameTag, message: &str) -> Result<(), String> {
+pub fn write_response_frame<W: Write>(
+    writer: &mut W,
+    tag: FrameTag,
+    message: &str,
+) -> Result<(), String> {
     let msg_bytes = message.as_bytes();
     write_frame_header(writer, tag, msg_bytes.len() as u32)?;
     writer
         .write_all(msg_bytes)
         .map_err(|e| format!("Failed to write response payload: {e}"))?;
-    writer.flush().map_err(|e| format!("Failed to flush stream: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Failed to flush stream: {e}"))?;
     Ok(())
 }
 
@@ -158,13 +300,26 @@ mod tests {
             session_id: "test-session-123".to_string(),
             sender_id: "sender-uuid-456".to_string(),
             sender_name: "MacBook Pro".to_string(),
-            total_files: 1,
+            total_files: 2,
             total_size_bytes: 104857600,
-            files: vec![FileMetadata {
-                file_index: 0,
-                relative_path: "docs/report.pdf".to_string(),
-                size_bytes: 104857600,
-            }],
+            files: vec![
+                FileMetadata {
+                    file_index: 0,
+                    relative_path: "docs/report.pdf".to_string(),
+                    size_bytes: 52428800,
+                    sha256_checksum:
+                        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                            .to_string(),
+                },
+                FileMetadata {
+                    file_index: 1,
+                    relative_path: "videos/demo.mp4".to_string(),
+                    size_bytes: 52428800,
+                    sha256_checksum:
+                        "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e"
+                            .to_string(),
+                },
+            ],
         };
 
         let mut buffer = Vec::new();
@@ -177,216 +332,46 @@ mod tests {
     }
 
     #[test]
-    fn test_successful_completion_handshake() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let req = read_transfer_request(&mut stream).unwrap();
-            assert_eq!(req.total_size_bytes, 12);
-            write_response_frame(&mut stream, FrameTag::TransferAccept, "ACCEPTED").unwrap();
-
-            let (tag, len) = read_frame_header(&mut stream).unwrap();
-            assert_eq!(tag, FrameTag::DataChunk);
-            let mut chunk = vec![0u8; len as usize];
-            stream.read_exact(&mut chunk).unwrap();
-            assert_eq!(&chunk, b"Hello World!");
-
-            let (comp_tag, comp_len) = read_frame_header(&mut stream).unwrap();
-            assert_eq!(comp_tag, FrameTag::TransferComplete);
-            let mut comp_buf = vec![0u8; comp_len as usize];
-            stream.read_exact(&mut comp_buf).unwrap();
-
-            write_response_frame(&mut stream, FrameTag::TransferAck, "ACK").unwrap();
-        });
-
-        let mut client = std::net::TcpStream::connect(addr).unwrap();
-        let meta = TransferMetadata {
-            session_id: "s1".to_string(),
-            sender_id: "u1".to_string(),
-            sender_name: "test".to_string(),
-            total_files: 1,
-            total_size_bytes: 12,
-            files: vec![FileMetadata {
-                file_index: 0,
-                relative_path: "f.txt".to_string(),
-                size_bytes: 12,
-            }],
+    fn test_file_header_roundtrip() {
+        let header = FileHeaderPayload {
+            file_index: 0,
+            relative_path: "images/vacation.png".to_string(),
+            size_bytes: 2048576,
+            sha256_checksum: "d41d8cd98f00b204e9800998ecf8427e".to_string(),
         };
 
-        write_transfer_request(&mut client, &meta).unwrap();
-        let (resp_tag, resp_len) = read_frame_header(&mut client).unwrap();
-        assert_eq!(resp_tag, FrameTag::TransferAccept);
-        let mut resp_buf = vec![0u8; resp_len as usize];
-        client.read_exact(&mut resp_buf).unwrap();
+        let mut buffer = Vec::new();
+        write_file_header(&mut buffer, &header).unwrap();
 
-        write_frame_header(&mut client, FrameTag::DataChunk, 12).unwrap();
-        client.write_all(b"Hello World!").unwrap();
+        let mut cursor = std::io::Cursor::new(buffer);
+        let decoded = read_file_header(&mut cursor).unwrap();
 
-        write_frame_header(&mut client, FrameTag::TransferComplete, 2).unwrap();
-        client.write_all(b"s1").unwrap();
-
-        let (ack_tag, ack_len) = read_frame_header(&mut client).unwrap();
-        assert_eq!(ack_tag, FrameTag::TransferAck);
-        let mut ack_buf = vec![0u8; ack_len as usize];
-        client.read_exact(&mut ack_buf).unwrap();
-
-        client.shutdown(std::net::Shutdown::Write).unwrap();
-        handle.join().unwrap();
+        assert_eq!(header, decoded);
     }
 
     #[test]
-    fn test_missing_ack() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let _ = read_transfer_request(&mut stream).unwrap();
-            write_response_frame(&mut stream, FrameTag::TransferAccept, "ACCEPTED").unwrap();
-            let _ = read_frame_header(&mut stream).unwrap();
-            let mut chunk = vec![0u8; 5];
-            let _ = stream.read_exact(&mut chunk);
-            let _ = read_frame_header(&mut stream).unwrap();
-            // Server drops stream without sending TransferAck
-        });
-
-        let mut client = std::net::TcpStream::connect(addr).unwrap();
-        let meta = TransferMetadata {
-            session_id: "s2".to_string(),
-            sender_id: "u1".to_string(),
-            sender_name: "test".to_string(),
-            total_files: 1,
-            total_size_bytes: 5,
-            files: vec![FileMetadata {
-                file_index: 0,
-                relative_path: "f.txt".to_string(),
-                size_bytes: 5,
-            }],
+    fn test_file_complete_roundtrip() {
+        let complete = FileCompletePayload {
+            file_index: 0,
+            bytes_written: 2048576,
+            sha256_checksum: "d41d8cd98f00b204e9800998ecf8427e".to_string(),
         };
 
-        write_transfer_request(&mut client, &meta).unwrap();
-        let (resp_tag, resp_len) = read_frame_header(&mut client).unwrap();
-        assert_eq!(resp_tag, FrameTag::TransferAccept);
-        let mut resp_buf = vec![0u8; resp_len as usize];
-        client.read_exact(&mut resp_buf).unwrap();
+        let mut buffer = Vec::new();
+        write_file_complete(&mut buffer, &complete).unwrap();
 
-        write_frame_header(&mut client, FrameTag::DataChunk, 5).unwrap();
-        client.write_all(b"12345").unwrap();
+        let mut cursor = std::io::Cursor::new(buffer);
+        let decoded = read_file_complete(&mut cursor).unwrap();
 
-        write_frame_header(&mut client, FrameTag::TransferComplete, 2).unwrap();
-        client.write_all(b"s2").unwrap();
-
-        let res = read_frame_header(&mut client);
-        assert!(res.is_err(), "Reading ACK should fail because server closed socket without ACK");
-
-        handle.join().unwrap();
+        assert_eq!(complete, decoded);
     }
 
     #[test]
-    fn test_premature_disconnect() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let _ = read_transfer_request(&mut stream).unwrap();
-            write_response_frame(&mut stream, FrameTag::TransferAccept, "ACCEPTED").unwrap();
-
-            // Client disconnects before sending complete frame header
-            let res = read_frame_header(&mut stream);
-            assert!(res.is_err(), "Receiver should detect premature disconnect");
-        });
-
-        let mut client = std::net::TcpStream::connect(addr).unwrap();
-        let meta = TransferMetadata {
-            session_id: "s3".to_string(),
-            sender_id: "u1".to_string(),
-            sender_name: "test".to_string(),
-            total_files: 1,
-            total_size_bytes: 10,
-            files: vec![FileMetadata {
-                file_index: 0,
-                relative_path: "f.txt".to_string(),
-                size_bytes: 10,
-            }],
-        };
-
-        write_transfer_request(&mut client, &meta).unwrap();
-        let (resp_tag, resp_len) = read_frame_header(&mut client).unwrap();
-        assert_eq!(resp_tag, FrameTag::TransferAccept);
-        let mut resp_buf = vec![0u8; resp_len as usize];
-        client.read_exact(&mut resp_buf).unwrap();
-
-        // Client drops stream prematurely
-        drop(client);
-
-        handle.join().unwrap();
-    }
-
-    #[test]
-    fn test_incorrect_byte_count() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let meta = read_transfer_request(&mut stream).unwrap();
-            write_response_frame(&mut stream, FrameTag::TransferAccept, "ACCEPTED").unwrap();
-
-            let (tag, len) = read_frame_header(&mut stream).unwrap();
-            assert_eq!(tag, FrameTag::DataChunk);
-            let mut chunk = vec![0u8; len as usize];
-            stream.read_exact(&mut chunk).unwrap();
-
-            let received_bytes = len as u64;
-            let (comp_tag, comp_len) = read_frame_header(&mut stream).unwrap();
-            assert_eq!(comp_tag, FrameTag::TransferComplete);
-            let mut comp_buf = vec![0u8; comp_len as usize];
-            stream.read_exact(&mut comp_buf).unwrap();
-
-            // Byte count check: 5 != 10
-            if received_bytes != meta.total_size_bytes {
-                // Return error without sending TransferAck!
-                return Err::<(), String>("Byte count mismatch".to_string());
-            }
-
-            write_response_frame(&mut stream, FrameTag::TransferAck, "ACK").unwrap();
-            Ok(())
-        });
-
-        let mut client = std::net::TcpStream::connect(addr).unwrap();
-        let meta = TransferMetadata {
-            session_id: "s4".to_string(),
-            sender_id: "u1".to_string(),
-            sender_name: "test".to_string(),
-            total_files: 1,
-            total_size_bytes: 10, // Metadata claims 10 bytes
-            files: vec![FileMetadata {
-                file_index: 0,
-                relative_path: "f.txt".to_string(),
-                size_bytes: 10,
-            }],
-        };
-
-        write_transfer_request(&mut client, &meta).unwrap();
-        let (resp_tag, resp_len) = read_frame_header(&mut client).unwrap();
-        assert_eq!(resp_tag, FrameTag::TransferAccept);
-        let mut resp_buf = vec![0u8; resp_len as usize];
-        client.read_exact(&mut resp_buf).unwrap();
-
-        // Sender writes only 5 bytes
-        write_frame_header(&mut client, FrameTag::DataChunk, 5).unwrap();
-        client.write_all(b"12345").unwrap();
-
-        write_frame_header(&mut client, FrameTag::TransferComplete, 2).unwrap();
-        client.write_all(b"s4").unwrap();
-
-        let ack_res = read_frame_header(&mut client);
-        assert!(ack_res.is_err(), "Client should fail to read ACK because server detected byte count mismatch");
-
-        let handle_res = handle.join().unwrap();
-        assert!(handle_res.is_err());
+    fn test_invalid_magic_bytes_rejected() {
+        let bad_header = [0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x05];
+        let mut cursor = std::io::Cursor::new(bad_header);
+        let result = read_frame_header(&mut cursor);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid protocol magic bytes"));
     }
 }

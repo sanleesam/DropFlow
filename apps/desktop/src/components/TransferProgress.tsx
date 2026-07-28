@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { X, CheckCircle2, FolderOpen, FileText } from "lucide-react";
+import { X, CheckCircle2, FolderOpen, FileText, Ban } from "lucide-react";
 import { useToast } from "./ToastProvider";
 import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
 import { listen } from "@tauri-apps/api/event";
@@ -7,11 +7,21 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { invoke } from "@tauri-apps/api/core";
 
+export interface FileMetadataPayload {
+  fileIndex: number;
+  relativePath: string;
+  sizeBytes: number;
+  sha256Checksum?: string;
+}
+
 interface TransferProgressProps {
+  sessionId?: string;
   /** Name of the remote peer device */
   deviceName: string;
-  /** Name of the file being transferred */
+  /** Primary display name of the transfer (file name or batch summary) */
   fileName: string;
+  /** Total number of files in session */
+  totalFiles?: number;
   /** Transfer direction: "send" or "receive" */
   direction?: "send" | "receive";
   /** Callback fired when user closes or dismisses card */
@@ -24,32 +34,30 @@ type TransferStatus = "Preparing..." | "Sending..." | "Receiving..." | "Finishin
 
 interface ProgressPayload {
   sessionId?: string;
-  session_id?: string;
-  fileName?: string;
-  file_name?: string;
-  bytesSent?: number;
-  bytes_sent?: number;
-  totalBytes?: number;
-  total_bytes?: number;
+  currentFileIndex?: number;
+  currentFileName?: string;
+  currentFileBytes?: number;
+  currentFileTotalBytes?: number;
+  sessionBytesSent?: number;
+  sessionTotalBytes?: number;
+  totalFiles?: number;
   percentage?: number;
   speedBytesPerSec?: number;
-  speed_bytes_per_sec?: number;
 }
 
 interface CompletedPayload {
   sessionId?: string;
-  session_id?: string;
   fileName?: string;
-  file_name?: string;
   deviceName?: string;
-  device_name?: string;
   size?: string;
   timestamp?: string;
+  totalFiles?: number;
+  totalSizeBytes?: number;
+  files?: FileMetadataPayload[];
 }
 
 interface FailedPayload {
   sessionId?: string;
-  session_id?: string;
   error?: string;
 }
 
@@ -69,8 +77,10 @@ async function triggerDesktopNotification(title: string, body: string) {
 }
 
 export const TransferProgress: React.FC<TransferProgressProps> = ({
+  sessionId,
   deviceName,
   fileName,
+  totalFiles = 1,
   direction = "send",
   onClose,
   onComplete,
@@ -86,6 +96,8 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
   const [speed, setSpeed] = useState("0 MB/s");
   const [timeRemaining, setTimeRemaining] = useState("Calculating...");
   const [bytesInfo, setBytesInfo] = useState("");
+  const [currentFileLabel, setCurrentFileLabel] = useState(fileName);
+  const [completedFileList, setCompletedFileList] = useState<FileMetadataPayload[]>([]);
   const [isDismissing, setIsDismissing] = useState(false);
   const [receiveDir, setReceiveDir] = useState<string>("");
 
@@ -110,6 +122,18 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
     setTimeout(onClose, 150);
   };
 
+  const handleCancelTransfer = async () => {
+    if (sessionId) {
+      try {
+        await invoke("cancel_transfer", { sessionId });
+        addToast("Transfer cancellation requested.", "info");
+      } catch (err) {
+        console.error("[TransferProgress] Failed to request cancellation:", err);
+      }
+    }
+    handleDismiss();
+  };
+
   const handleOpenFolder = async () => {
     try {
       const dirPath = receiveDir || (await invoke<string>("get_receive_dir"));
@@ -120,15 +144,15 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
     }
   };
 
-  const handleOpenFile = async () => {
+  const handleOpenFile = async (specificFileName?: string) => {
     try {
+      const targetName = specificFileName || fileName;
       const dirPath = receiveDir || (await invoke<string>("get_receive_dir"));
       const normalizedDir = dirPath.replace(/\\/g, "/").replace(/\/$/, "");
-      const fullPath = `${normalizedDir}/${fileName}`;
+      const fullPath = `${normalizedDir}/${targetName}`;
       await openPath(fullPath);
     } catch (err) {
       console.error("[TransferProgress] Failed to open file:", err);
-      // Fallback: open receive directory if direct file opening is unavailable
       handleOpenFolder();
     }
   };
@@ -148,26 +172,42 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
       try {
         unlistenProgress = await listen<ProgressPayload>("transfer-progress", (event) => {
           const payload = event.payload;
+
+          // Filter by sessionId if available
+          if (sessionId && payload.sessionId && payload.sessionId !== sessionId) {
+            return;
+          }
+
           const pct = payload.percentage ?? 0;
           const rounded = Math.min(100, Math.max(0, Math.round(pct)));
           setProgress(rounded);
 
-          const speedBytes = payload.speedBytesPerSec ?? payload.speed_bytes_per_sec ?? 0;
+          const speedBytes = payload.speedBytesPerSec ?? 0;
           const mbps = (speedBytes / (1024 * 1024)).toFixed(1);
           setSpeed(`${mbps} MB/s`);
 
-          const bytesSent = payload.bytesSent ?? payload.bytes_sent ?? 0;
-          const totalBytes = payload.totalBytes ?? payload.total_bytes ?? 0;
+          const sessionSent = payload.sessionBytesSent ?? 0;
+          const sessionTotal = payload.sessionTotalBytes ?? 0;
 
-          if (totalBytes > 0) {
-            const sentMb = (bytesSent / (1024 * 1024)).toFixed(1);
-            const totalMb = (totalBytes / (1024 * 1024)).toFixed(1);
+          if (sessionTotal > 0) {
+            const sentMb = (sessionSent / (1024 * 1024)).toFixed(1);
+            const totalMb = (sessionTotal / (1024 * 1024)).toFixed(1);
             setBytesInfo(`${sentMb} / ${totalMb} MB`);
+          }
+
+          if (payload.currentFileName) {
+            const fileIdx = (payload.currentFileIndex ?? 0) + 1;
+            const fileCount = payload.totalFiles ?? totalFiles;
+            if (fileCount > 1) {
+              setCurrentFileLabel(`[${fileIdx}/${fileCount}] ${payload.currentFileName}`);
+            } else {
+              setCurrentFileLabel(payload.currentFileName);
+            }
           }
 
           if (rounded < 100) {
             setStatus(direction === "receive" ? "Receiving..." : "Sending...");
-            const remainingBytes = Math.max(0, totalBytes - bytesSent);
+            const remainingBytes = Math.max(0, sessionTotal - sessionSent);
             const remainingSecs = speedBytes > 0
               ? Math.ceil(remainingBytes / speedBytes)
               : 0;
@@ -177,15 +217,23 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
         unlistenCompleted = await listen<CompletedPayload>("transfer-completed", (event) => {
           const payload = event.payload;
+          if (sessionId && payload.sessionId && payload.sessionId !== sessionId) {
+            return;
+          }
+
           setProgress(100);
           setStatus("Completed");
           setSpeed("0 MB/s");
           setTimeRemaining("0 seconds");
 
+          if (payload.files && payload.files.length > 0) {
+            setCompletedFileList(payload.files);
+          }
+
           if (!hasCompletedRef.current) {
             hasCompletedRef.current = true;
-            const itemFileName = payload.fileName ?? payload.file_name ?? fileName;
-            const itemDeviceName = payload.deviceName ?? payload.device_name ?? deviceName;
+            const itemFileName = payload.fileName ?? fileName;
+            const itemDeviceName = payload.deviceName ?? deviceName;
 
             if (direction === "receive") {
               addToast(`Received ${itemFileName} from ${itemDeviceName}`, "success");
@@ -199,11 +247,14 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
             if (onCompleteRef.current) {
               onCompleteRef.current({
-                sessionId: payload.sessionId ?? payload.session_id,
+                sessionId: payload.sessionId ?? sessionId,
                 fileName: itemFileName,
                 deviceName: itemDeviceName,
                 size: payload.size ?? "Complete",
                 timestamp: payload.timestamp ?? "Just now",
+                totalFiles: payload.totalFiles ?? totalFiles,
+                totalSizeBytes: payload.totalSizeBytes ?? 0,
+                files: payload.files ?? [],
                 direction,
               });
             }
@@ -211,8 +262,12 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         });
 
         unlistenFailed = await listen<FailedPayload>("transfer-failed", (event) => {
+          const payload = event.payload;
+          if (sessionId && payload.sessionId && payload.sessionId !== sessionId) {
+            return;
+          }
           setStatus("Failed");
-          addToast(`Transfer failed: ${event.payload.error || "Unknown error"}`, "error");
+          addToast(`Transfer failed: ${payload.error || "Unknown error"}`, "error");
         });
       } catch (err) {
         console.error("[TransferProgress] Failed to register event listeners:", err);
@@ -226,7 +281,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
       if (unlistenCompleted) unlistenCompleted();
       if (unlistenFailed) unlistenFailed();
     };
-  }, [addToast, fileName, deviceName, direction]);
+  }, [addToast, fileName, deviceName, direction, sessionId, totalFiles]);
 
   const isCompleted = progress === 100;
   const isFailed = status === "Failed";
@@ -241,20 +296,21 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         animate-slide-in-up
       `}
     >
-      {/* Header Info & Close Button */}
+      {/* Header Info & Actions */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className={`h-2 w-2 rounded-full ${accent.progressBgDot} animate-pulse`} />
-          <h3 className="text-sm font-semibold tracking-tight text-neutral-100">
-            {direction === "receive" ? "Receiving file" : "Sending file"}
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`h-2 w-2 rounded-full ${accent.progressBgDot} animate-pulse flex-shrink-0`} />
+          <h3 className="text-sm font-semibold tracking-tight text-neutral-100 truncate">
+            {direction === "receive" ? "Receiving" : "Sending"}{" "}
+            {totalFiles > 1 ? `${totalFiles} files` : "file"}
           </h3>
-          <span className="text-xs text-neutral-400">
+          <span className="text-xs text-neutral-400 truncate">
             {direction === "receive" ? "from" : "to"}{" "}
             <span className="font-medium text-neutral-200">{deviceName}</span>
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {/* Status Label */}
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-neutral-800 border border-white/[0.06] select-none">
             {!isCompleted && !isFailed ? (
@@ -274,6 +330,23 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
               </>
             )}
           </div>
+
+          {/* Cancel button during active transfer */}
+          {!isCompleted && !isFailed && (
+            <button
+              type="button"
+              onClick={handleCancelTransfer}
+              title="Cancel transfer"
+              className="
+                flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium
+                text-red-400 bg-red-500/10 border border-red-500/20
+                hover:bg-red-500/20 transition-all duration-150 outline-none
+              "
+            >
+              <Ban size={11} />
+              <span>Cancel</span>
+            </button>
+          )}
 
           {/* Dismiss Button */}
           <button
@@ -315,7 +388,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
         {/* Text Details */}
         <div className="flex-1 min-w-0">
-          <p className="truncate text-sm font-medium text-neutral-200">{fileName}</p>
+          <p className="truncate text-sm font-medium text-neutral-200">{currentFileLabel}</p>
           <div className="mt-0.5 flex items-center gap-2 text-xs text-neutral-500 select-none truncate">
             <span>{speed}</span>
             <span>•</span>
@@ -330,14 +403,14 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         </div>
 
         {/* Progress Percent */}
-        <div className="text-right select-none">
+        <div className="text-right select-none flex-shrink-0">
           <span className="text-lg font-semibold tracking-tight text-neutral-100">
             {progress}%
           </span>
         </div>
       </div>
 
-      {/* Progress Bar / Receiver Completion Summary Actions */}
+      {/* Progress Bar / Completion Summary */}
       <div className="relative w-full">
         {!isCompleted && !isFailed ? (
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
@@ -351,18 +424,31 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs text-emerald-400 font-semibold">
                 <CheckCircle2 size={16} strokeWidth={2} />
-                <span>Transfer Complete</span>
+                <span>Transfer Complete ({totalFiles} {totalFiles === 1 ? "file" : "files"})</span>
               </div>
               <span className="text-[11px] font-mono text-neutral-400 truncate max-w-[200px]" title={receiveDir}>
                 {receiveDir || "~/Downloads/DropFlow/"}
               </span>
             </div>
 
+            {completedFileList.length > 1 && (
+              <ul className="flex flex-col gap-1 max-h-24 overflow-y-auto py-1 pr-1 text-xs">
+                {completedFileList.map((f, i) => (
+                  <li key={i} className="flex items-center justify-between text-neutral-300">
+                    <span className="truncate flex-1">{f.relativePath}</span>
+                    <span className="font-mono text-[11px] text-neutral-400 ml-2">
+                      {(f.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
             {direction === "receive" && (
               <div className="flex items-center gap-2 pt-0.5">
                 <button
                   type="button"
-                  onClick={handleOpenFile}
+                  onClick={() => handleOpenFile()}
                   className="flex-1 flex items-center justify-center gap-1.5 rounded-md bg-emerald-500/20 border border-emerald-500/30 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/30 transition-colors"
                 >
                   <FileText size={13} />

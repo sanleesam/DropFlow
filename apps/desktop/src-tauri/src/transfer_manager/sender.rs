@@ -2,14 +2,18 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use super::protocol::{
-    read_frame_header, write_frame_header, write_transfer_request, FrameTag, DEFAULT_CHUNK_SIZE,
-    FileMetadata, TransferMetadata,
+    read_frame_header, write_file_complete, write_file_header, write_frame_header,
+    write_transfer_request, FileCompletePayload, FileHeaderPayload, FileMetadata, FrameTag,
+    TransferMetadata, DEFAULT_CHUNK_SIZE,
 };
 use super::receiver::{TransferCompletedPayload, TransferFailedPayload, TransferProgressPayload};
 
@@ -20,6 +24,7 @@ pub fn send_files_over_tcp(
     local_uuid: &str,
     local_device_name: &str,
     file_paths: Vec<String>,
+    cancel_flag: Arc<AtomicBool>,
 ) -> Result<String, String> {
     if file_paths.is_empty() {
         return Err("No files selected for transfer".to_string());
@@ -51,16 +56,19 @@ pub fn send_files_over_tcp(
             file_index: idx as u32,
             relative_path: filename,
             size_bytes: file_size,
+            sha256_checksum: String::new(), // Populated dynamically during streaming
         });
     }
+
+    let total_files_count = files_metadata.len() as u32;
 
     let transfer_meta = TransferMetadata {
         session_id: session_id.clone(),
         sender_id: local_uuid.to_string(),
         sender_name: local_device_name.to_string(),
-        total_files: files_metadata.len() as u32,
+        total_files: total_files_count,
         total_size_bytes,
-        files: files_metadata,
+        files: files_metadata.clone(),
     };
 
     let target_socket_addr = format!("{}:{}", peer_address, peer_port);
@@ -89,10 +97,13 @@ pub fn send_files_over_tcp(
 
     if resp_tag != FrameTag::TransferAccept {
         let err_msg = format!("Peer rejected transfer with frame tag {:?}", resp_tag);
-        let _ = app.emit("transfer-failed", TransferFailedPayload {
-            session_id: session_id.clone(),
-            error: err_msg.clone(),
-        });
+        let _ = app.emit(
+            "transfer-failed",
+            TransferFailedPayload {
+                session_id: session_id.clone(),
+                error: err_msg.clone(),
+            },
+        );
         return Err(err_msg);
     }
 
@@ -106,17 +117,57 @@ pub fn send_files_over_tcp(
 
     let start_time = Instant::now();
     let mut total_sent_bytes: u64 = 0;
+    let mut last_emit_time = Instant::now();
+    let emit_interval = Duration::from_millis(50); // Max 20 FPS progress emissions
 
-    // 3. Stream data chunks for each file
-    println!("[Sender] STREAMING");
+    // 3. Stream data for each file
+    println!("[Sender] STREAMING {} files", total_files_count);
     for (idx, path_str) in file_paths.iter().enumerate() {
+        if cancel_flag.load(Ordering::Relaxed) {
+            let _ = write_frame_header(&mut stream, FrameTag::Cancel, 0);
+            let err_msg = "Transfer cancelled by user".to_string();
+            let _ = app.emit(
+                "transfer-failed",
+                TransferFailedPayload {
+                    session_id: session_id.clone(),
+                    error: err_msg.clone(),
+                },
+            );
+            return Err(err_msg);
+        }
+
         let mut file = File::open(path_str)
             .map_err(|e| format!("Failed to open file for reading {path_str}: {e}"))?;
 
         let file_meta = &transfer_meta.files[idx];
+
+        // 3a. Send FileHeader frame
+        let file_header_payload = FileHeaderPayload {
+            file_index: idx as u32,
+            relative_path: file_meta.relative_path.clone(),
+            size_bytes: file_meta.size_bytes,
+            sha256_checksum: String::new(),
+        };
+        write_file_header(&mut stream, &file_header_payload)?;
+
+        let mut hasher = Sha256::new();
+        let mut file_bytes_sent: u64 = 0;
         let mut file_buffer = vec![0u8; DEFAULT_CHUNK_SIZE];
 
         loop {
+            if cancel_flag.load(Ordering::Relaxed) {
+                let _ = write_frame_header(&mut stream, FrameTag::Cancel, 0);
+                let err_msg = "Transfer cancelled by user".to_string();
+                let _ = app.emit(
+                    "transfer-failed",
+                    TransferFailedPayload {
+                        session_id: session_id.clone(),
+                        error: err_msg.clone(),
+                    },
+                );
+                return Err(err_msg);
+            }
+
             let n = file
                 .read(&mut file_buffer)
                 .map_err(|e| format!("Failed reading file chunk: {e}"))?;
@@ -125,47 +176,79 @@ pub fn send_files_over_tcp(
                 break;
             }
 
+            hasher.update(&file_buffer[..n]);
+
             // Write DataChunk frame header + payload
             write_frame_header(&mut stream, FrameTag::DataChunk, n as u32)?;
             stream
                 .write_all(&file_buffer[..n])
                 .map_err(|e| format!("Failed writing chunk payload to socket: {e}"))?;
 
+            file_bytes_sent += n as u64;
             total_sent_bytes += n as u64;
 
-            let elapsed_secs = start_time.elapsed().as_secs_f64();
-            let speed = if elapsed_secs > 0.0 {
-                (total_sent_bytes as f64 / elapsed_secs) as u64
-            } else {
-                0
-            };
+            let is_final = total_sent_bytes == total_size_bytes;
+            if is_final || last_emit_time.elapsed() >= emit_interval {
+                last_emit_time = Instant::now();
+                let elapsed_secs = start_time.elapsed().as_secs_f64();
+                let speed = if elapsed_secs > 0.0 {
+                    (total_sent_bytes as f64 / elapsed_secs) as u64
+                } else {
+                    0
+                };
 
-            let percentage = if total_size_bytes > 0 {
-                ((total_sent_bytes as f32 / total_size_bytes as f32) * 100.0).min(100.0)
-            } else {
-                100.0
-            };
+                let percentage = if total_size_bytes > 0 {
+                    ((total_sent_bytes as f32 / total_size_bytes as f32) * 100.0).min(100.0)
+                } else {
+                    100.0
+                };
 
-            let _ = app.emit("transfer-progress", TransferProgressPayload {
-                session_id: session_id.clone(),
-                file_name: file_meta.relative_path.clone(),
-                bytes_sent: total_sent_bytes,
-                total_bytes: total_size_bytes,
-                percentage,
-                speed_bytes_per_sec: speed,
-            });
+                let _ = app.emit(
+                    "transfer-progress",
+                    TransferProgressPayload {
+                        session_id: session_id.clone(),
+                        current_file_index: idx as u32,
+                        current_file_name: file_meta.relative_path.clone(),
+                        current_file_bytes: file_bytes_sent,
+                        current_file_total_bytes: file_meta.size_bytes,
+                        session_bytes_sent: total_sent_bytes,
+                        session_total_bytes: total_size_bytes,
+                        total_files: total_files_count,
+                        percentage,
+                        speed_bytes_per_sec: speed,
+                    },
+                );
+            }
         }
+
+        let file_checksum = format!("{:x}", hasher.finalize());
+
+        // 3b. Send FileComplete frame
+        let file_comp_payload = FileCompletePayload {
+            file_index: idx as u32,
+            bytes_written: file_bytes_sent,
+            sha256_checksum: file_checksum,
+        };
+        write_file_complete(&mut stream, &file_comp_payload)?;
     }
 
-    stream.flush().map_err(|e| format!("Failed to flush TCP stream: {e}"))?;
+    stream
+        .flush()
+        .map_err(|e| format!("Failed to flush TCP stream: {e}"))?;
 
     // 4. Send TransferComplete frame
     let session_bytes = session_id.as_bytes();
-    write_frame_header(&mut stream, FrameTag::TransferComplete, session_bytes.len() as u32)?;
+    write_frame_header(
+        &mut stream,
+        FrameTag::TransferComplete,
+        session_bytes.len() as u32,
+    )?;
     stream
         .write_all(session_bytes)
         .map_err(|e| format!("Failed writing TransferComplete payload: {e}"))?;
-    stream.flush().map_err(|e| format!("Failed flushing TransferComplete frame: {e}"))?;
+    stream
+        .flush()
+        .map_err(|e| format!("Failed flushing TransferComplete frame: {e}"))?;
     println!("[Sender] TRANSFER_COMPLETE_SENT");
 
     // 5. Wait for TransferAck frame from receiver
@@ -174,10 +257,13 @@ pub fn send_files_over_tcp(
 
     if ack_tag != FrameTag::TransferAck {
         let err_msg = format!("Expected TransferAck, received {:?}", ack_tag);
-        let _ = app.emit("transfer-failed", TransferFailedPayload {
-            session_id: session_id.clone(),
-            error: err_msg.clone(),
-        });
+        let _ = app.emit(
+            "transfer-failed",
+            TransferFailedPayload {
+                session_id: session_id.clone(),
+                error: err_msg.clone(),
+            },
+        );
         return Err(err_msg);
     }
 
@@ -197,7 +283,7 @@ pub fn send_files_over_tcp(
     let formatted_size = if size_mb >= 1.0 {
         format!("{:.1} MB", size_mb)
     } else {
-        format!("{} KB", (total_size_bytes + 1023) / 1024)
+        format!("{} KB", total_size_bytes.div_ceil(1024))
     };
 
     let main_filename = transfer_meta
@@ -206,13 +292,19 @@ pub fn send_files_over_tcp(
         .map(|f| f.relative_path.as_str())
         .unwrap_or("File");
 
-    let _ = app.emit("transfer-completed", TransferCompletedPayload {
-        session_id: session_id.clone(),
-        file_name: main_filename.to_string(),
-        device_name: "Target Device".to_string(),
-        size: formatted_size,
-        timestamp: "Just now".to_string(),
-    });
+    let _ = app.emit(
+        "transfer-completed",
+        TransferCompletedPayload {
+            session_id: session_id.clone(),
+            file_name: main_filename.to_string(),
+            device_name: "Target Device".to_string(),
+            size: formatted_size,
+            timestamp: "Just now".to_string(),
+            total_files: total_files_count,
+            total_size_bytes,
+            files: transfer_meta.files,
+        },
+    );
 
     println!("[Sender] Successfully completed streaming {total_sent_bytes} bytes over TCP");
     Ok(session_id)

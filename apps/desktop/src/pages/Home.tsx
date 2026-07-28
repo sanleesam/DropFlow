@@ -71,7 +71,7 @@ const IconClock: React.FC = () => (
 
 // ─── Home page ────────────────────────────────────────────────────────────────
 
-interface RecentTransfer {
+export interface RecentTransfer {
   id: string;
   fileName: string;
   deviceName: string;
@@ -79,18 +79,22 @@ interface RecentTransfer {
   timestamp: string;
   status: "completed" | "failed";
   direction: "send" | "receive";
+  totalFiles: number;
+}
+
+export interface ActiveTransferInfo {
+  id: string;
+  deviceName: string;
+  fileName: string;
+  totalFiles: number;
+  direction: "send" | "receive";
 }
 
 const Home: React.FC = () => {
   const { settings } = useSettings();
   const { addToast } = useToast();
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
-  const [activeTransfer, setActiveTransfer] = useState<{
-    id: string;
-    deviceName: string;
-    fileName: string;
-    direction: "send" | "receive";
-  } | null>(null);
+  const [activeTransfers, setActiveTransfers] = useState<Record<string, ActiveTransferInfo>>({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const wasSettingsOpenRef = useRef(false);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -134,20 +138,25 @@ const Home: React.FC = () => {
       try {
         unlistenProgress = await listen<any>("transfer-progress", (event) => {
           const payload = event.payload;
-          const fileName = payload.fileName ?? payload.file_name ?? "Incoming File";
+          const fileName = payload.fileName ?? payload.currentFileName ?? payload.file_name ?? "Incoming File";
           const deviceName = payload.deviceName ?? payload.device_name ?? "Peer Device";
           const sessionId = payload.sessionId ?? payload.session_id ?? `rx-${Date.now()}`;
+          const totalFiles = payload.totalFiles ?? payload.total_files ?? 1;
 
-          setActiveTransfer((current) => {
-            if (!current) {
+          setActiveTransfers((prev) => {
+            if (!prev[sessionId]) {
               return {
-                id: sessionId,
-                deviceName,
-                fileName,
-                direction: "receive",
+                ...prev,
+                [sessionId]: {
+                  id: sessionId,
+                  deviceName,
+                  fileName,
+                  totalFiles,
+                  direction: "receive",
+                },
               };
             }
-            return current;
+            return prev;
           });
         });
       } catch (err) {
@@ -273,22 +282,39 @@ const Home: React.FC = () => {
   }, [settings.deviceName, settings.deviceVisibility, localUuid]);
 
   const handleTransferComplete = useCallback((payload?: any) => {
-    setActiveTransfer((currentActive) => {
-      if (currentActive && !completedTransferIdsRef.current.has(currentActive.id)) {
-        completedTransferIdsRef.current.add(currentActive.id);
-        const direction = payload?.direction || currentActive.direction || "send";
+    const sessionId = payload?.sessionId || payload?.session_id;
+    if (!sessionId) return;
+
+    setActiveTransfers((prev) => {
+      const active = prev[sessionId];
+      if (active && !completedTransferIdsRef.current.has(active.id)) {
+        completedTransferIdsRef.current.add(active.id);
+
+        const totalFiles = payload?.totalFiles ?? payload?.total_files ?? active.totalFiles ?? 1;
+        let displayName = payload?.fileName || payload?.file_name || active.fileName;
+
+        if (totalFiles > 1 && payload?.files && payload.files.length > 0) {
+          const first = payload.files[0].relativePath || payload.files[0].relative_path;
+          const count = payload.files.length;
+          displayName = `${first} (+${count - 1} other ${count - 1 === 1 ? "file" : "files"})`;
+        }
+
         const newTransfer: RecentTransfer = {
-          id: currentActive.id,
-          fileName: payload?.fileName || payload?.file_name || currentActive.fileName,
-          deviceName: payload?.deviceName || payload?.device_name || currentActive.deviceName,
+          id: active.id,
+          fileName: displayName,
+          deviceName: payload?.deviceName || payload?.device_name || active.deviceName,
           size: payload?.size || "Complete",
           timestamp: payload?.timestamp || "Just now",
           status: "completed",
-          direction,
+          direction: payload?.direction || active.direction || "send",
+          totalFiles,
         };
-        setRecentTransfers((prev) => [newTransfer, ...prev]);
+        setRecentTransfers((recent) => [newTransfer, ...recent]);
       }
-      return null; // Clear activeTransfer so TransferProgress unmounts cleanly
+
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
     });
   }, []);
 
@@ -305,17 +331,25 @@ const Home: React.FC = () => {
       const peerAddress = targetDevice.addresses[0]?.address || "127.0.0.1";
       const peerPort = targetDevice.port;
 
-      // Extract native absolute filesystem paths directly from SelectedFilePayload
       const filePaths = selectedFiles.map((f) => f.path);
-      const mainFileName = selectedFiles[0].name;
+      const totalCount = selectedFiles.length;
+      const primaryName = selectedFiles[0].name;
+
+      const displayFileName = totalCount > 1
+        ? `${primaryName} (+${totalCount - 1} other ${totalCount - 1 === 1 ? "file" : "files"})`
+        : primaryName;
 
       const txId = `tx-${Date.now()}`;
-      setActiveTransfer({
-        id: txId,
-        deviceName: targetDevice.name,
-        fileName: mainFileName,
-        direction: "send",
-      });
+      setActiveTransfers((prev) => ({
+        ...prev,
+        [txId]: {
+          id: txId,
+          deviceName: targetDevice.name,
+          fileName: displayFileName,
+          totalFiles: totalCount,
+          direction: "send",
+        },
+      }));
 
       try {
         const sessionId = await invoke<string>("send_files", {
@@ -329,21 +363,28 @@ const Home: React.FC = () => {
         // Robust fallback completion: when invoke() resolves, ensure the transfer
         // completes cleanly even if an event was missed due to timing/IPC delays.
         handleTransferComplete({
-          sessionId,
-          fileName: mainFileName,
+          sessionId: sessionId || txId,
+          fileName: displayFileName,
           deviceName: targetDevice.name,
           size: "Complete",
           timestamp: "Just now",
           direction: "send",
+          totalFiles: totalCount,
         });
       } catch (err: any) {
         console.error("[Home] Send failed:", err);
         addToast(`Transfer error: ${err}`, "error");
-        setActiveTransfer(null);
+        setActiveTransfers((prev) => {
+          const next = { ...prev };
+          delete next[txId];
+          return next;
+        });
       }
     },
     [devices, selectedDeviceId, localUuid, settings.deviceName, addToast, handleTransferComplete],
   );
+
+  const activeTransferList = Object.values(activeTransfers);
 
   return (
     <div className="df-app-shell flex h-screen w-screen flex-col overflow-hidden text-neutral-100">
@@ -399,16 +440,28 @@ const Home: React.FC = () => {
           <FileDropZone selectedDeviceId={selectedDeviceId} onSend={handleSend} />
         </Section>
 
-        {/* ── Active Transfer Progress ── */}
-        {activeTransfer && (
-          <TransferProgress
-            key={activeTransfer.id}
-            deviceName={activeTransfer.deviceName}
-            fileName={activeTransfer.fileName}
-            direction={activeTransfer.direction}
-            onClose={() => setActiveTransfer(null)}
-            onComplete={handleTransferComplete}
-          />
+        {/* ── Active Transfer Progress Cards ── */}
+        {activeTransferList.length > 0 && (
+          <div className="w-full flex flex-col gap-3">
+            {activeTransferList.map((transfer) => (
+              <TransferProgress
+                key={transfer.id}
+                sessionId={transfer.id}
+                deviceName={transfer.deviceName}
+                fileName={transfer.fileName}
+                totalFiles={transfer.totalFiles}
+                direction={transfer.direction}
+                onClose={() => {
+                  setActiveTransfers((prev) => {
+                    const next = { ...prev };
+                    delete next[transfer.id];
+                    return next;
+                  });
+                }}
+                onComplete={handleTransferComplete}
+              />
+            ))}
+          </div>
         )}
 
         {/* ── Recent Transfers ── */}

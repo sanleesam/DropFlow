@@ -153,18 +153,23 @@ The receiver presents an incoming transfer notification to the user (or automati
 To support massive files (e.g. multi-gigabyte video files) without running out of RAM, DFP/1 transfers files in sequential **binary chunks** over the negotiated TCP data connection.
 
 ### 5.1 Binary Frame Structure
-Each chunk transmitted consists of a fixed-size header followed by the raw payload bytes. This avoids JSON encoding overhead for file payloads.
+Each frame transmitted consists of a 10-byte fixed header followed by the payload.
 
 | Field Name | Size (Bytes) | Data Type | Description |
 | :--- | :--- | :--- | :--- |
-| **Magic Byte** | 1 | `uint8` | Always `0xDF` (DropFlow magic identifier) |
-| **Frame Type** | 1 | `uint8` | `0x01` = Data chunk, `0x02` = Metadata block |
-| **File Index** | 4 | `uint32` | 0-based index of the file in the transfer list |
-| **Chunk Index** | 8 | `uint64` | 0-based sequential chunk count for this file |
-| **Payload Length** | 4 | `uint32` | Byte length $N$ of the succeeding payload |
-| **Payload** | $N$ | `bytes` | Raw chunk bytes (standard size is 65,536 bytes) |
+| **Magic Bytes** | 4 | `[u8; 4]` | Always `DFP1` (DropFlow Protocol v1 magic identifier) |
+| **Version** | 1 | `uint8` | `0x01` |
+| **Frame Tag** | 1 | `uint8` | `0x01` Request, `0x02` Accept, `0x03` Reject, `0x04` FileHeader, `0x05` DataChunk, `0x06` TransferComplete, `0x07` Cancel, `0x08` TransferAck, `0x09` FileComplete |
+| **Payload Length** | 4 | `uint32 (BE)` | Length $N$ of succeeding payload bytes |
+| **Payload** | $N$ | `bytes` | Frame payload (JSON for metadata, raw bytes for data chunks) |
 
-This binary framing ensures the receiving socket can parse data continuously with a simple loop (Read 18-byte header -> Read $N$ payload bytes -> Repeat).
+### 5.2 Multi-File Stream Sequence
+For each file in the transfer session:
+1. Sender transmits `FileHeader` (`0x04`) frame with file index, relative path, size, and optional SHA-256 digest.
+2. Sender streams `DataChunk` (`0x05`) frames (64 KB chunks).
+3. Receiver streams to `<file>.dropflow-part` and calculates streaming SHA-256 digest on the fly.
+4. Sender transmits `FileComplete` (`0x09`) frame with final checksum.
+5. Receiver verifies checksum and byte count, then renames `.dropflow-part` to destination file (resolving filename collisions safely).
 
 ---
 

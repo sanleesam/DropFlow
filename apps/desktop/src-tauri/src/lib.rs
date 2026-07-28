@@ -33,6 +33,7 @@ pub fn run() {
 
             app.manage(transfer_manager::TransferState {
                 receiver: Mutex::new(Some(receiver)),
+                active_cancellations: Mutex::new(std::collections::HashMap::new()),
             });
 
             Ok(())
@@ -45,6 +46,7 @@ pub fn run() {
             device_discovery::get_current_peers,
             device_discovery::get_system_computer_name,
             transfer_manager::engine::send_files,
+            transfer_manager::engine::cancel_transfer,
             transfer_manager::engine::get_receive_dir,
             transfer_manager::engine::get_receiver_port,
         ])
