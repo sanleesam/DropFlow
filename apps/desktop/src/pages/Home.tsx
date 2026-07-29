@@ -17,6 +17,7 @@ import {
   applyFailureEvent,
   dismissActiveSession,
   SessionStateStore,
+  formatRelativeTimestamp,
 } from "../utils/transferSessionManager";
 
 // ─── Section wrapper ────────────────────────────────────────────────────────
@@ -468,77 +469,80 @@ export const Home: React.FC<HomeProps> = ({ onNavigateHistory }) => {
           </Section>
         )}
 
-        {/* ── Recent Transfers ── */}
+        {/* ── Recent Transfer Summary ── */}
         <Section
           id="recent-transfers"
-          title="Recent transfers"
+          title="Recent transfer"
           icon={<IconClock />}
         >
           {sessionStore.recentTransfers.length > 0 ? (
-            <div className="w-full flex flex-col rounded-xl border border-white/[0.07] bg-neutral-900/40 overflow-hidden select-none">
-              <div className="flex flex-col divide-y divide-white/[0.06]">
-                {sessionStore.recentTransfers.slice(0, 5).map((tx) => (
-                  <div key={tx.id} className="flex items-center justify-between px-3 py-2 hover:bg-white/[0.02] transition-colors duration-150">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-neutral-800 border border-white/[0.06] ${
-                        tx.status === "completed" 
-                          ? tx.direction === "receive" ? "text-blue-400" : "text-emerald-400" 
-                          : "text-red-400"
-                      }`}>
-                        <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
-                        </svg>
-                      </span>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-medium text-neutral-200 truncate leading-tight">
-                          {tx.totalFiles > 1 ? `${tx.totalFiles} files` : tx.fileName}
-                        </span>
-                        <span className="text-[11px] text-neutral-500 mt-0.5 leading-tight flex items-center gap-1">
-                          <span>{tx.direction === "receive" ? "↓ Received from" : "↑ Sent to"}</span>
-                          <span className="text-neutral-300 font-medium">{tx.deviceName}</span>
-                        </span>
-                      </div>
-                    </div>
+            (() => {
+              const latest = sessionStore.recentTransfers[0];
+              const isReceive = latest.direction === "receive";
+              const isFailed = latest.status === "failed";
+              const displayTime = latest.timestampMs
+                ? formatRelativeTimestamp(latest.timestampMs)
+                : latest.timestamp;
 
-                    <div className="flex items-center gap-3 flex-shrink-0 text-right select-none">
-                      <div className="flex flex-col items-end">
-                        <span className="text-xs text-neutral-400 font-mono">{tx.size}</span>
-                        <span className="text-[10px] text-neutral-500 mt-0.5">{tx.timestamp}</span>
+              return (
+                <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/40 select-none">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span
+                      className={`flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg border ${
+                        isFailed
+                          ? "bg-red-500/10 border-red-500/20 text-red-400"
+                          : isReceive
+                          ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
+                          : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                      }`}
+                    >
+                      <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                      </svg>
+                    </span>
+
+                    <div className="flex flex-col min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-neutral-100 truncate">
+                          {latest.totalFiles > 1 ? `${latest.totalFiles} files` : latest.fileName}
+                        </span>
+                        <span className="text-[10px] font-mono text-neutral-400">{latest.size}</span>
                       </div>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
-                        tx.status === "completed" 
-                          ? tx.direction === "receive"
-                            ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                            : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
-                          : "bg-red-500/10 text-red-400 border-red-500/20"
-                      }`}>
-                        {tx.status === "completed" ? "Completed" : "Failed"}
+                      <span className="text-[11px] text-neutral-400 mt-0.5 flex items-center gap-1.5 truncate">
+                        <span>{isReceive ? "↓ Received from" : "↑ Sent to"}</span>
+                        <span className="text-neutral-200 font-medium">{latest.deviceName}</span>
+                        <span>•</span>
+                        <span>{displayTime}</span>
                       </span>
                     </div>
                   </div>
-                ))}
-              </div>
 
-              {sessionStore.recentTransfers.length > 5 && (
-                <div className="flex items-center justify-between px-3.5 py-2.5 border-t border-white/[0.06] bg-neutral-950/60 text-xs">
-                  <span className="text-neutral-400 font-medium">
-                    Showing 5 of {sessionStore.recentTransfers.length} transfers
-                  </span>
                   <button
                     type="button"
                     onClick={() => onNavigateHistory ? onNavigateHistory() : addToast("History page available in menu", "info")}
-                    className="text-blue-400 hover:text-blue-300 font-medium hover:underline flex items-center gap-1 cursor-pointer outline-none"
+                    className="self-start sm:self-auto text-xs font-medium text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 shrink-0 cursor-pointer outline-none"
                   >
-                    <span>View all transfers</span>
+                    <span>View transfer history</span>
                     <span>→</span>
                   </button>
                 </div>
-              )}
-            </div>
+              );
+            })()
           ) : (
-            <div className="py-1 select-none">
-              <p className="text-xs text-neutral-500">No transfers yet</p>
+            <div className="flex items-center justify-between p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/30 select-none">
+              <div className="flex flex-col">
+                <span className="text-xs font-medium text-neutral-300">No recent transfers</span>
+                <span className="text-[11px] text-neutral-500 mt-0.5">Transferred files will appear here</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigateHistory ? onNavigateHistory() : addToast("History page available in menu", "info")}
+                className="text-xs font-medium text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 shrink-0 cursor-pointer outline-none"
+              >
+                <span>View transfer history</span>
+                <span>→</span>
+              </button>
             </div>
           )}
         </Section>

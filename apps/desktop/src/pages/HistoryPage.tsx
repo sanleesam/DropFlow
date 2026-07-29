@@ -96,7 +96,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers, onBac
   };
 
   return (
-    <div className="flex flex-col gap-5 w-full max-w-[980px] mx-auto p-4 sm:p-6 animate-[backdrop-fade-in_0.15s_ease-out]">
+    <div className="flex flex-col gap-5 w-full max-w-[980px] mx-auto p-4 sm:p-6 transition-opacity duration-150">
       {/* ── Page Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-white/[0.07]">
         <div>
