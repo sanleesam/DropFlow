@@ -8,6 +8,17 @@ import { useSettings } from "../components/SettingsProvider";
 import { useToast } from "../components/ToastProvider";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+
+import {
+  createInitialSessionStore,
+  startSendSession,
+  applyProgressEvent,
+  applyCompletionEvent,
+  applyFailureEvent,
+  dismissActiveSession,
+  SessionStateStore,
+} from "../utils/transferSessionManager";
 
 // ─── Section wrapper ────────────────────────────────────────────────────────
 
@@ -69,43 +80,36 @@ const IconClock: React.FC = () => (
   </svg>
 );
 
+async function triggerDesktopNotification(title: string, body: string) {
+  try {
+    let granted = await isPermissionGranted();
+    if (!granted) {
+      const permission = await requestPermission();
+      granted = permission === "granted";
+    }
+    if (granted) {
+      sendNotification({ title, body });
+    }
+  } catch (err) {
+    console.error("[Notification] Failed to send desktop notification:", err);
+  }
+}
+
 // ─── Home page ────────────────────────────────────────────────────────────────
-
-export interface RecentTransfer {
-  id: string;
-  fileName: string;
-  deviceName: string;
-  size: string;
-  timestamp: string;
-  status: "completed" | "failed";
-  direction: "send" | "receive";
-  totalFiles: number;
-}
-
-export interface ActiveTransferInfo {
-  id: string;
-  deviceName: string;
-  fileName: string;
-  totalFiles: number;
-  direction: "send" | "receive";
-}
 
 const Home: React.FC = () => {
   const { settings } = useSettings();
   const { addToast } = useToast();
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
-  const [activeTransfers, setActiveTransfers] = useState<Record<string, ActiveTransferInfo>>({});
+  
+  // Central Session Store managing active and recent transfers
+  const [sessionStore, setSessionStore] = useState<SessionStateStore>(createInitialSessionStore);
+  
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const wasSettingsOpenRef = useRef(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [localUuid, setLocalUuid] = useState<string>("");
   const discoveryEventRevision = useRef(0);
-
-  // Production state starts clean with zero mock transfers
-  const [recentTransfers, setRecentTransfers] = useState<RecentTransfer[]>([]);
-
-  // Prevent duplicate completion handling across re-renders
-  const completedTransferIdsRef = useRef<Set<string>>(new Set());
 
   // Restore focus to Settings button after modal is closed
   useEffect(() => {
@@ -131,45 +135,59 @@ const Home: React.FC = () => {
     );
   }, []);
 
-  // Auto-detect incoming receive transfers to display active receiving card
+  // Long-lived central IPC event listeners registered once on mount
   useEffect(() => {
     let unlistenProgress: (() => void) | undefined;
-    const setupReceiveListener = async () => {
+    let unlistenCompleted: (() => void) | undefined;
+    let unlistenFailed: (() => void) | undefined;
+
+    const setupCentralListeners = async () => {
       try {
         unlistenProgress = await listen<any>("transfer-progress", (event) => {
-          const payload = event.payload;
-          const fileName = payload.fileName ?? payload.currentFileName ?? payload.file_name ?? "Incoming File";
-          const deviceName = payload.deviceName ?? payload.device_name ?? "Peer Device";
-          const sessionId = payload.sessionId ?? payload.session_id ?? `rx-${Date.now()}`;
-          const totalFiles = payload.totalFiles ?? payload.total_files ?? 1;
+          setSessionStore((prev) => applyProgressEvent(prev, event.payload));
+        });
 
-          setActiveTransfers((prev) => {
-            if (!prev[sessionId]) {
-              return {
-                ...prev,
-                [sessionId]: {
-                  id: sessionId,
-                  deviceName,
-                  fileName,
-                  totalFiles,
-                  direction: "receive",
-                },
-              };
+        unlistenCompleted = await listen<any>("transfer-completed", (event) => {
+          const payload = event.payload;
+          setSessionStore((prev) => {
+            const isReceive =
+              payload.direction === "receive" ||
+              prev.activeTransfers[payload.sessionId]?.direction === "receive";
+
+            const next = applyCompletionEvent(prev, payload);
+
+            if (isReceive && !prev.completedSessionIds.has(payload.sessionId)) {
+              addToast(
+                `Received ${payload.fileName || "file"} from ${payload.deviceName || "Peer Device"}`,
+                "success"
+              );
+              triggerDesktopNotification(
+                "DropFlow — Transfer Complete",
+                `${payload.fileName || "file"}\nReceived from ${payload.deviceName || "Peer Device"}`
+              );
             }
-            return prev;
+            return next;
           });
         });
+
+        unlistenFailed = await listen<any>("transfer-failed", (event) => {
+          const payload = event.payload;
+          setSessionStore((prev) => applyFailureEvent(prev, payload));
+          addToast(`Transfer failed: ${payload.error || "Unknown error"}`, "error");
+        });
       } catch (err) {
-        console.error("[Home] Failed to setup receive listener:", err);
+        console.error("[Home] Failed to setup central event listeners:", err);
       }
     };
 
-    setupReceiveListener();
+    setupCentralListeners();
 
     return () => {
       if (unlistenProgress) unlistenProgress();
+      if (unlistenCompleted) unlistenCompleted();
+      if (unlistenFailed) unlistenFailed();
     };
-  }, []);
+  }, [addToast]);
 
   // Subscribe before browsing, then hydrate from the backend source of truth.
   useEffect(() => {
@@ -281,43 +299,6 @@ const Home: React.FC = () => {
     }
   }, [settings.deviceName, settings.deviceVisibility, localUuid]);
 
-  const handleTransferComplete = useCallback((payload?: any) => {
-    const sessionId = payload?.sessionId || payload?.session_id;
-    if (!sessionId) return;
-
-    setActiveTransfers((prev) => {
-      const active = prev[sessionId];
-      if (active && !completedTransferIdsRef.current.has(active.id)) {
-        completedTransferIdsRef.current.add(active.id);
-
-        const totalFiles = payload?.totalFiles ?? payload?.total_files ?? active.totalFiles ?? 1;
-        let displayName = payload?.fileName || payload?.file_name || active.fileName;
-
-        if (totalFiles > 1 && payload?.files && payload.files.length > 0) {
-          const first = payload.files[0].relativePath || payload.files[0].relative_path;
-          const count = payload.files.length;
-          displayName = `${first} (+${count - 1} other ${count - 1 === 1 ? "file" : "files"})`;
-        }
-
-        const newTransfer: RecentTransfer = {
-          id: active.id,
-          fileName: displayName,
-          deviceName: payload?.deviceName || payload?.device_name || active.deviceName,
-          size: payload?.size || "Complete",
-          timestamp: payload?.timestamp || "Just now",
-          status: "completed",
-          direction: payload?.direction || active.direction || "send",
-          totalFiles,
-        };
-        setRecentTransfers((recent) => [newTransfer, ...recent]);
-      }
-
-      const next = { ...prev };
-      delete next[sessionId];
-      return next;
-    });
-  }, []);
-
   const handleSend = useCallback(
     async (selectedFiles: SelectedFilePayload[]) => {
       if (selectedFiles.length === 0) return;
@@ -339,20 +320,16 @@ const Home: React.FC = () => {
         ? `${primaryName} (+${totalCount - 1} other ${totalCount - 1 === 1 ? "file" : "files"})`
         : primaryName;
 
-      const txId = `tx-${Date.now()}`;
-      setActiveTransfers((prev) => ({
-        ...prev,
-        [txId]: {
-          id: txId,
-          deviceName: targetDevice.name,
-          fileName: displayFileName,
-          totalFiles: totalCount,
-          direction: "send",
-        },
-      }));
+      // Single canonical session ID created by frontend and passed to Rust
+      const sessionId = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+      setSessionStore((prev) =>
+        startSendSession(prev, sessionId, targetDevice.name, displayFileName, totalCount)
+      );
 
       try {
-        const sessionId = await invoke<string>("send_files", {
+        await invoke<string>("send_files", {
+          sessionId,
           peerAddress,
           peerPort,
           localUuid,
@@ -360,31 +337,33 @@ const Home: React.FC = () => {
           filePaths,
         });
 
-        // Robust fallback completion: when invoke() resolves, ensure the transfer
-        // completes cleanly even if an event was missed due to timing/IPC delays.
-        handleTransferComplete({
-          sessionId: sessionId || txId,
-          fileName: displayFileName,
-          deviceName: targetDevice.name,
-          size: "Complete",
-          timestamp: "Just now",
-          direction: "send",
-          totalFiles: totalCount,
-        });
+        // Robust fallback completion upon invoke resolution
+        setSessionStore((prev) =>
+          applyCompletionEvent(prev, {
+            sessionId,
+            fileName: displayFileName,
+            deviceName: targetDevice.name,
+            size: "Complete",
+            timestamp: "Just now",
+            direction: "send",
+            totalFiles: totalCount,
+          })
+        );
       } catch (err: any) {
         console.error("[Home] Send failed:", err);
+        setSessionStore((prev) =>
+          applyFailureEvent(prev, {
+            sessionId,
+            error: String(err),
+          })
+        );
         addToast(`Transfer error: ${err}`, "error");
-        setActiveTransfers((prev) => {
-          const next = { ...prev };
-          delete next[txId];
-          return next;
-        });
       }
     },
-    [devices, selectedDeviceId, localUuid, settings.deviceName, addToast, handleTransferComplete],
+    [devices, selectedDeviceId, localUuid, settings.deviceName, addToast],
   );
 
-  const activeTransferList = Object.values(activeTransfers);
+  const activeTransferList = Object.values(sessionStore.activeTransfers);
 
   return (
     <div className="df-app-shell flex h-screen w-screen flex-col overflow-hidden text-neutral-100">
@@ -443,22 +422,17 @@ const Home: React.FC = () => {
         {/* ── Active Transfer Progress Cards ── */}
         {activeTransferList.length > 0 && (
           <div className="w-full flex flex-col gap-3">
-            {activeTransferList.map((transfer) => (
+            {activeTransferList.map((session) => (
               <TransferProgress
-                key={transfer.id}
-                sessionId={transfer.id}
-                deviceName={transfer.deviceName}
-                fileName={transfer.fileName}
-                totalFiles={transfer.totalFiles}
-                direction={transfer.direction}
-                onClose={() => {
-                  setActiveTransfers((prev) => {
-                    const next = { ...prev };
-                    delete next[transfer.id];
-                    return next;
-                  });
+                key={session.id}
+                session={session}
+                onDismiss={(id) => setSessionStore((prev) => dismissActiveSession(prev, id))}
+                onCancel={(id) => {
+                  invoke("cancel_transfer", { sessionId: id }).catch(console.error);
+                  setSessionStore((prev) =>
+                    applyFailureEvent(prev, { sessionId: id, error: "Transfer cancelled by user" })
+                  );
                 }}
-                onComplete={handleTransferComplete}
               />
             ))}
           </div>
@@ -470,9 +444,9 @@ const Home: React.FC = () => {
           title="Recent transfers"
           icon={<IconClock />}
         >
-          {recentTransfers.length > 0 ? (
+          {sessionStore.recentTransfers.length > 0 ? (
             <div className="w-full flex flex-col divide-y divide-white/[0.06] rounded-xl border border-white/[0.07] bg-neutral-900/40 overflow-hidden">
-              {recentTransfers.map((tx) => (
+              {sessionStore.recentTransfers.map((tx) => (
                 <div key={tx.id} className="flex items-center justify-between px-3 py-2 hover:bg-white/[0.02] transition-colors duration-150">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-neutral-800 border border-white/[0.06] ${

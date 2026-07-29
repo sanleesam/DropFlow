@@ -1,137 +1,45 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { X, CheckCircle2, FolderOpen, FileText, Ban } from "lucide-react";
 import { useToast } from "./ToastProvider";
 import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
-import { listen } from "@tauri-apps/api/event";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { invoke } from "@tauri-apps/api/core";
-
-export interface FileMetadataPayload {
-  fileIndex: number;
-  relativePath: string;
-  sizeBytes: number;
-  sha256Checksum?: string;
-}
+import { ActiveTransferSession } from "../utils/transferSessionManager";
 
 interface TransferProgressProps {
-  sessionId?: string;
-  /** Name of the remote peer device */
-  deviceName: string;
-  /** Primary display name of the transfer (file name or batch summary) */
-  fileName: string;
-  /** Total number of files in session */
-  totalFiles?: number;
-  /** Transfer direction: "send" or "receive" */
-  direction?: "send" | "receive";
-  /** Callback fired when user closes or dismisses card */
-  onClose: () => void;
-  /** Callback fired when transfer reaches 100% */
-  onComplete?: (payload?: any) => void;
-}
-
-type TransferStatus = "Preparing..." | "Sending..." | "Receiving..." | "Finishing..." | "Completed" | "Failed";
-
-interface ProgressPayload {
-  sessionId?: string;
-  currentFileIndex?: number;
-  currentFileName?: string;
-  currentFileBytes?: number;
-  currentFileTotalBytes?: number;
-  sessionBytesSent?: number;
-  sessionTotalBytes?: number;
-  totalFiles?: number;
-  percentage?: number;
-  speedBytesPerSec?: number;
-}
-
-interface CompletedPayload {
-  sessionId?: string;
-  fileName?: string;
-  deviceName?: string;
-  size?: string;
-  timestamp?: string;
-  totalFiles?: number;
-  totalSizeBytes?: number;
-  files?: FileMetadataPayload[];
-}
-
-interface FailedPayload {
-  sessionId?: string;
-  error?: string;
-}
-
-async function triggerDesktopNotification(title: string, body: string) {
-  try {
-    let granted = await isPermissionGranted();
-    if (!granted) {
-      const permission = await requestPermission();
-      granted = permission === "granted";
-    }
-    if (granted) {
-      sendNotification({ title, body });
-    }
-  } catch (err) {
-    console.error("[Notification] Failed to send desktop notification:", err);
-  }
+  session: ActiveTransferSession;
+  onDismiss: (sessionId: string) => void;
+  onCancel: (sessionId: string) => void;
 }
 
 export const TransferProgress: React.FC<TransferProgressProps> = ({
-  sessionId,
-  deviceName,
-  fileName,
-  totalFiles = 1,
-  direction = "send",
-  onClose,
-  onComplete,
+  session,
+  onDismiss,
+  onCancel,
 }) => {
   const { addToast } = useToast();
   const { settings } = useSettings();
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
 
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState<TransferStatus>(
-    direction === "receive" ? "Receiving..." : "Preparing..."
-  );
-  const [speed, setSpeed] = useState("0 MB/s");
-  const [timeRemaining, setTimeRemaining] = useState("Calculating...");
-  const [bytesInfo, setBytesInfo] = useState("");
-  const [currentFileLabel, setCurrentFileLabel] = useState(fileName);
-  const [completedFileList, setCompletedFileList] = useState<FileMetadataPayload[]>([]);
   const [isDismissing, setIsDismissing] = useState(false);
   const [receiveDir, setReceiveDir] = useState<string>("");
 
-  const onCompleteRef = useRef(onComplete);
-  useEffect(() => {
-    onCompleteRef.current = onComplete;
-  }, [onComplete]);
-
-  const hasCompletedRef = useRef(false);
-
   // Fetch receive directory path for Open Folder action
   useEffect(() => {
-    if (direction === "receive") {
+    if (session.direction === "receive") {
       invoke<string>("get_receive_dir")
         .then(setReceiveDir)
         .catch(console.error);
     }
-  }, [direction]);
+  }, [session.direction]);
 
   const handleDismiss = () => {
     setIsDismissing(true);
-    setTimeout(onClose, 150);
+    setTimeout(() => onDismiss(session.id), 150);
   };
 
-  const handleCancelTransfer = async () => {
-    if (sessionId) {
-      try {
-        await invoke("cancel_transfer", { sessionId });
-        addToast("Transfer cancellation requested.", "info");
-      } catch (err) {
-        console.error("[TransferProgress] Failed to request cancellation:", err);
-      }
-    }
-    handleDismiss();
+  const handleCancelTransfer = () => {
+    onCancel(session.id);
   };
 
   const handleOpenFolder = async () => {
@@ -146,7 +54,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
   const handleOpenFile = async (specificFileName?: string) => {
     try {
-      const targetName = specificFileName || fileName;
+      const targetName = specificFileName || session.fileName;
       const dirPath = receiveDir || (await invoke<string>("get_receive_dir"));
       const normalizedDir = dirPath.replace(/\\/g, "/").replace(/\/$/, "");
       const fullPath = `${normalizedDir}/${targetName}`;
@@ -157,134 +65,8 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
     }
   };
 
-  useEffect(() => {
-    hasCompletedRef.current = false;
-    setProgress(0);
-    setStatus(direction === "receive" ? "Receiving..." : "Preparing...");
-    setSpeed("0 MB/s");
-    setTimeRemaining("Calculating...");
-
-    let unlistenProgress: (() => void) | undefined;
-    let unlistenCompleted: (() => void) | undefined;
-    let unlistenFailed: (() => void) | undefined;
-
-    const setupListeners = async () => {
-      try {
-        unlistenProgress = await listen<ProgressPayload>("transfer-progress", (event) => {
-          const payload = event.payload;
-
-          // Filter by sessionId if available
-          if (sessionId && payload.sessionId && payload.sessionId !== sessionId) {
-            return;
-          }
-
-          const pct = payload.percentage ?? 0;
-          const rounded = Math.min(100, Math.max(0, Math.round(pct)));
-          setProgress(rounded);
-
-          const speedBytes = payload.speedBytesPerSec ?? 0;
-          const mbps = (speedBytes / (1024 * 1024)).toFixed(1);
-          setSpeed(`${mbps} MB/s`);
-
-          const sessionSent = payload.sessionBytesSent ?? 0;
-          const sessionTotal = payload.sessionTotalBytes ?? 0;
-
-          if (sessionTotal > 0) {
-            const sentMb = (sessionSent / (1024 * 1024)).toFixed(1);
-            const totalMb = (sessionTotal / (1024 * 1024)).toFixed(1);
-            setBytesInfo(`${sentMb} / ${totalMb} MB`);
-          }
-
-          if (payload.currentFileName) {
-            const fileIdx = (payload.currentFileIndex ?? 0) + 1;
-            const fileCount = payload.totalFiles ?? totalFiles;
-            if (fileCount > 1) {
-              setCurrentFileLabel(`[${fileIdx}/${fileCount}] ${payload.currentFileName}`);
-            } else {
-              setCurrentFileLabel(payload.currentFileName);
-            }
-          }
-
-          if (rounded < 100) {
-            setStatus(direction === "receive" ? "Receiving..." : "Sending...");
-            const remainingBytes = Math.max(0, sessionTotal - sessionSent);
-            const remainingSecs = speedBytes > 0
-              ? Math.ceil(remainingBytes / speedBytes)
-              : 0;
-            setTimeRemaining(`${remainingSecs} second${remainingSecs !== 1 ? "s" : ""}`);
-          }
-        });
-
-        unlistenCompleted = await listen<CompletedPayload>("transfer-completed", (event) => {
-          const payload = event.payload;
-          if (sessionId && payload.sessionId && payload.sessionId !== sessionId) {
-            return;
-          }
-
-          setProgress(100);
-          setStatus("Completed");
-          setSpeed("0 MB/s");
-          setTimeRemaining("0 seconds");
-
-          if (payload.files && payload.files.length > 0) {
-            setCompletedFileList(payload.files);
-          }
-
-          if (!hasCompletedRef.current) {
-            hasCompletedRef.current = true;
-            const itemFileName = payload.fileName ?? fileName;
-            const itemDeviceName = payload.deviceName ?? deviceName;
-
-            if (direction === "receive") {
-              addToast(`Received ${itemFileName} from ${itemDeviceName}`, "success");
-              triggerDesktopNotification(
-                "DropFlow — Transfer Complete",
-                `${itemFileName}\nReceived from ${itemDeviceName}`
-              );
-            } else {
-              addToast("Transfer completed successfully.", "success");
-            }
-
-            if (onCompleteRef.current) {
-              onCompleteRef.current({
-                sessionId: payload.sessionId ?? sessionId,
-                fileName: itemFileName,
-                deviceName: itemDeviceName,
-                size: payload.size ?? "Complete",
-                timestamp: payload.timestamp ?? "Just now",
-                totalFiles: payload.totalFiles ?? totalFiles,
-                totalSizeBytes: payload.totalSizeBytes ?? 0,
-                files: payload.files ?? [],
-                direction,
-              });
-            }
-          }
-        });
-
-        unlistenFailed = await listen<FailedPayload>("transfer-failed", (event) => {
-          const payload = event.payload;
-          if (sessionId && payload.sessionId && payload.sessionId !== sessionId) {
-            return;
-          }
-          setStatus("Failed");
-          addToast(`Transfer failed: ${payload.error || "Unknown error"}`, "error");
-        });
-      } catch (err) {
-        console.error("[TransferProgress] Failed to register event listeners:", err);
-      }
-    };
-
-    setupListeners();
-
-    return () => {
-      if (unlistenProgress) unlistenProgress();
-      if (unlistenCompleted) unlistenCompleted();
-      if (unlistenFailed) unlistenFailed();
-    };
-  }, [addToast, fileName, deviceName, direction, sessionId, totalFiles]);
-
-  const isCompleted = progress === 100;
-  const isFailed = status === "Failed";
+  const isCompleted = session.progress === 100 || session.status === "Completed";
+  const isFailed = session.status === "Failed";
 
   return (
     <div
@@ -301,12 +83,12 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         <div className="flex items-center gap-2 min-w-0">
           <span className={`h-2 w-2 rounded-full ${accent.progressBgDot} animate-pulse flex-shrink-0`} />
           <h3 className="text-sm font-semibold tracking-tight text-neutral-100 truncate">
-            {direction === "receive" ? "Receiving" : "Sending"}{" "}
-            {totalFiles > 1 ? `${totalFiles} files` : "file"}
+            {session.direction === "receive" ? "Receiving" : "Sending"}{" "}
+            {session.totalFiles > 1 ? `${session.totalFiles} files` : "file"}
           </h3>
           <span className="text-xs text-neutral-400 truncate">
-            {direction === "receive" ? "from" : "to"}{" "}
-            <span className="font-medium text-neutral-200">{deviceName}</span>
+            {session.direction === "receive" ? "from" : "to"}{" "}
+            <span className="font-medium text-neutral-200">{session.deviceName}</span>
           </span>
         </div>
 
@@ -316,17 +98,17 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
             {!isCompleted && !isFailed ? (
               <>
                 <span className={`h-1.5 w-1.5 rounded-full ${accent.progressBgDot} animate-pulse`} />
-                <span className={accent.progressText}>{status}</span>
+                <span className={accent.progressText}>{session.status}</span>
               </>
             ) : isCompleted ? (
               <>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span className="text-emerald-400">{status}</span>
+                <span className="text-emerald-400">Completed</span>
               </>
             ) : (
               <>
                 <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-                <span className="text-red-400">{status}</span>
+                <span className="text-red-400">Failed</span>
               </>
             )}
           </div>
@@ -388,15 +170,15 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
         {/* Text Details */}
         <div className="flex-1 min-w-0">
-          <p className="truncate text-sm font-medium text-neutral-200">{currentFileLabel}</p>
+          <p className="truncate text-sm font-medium text-neutral-200">{session.currentFileLabel}</p>
           <div className="mt-0.5 flex items-center gap-2 text-xs text-neutral-500 select-none truncate">
-            <span>{speed}</span>
+            <span>{session.speed}</span>
             <span>•</span>
-            <span>{timeRemaining} remaining</span>
-            {bytesInfo && (
+            <span>{session.timeRemaining} remaining</span>
+            {session.bytesInfo && (
               <>
                 <span>•</span>
-                <span className="font-mono">{bytesInfo}</span>
+                <span className="font-mono">{session.bytesInfo}</span>
               </>
             )}
           </div>
@@ -405,7 +187,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         {/* Progress Percent */}
         <div className="text-right select-none flex-shrink-0">
           <span className="text-lg font-semibold tracking-tight text-neutral-100">
-            {progress}%
+            {session.progress}%
           </span>
         </div>
       </div>
@@ -416,7 +198,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
             <div
               className={`h-full rounded-full ${accent.switchBg} transition-all duration-75 ease-out`}
-              style={{ width: `${progress}%` }}
+              style={{ width: `${session.progress}%` }}
             />
           </div>
         ) : isCompleted ? (
@@ -424,16 +206,16 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs text-emerald-400 font-semibold">
                 <CheckCircle2 size={16} strokeWidth={2} />
-                <span>Transfer Complete ({totalFiles} {totalFiles === 1 ? "file" : "files"})</span>
+                <span>Transfer Complete ({session.totalFiles} {session.totalFiles === 1 ? "file" : "files"})</span>
               </div>
               <span className="text-[11px] font-mono text-neutral-400 truncate max-w-[200px]" title={receiveDir}>
                 {receiveDir || "~/Downloads/DropFlow/"}
               </span>
             </div>
 
-            {completedFileList.length > 1 && (
+            {session.completedFiles.length > 1 && (
               <ul className="flex flex-col gap-1 max-h-24 overflow-y-auto py-1 pr-1 text-xs">
-                {completedFileList.map((f, i) => (
+                {session.completedFiles.map((f, i) => (
                   <li key={i} className="flex items-center justify-between text-neutral-300">
                     <span className="truncate flex-1">{f.relativePath}</span>
                     <span className="font-mono text-[11px] text-neutral-400 ml-2">
@@ -444,7 +226,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
               </ul>
             )}
 
-            {direction === "receive" && (
+            {session.direction === "receive" && (
               <div className="flex items-center gap-2 pt-0.5">
                 <button
                   type="button"
@@ -467,7 +249,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
           </div>
         ) : (
           <div className="flex items-center justify-between rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-400 font-medium select-none">
-            <span>Transfer failed.</span>
+            <span>Transfer failed: {session.error || "Unknown error"}</span>
             <button
               type="button"
               onClick={handleDismiss}

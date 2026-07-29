@@ -17,6 +17,7 @@ use super::protocol::{
 };
 use super::receiver::{TransferCompletedPayload, TransferFailedPayload, TransferProgressPayload};
 
+#[allow(clippy::too_many_arguments)]
 pub fn send_files_over_tcp(
     app: &AppHandle,
     peer_address: &str,
@@ -25,12 +26,13 @@ pub fn send_files_over_tcp(
     local_device_name: &str,
     file_paths: Vec<String>,
     cancel_flag: Arc<AtomicBool>,
+    session_id: Option<String>,
 ) -> Result<String, String> {
     if file_paths.is_empty() {
         return Err("No files selected for transfer".to_string());
     }
 
-    let session_id = format!("tx-{}", Uuid::new_v4());
+    let session_id = session_id.unwrap_or_else(|| format!("tx-{}", Uuid::new_v4()));
     let mut files_metadata = Vec::new();
     let mut total_size_bytes: u64 = 0;
 

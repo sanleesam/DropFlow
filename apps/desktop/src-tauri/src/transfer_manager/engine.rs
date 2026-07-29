@@ -22,9 +22,11 @@ impl Default for TransferState {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn send_files(
     app: AppHandle,
     state: State<'_, TransferState>,
+    session_id: Option<String>,
     peer_address: String,
     peer_port: u16,
     local_uuid: String,
@@ -33,16 +35,17 @@ pub async fn send_files(
 ) -> Result<String, String> {
     let cancel_flag = Arc::new(AtomicBool::new(false));
 
-    let session_id_placeholder = format!("tx-temp-{}", uuid::Uuid::new_v4());
+    let target_session_id = session_id.unwrap_or_else(|| format!("tx-{}", uuid::Uuid::new_v4()));
     {
         let mut cancellations = state
             .active_cancellations
             .lock()
             .map_err(|e| e.to_string())?;
-        cancellations.insert(session_id_placeholder.clone(), Arc::clone(&cancel_flag));
+        cancellations.insert(target_session_id.clone(), Arc::clone(&cancel_flag));
     }
 
     let cancel_flag_clone = Arc::clone(&cancel_flag);
+    let session_id_param = target_session_id.clone();
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         send_files_over_tcp(
@@ -53,6 +56,7 @@ pub async fn send_files(
             &local_device_name,
             file_paths,
             cancel_flag_clone,
+            Some(session_id_param),
         )
     })
     .await
@@ -63,10 +67,7 @@ pub async fn send_files(
             .active_cancellations
             .lock()
             .map_err(|e| e.to_string())?;
-        cancellations.remove(&session_id_placeholder);
-        if let Ok(ref actual_session_id) = result {
-            cancellations.remove(actual_session_id);
-        }
+        cancellations.remove(&target_session_id);
     }
 
     result
