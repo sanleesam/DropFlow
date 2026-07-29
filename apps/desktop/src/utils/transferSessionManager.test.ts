@@ -5,6 +5,7 @@ import {
   applyCompletionEvent,
   applyFailureEvent,
   dismissActiveSession,
+  MAX_HISTORY_CAPACITY,
 } from "./transferSessionManager.ts";
 
 function assertEqual(actual: any, expected: any, message: string) {
@@ -139,7 +140,7 @@ export function runLifecycleTests() {
     let store = createInitialSessionStore();
     store = startSendSession(store, "tx-7", "Laptop", "iso_image.iso", 1);
     store = applyFailureEvent(store, { sessionId: "tx-7", error: "Transfer cancelled by user" });
-    assertTrue(store.activeTransfers["tx-7"].status === "Failed", "S7: Cancelled transfer sets Failed status");
+    assertTrue(store.activeTransfers["tx-7"].status === "Cancelled", "S7: Cancelled transfer sets Cancelled status");
     assertEqual(store.recentTransfers.length, 0, "S7: No history entry created for cancelled transfer");
 
     store = dismissActiveSession(store, "tx-7");
@@ -274,12 +275,68 @@ export function runLifecycleTests() {
       sessionId: "rx-12",
       error: "Transfer cancelled by receiver",
     });
-    assertTrue(store.activeTransfers["rx-12"].status === "Failed", "S12: Receiver status set to Failed on cancel");
-    assertTrue(store.activeTransfers["rx-12"].error === "Transfer cancelled by receiver", "S12: Receiver cancellation error preserved");
+    store = applyFailureEvent(store, {
+      sessionId: "rx-12",
+      error: "Transfer cancelled by receiver",
+    });
+    assertTrue(store.activeTransfers["rx-12"].status === "Cancelled", "S12: Receiver status set to Cancelled");
     assertEqual(store.recentTransfers.length, 0, "S12: No recent transfer added for cancelled receive");
 
     store = dismissActiveSession(store, "rx-12");
     assertTrue(store.activeTransfers["rx-12"] === undefined, "S12: Active card dismissed cleanly");
+  }
+
+  // ── Scenario 13: 500-Session History Capacity Limit ────────────────────────
+  {
+    let store = createInitialSessionStore();
+    for (let i = 0; i < 550; i++) {
+      store = applyCompletionEvent(store, {
+        sessionId: `tx-cap-${i}`,
+        fileName: `file_${i}.dat`,
+        size: "1 MB",
+      });
+    }
+
+    assertEqual(store.recentTransfers.length, MAX_HISTORY_CAPACITY, "S13: History length capped at MAX_HISTORY_CAPACITY (500)");
+    assertEqual(store.recentTransfers[0].id, "tx-cap-549", "S13: Newest session is at index 0");
+    assertEqual(store.recentTransfers[MAX_HISTORY_CAPACITY - 1].id, "tx-cap-50", "S13: Oldest retained session is at index 499");
+  }
+
+  // ── Scenario 14: Active Card Dismissal Isolation ───────────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-card-14", "Pixel 8", "document.pdf", 1);
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-card-14",
+      fileName: "document.pdf",
+      size: "2.1 MB",
+    });
+
+    assertTrue(store.activeTransfers["tx-card-14"] !== undefined, "S14: Active card exists before auto-dismiss");
+    assertEqual(store.recentTransfers.length, 1, "S14: Recent transfer history entry exists");
+
+    store = dismissActiveSession(store, "tx-card-14");
+    assertTrue(store.activeTransfers["tx-card-14"] === undefined, "S14: Active card removed on dismiss");
+    assertEqual(store.recentTransfers.length, 1, "S14: Recent transfer history entry STILL EXISTS after card dismiss");
+    assertEqual(store.recentTransfers[0].id, "tx-card-14", "S14: Correct history item preserved");
+  }
+
+  // ── Scenario 15: Concurrency Mixed Outcomes (Active + Complete + Fail) ──────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-c1", "Device 1", "file1.zip", 1);
+    store = startSendSession(store, "tx-c2", "Device 2", "file2.zip", 1);
+    store = startSendSession(store, "tx-c3", "Device 3", "file3.zip", 1);
+
+    store = applyProgressEvent(store, { sessionId: "tx-c1", percentage: 50 });
+    store = applyCompletionEvent(store, { sessionId: "tx-c2", fileName: "file2.zip" });
+    store = applyFailureEvent(store, { sessionId: "tx-c3", error: "Connection timed out" });
+
+    assertEqual(store.activeTransfers["tx-c1"].status, "Sending...", "S15: Session 1 remains active sending");
+    assertEqual(store.activeTransfers["tx-c2"].status, "Completed", "S15: Session 2 completed");
+    assertEqual(store.activeTransfers["tx-c3"].status, "Failed", "S15: Session 3 failed with timeout");
+    assertEqual(store.recentTransfers.length, 1, "S15: Only completed session added to recent transfers");
+    assertEqual(store.recentTransfers[0].id, "tx-c2", "S15: Correct session in recent transfers");
   }
 
   console.log("All Transfer Session Lifecycle & Path Propagation Tests PASSED cleanly! ✓");

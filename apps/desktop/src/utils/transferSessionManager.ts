@@ -1,3 +1,5 @@
+export const MAX_HISTORY_CAPACITY = 500;
+
 export interface FileMetadataPayload {
   fileIndex: number;
   relativePath: string;
@@ -44,7 +46,7 @@ export interface ActiveTransferSession {
   totalFiles: number;
   direction: "send" | "receive";
   progress: number;
-  status: "Preparing..." | "Sending..." | "Receiving..." | "Finishing..." | "Completed" | "Failed";
+  status: "Preparing..." | "Sending..." | "Receiving..." | "Finishing..." | "Completed" | "Cancelled" | "Failed";
   speed: string;
   timeRemaining: string;
   bytesInfo: string;
@@ -63,8 +65,10 @@ export interface RecentTransfer {
   status: "completed" | "failed";
   direction: "send" | "receive";
   totalFiles: number;
+  totalSizeBytes?: number;
   files?: FileMetadataPayload[];
   receiveDir?: string;
+  error?: string;
 }
 
 export interface SessionStateStore {
@@ -234,12 +238,17 @@ export function applyCompletionEvent(
   const nextCompletedIds = new Set(store.completedSessionIds);
   nextCompletedIds.add(sessionId);
 
+  const nextRecentTransfers = [newRecent, ...store.recentTransfers].slice(
+    0,
+    MAX_HISTORY_CAPACITY
+  );
+
   return {
     activeTransfers: {
       ...store.activeTransfers,
       [sessionId]: updatedActiveSession,
     },
-    recentTransfers: [newRecent, ...store.recentTransfers],
+    recentTransfers: nextRecentTransfers,
     completedSessionIds: nextCompletedIds,
   };
 }
@@ -254,10 +263,12 @@ export function applyFailureEvent(
   const active = store.activeTransfers[sessionId];
   if (!active) return store;
 
+  const isCancelled = error ? /cancell?ed/i.test(error) : false;
+
   const updatedActive: ActiveTransferSession = {
     ...active,
-    status: "Failed",
-    error: error || "Unknown error",
+    status: isCancelled ? "Cancelled" : "Failed",
+    error: error || (isCancelled ? "Transfer cancelled" : "Unknown error"),
   };
 
   return {

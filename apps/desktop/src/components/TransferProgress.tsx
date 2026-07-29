@@ -96,7 +96,29 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
   };
 
   const isCompleted = session.progress === 100 || session.status === "Completed";
+  const isCancelled = session.status === "Cancelled";
   const isFailed = session.status === "Failed";
+
+  // Auto-dismiss completed cards after 2.0s and cancelled cards after 1.5s
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    if (isCompleted) {
+      timer = setTimeout(() => {
+        setIsDismissing(true);
+        setTimeout(() => onDismiss(session.id), 150);
+      }, 2000);
+    } else if (isCancelled) {
+      timer = setTimeout(() => {
+        setIsDismissing(true);
+        setTimeout(() => onDismiss(session.id), 150);
+      }, 1500);
+    }
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [isCompleted, isCancelled, session.id, onDismiss]);
 
   return (
     <div
@@ -125,7 +147,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         <div className="flex items-center gap-2 flex-shrink-0">
           {/* Status Label */}
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-neutral-800 border border-white/[0.06] select-none">
-            {!isCompleted && !isFailed ? (
+            {!isCompleted && !isCancelled && !isFailed ? (
               <>
                 <span className={`h-1.5 w-1.5 rounded-full ${accent.progressBgDot} animate-pulse`} />
                 <span className={accent.progressText}>{session.status}</span>
@@ -134,6 +156,11 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
               <>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                 <span className="text-emerald-400">Completed</span>
+              </>
+            ) : isCancelled ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                <span className="text-amber-400">Cancelled</span>
               </>
             ) : (
               <>
@@ -144,7 +171,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
           </div>
 
           {/* Cancel button during active transfer */}
-          {!isCompleted && !isFailed && (
+          {!isCompleted && !isCancelled && !isFailed && (
             <button
               type="button"
               onClick={handleCancelTransfer}
@@ -224,7 +251,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
       {/* Progress Bar / Completion Summary */}
       <div className="relative w-full">
-        {!isCompleted && !isFailed ? (
+        {!isCompleted && !isCancelled && !isFailed ? (
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
             <div
               className={`h-full rounded-full ${accent.switchBg} transition-all duration-75 ease-out`}
@@ -281,6 +308,17 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
                 </button>
               </div>
             )}
+          </div>
+        ) : isCancelled ? (
+          <div className="flex items-center justify-between rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-400 font-medium select-none">
+            <span>Transfer cancelled</span>
+            <button
+              type="button"
+              onClick={handleDismiss}
+              className="px-2 py-1 rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700 text-[11px]"
+            >
+              Dismiss
+            </button>
           </div>
         ) : (
           <div className="flex items-center justify-between rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-400 font-medium select-none">

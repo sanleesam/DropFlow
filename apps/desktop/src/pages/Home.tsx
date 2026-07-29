@@ -73,6 +73,12 @@ const IconUpload: React.FC = () => (
   </svg>
 );
 
+const IconActivity: React.FC = () => (
+  <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <polyline points="2 8 5 8 7 3 9 13 11 8 14 8" />
+  </svg>
+);
+
 const IconClock: React.FC = () => (
   <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <circle cx="8" cy="8" r="6.5" />
@@ -421,21 +427,27 @@ const Home: React.FC = () => {
 
         {/* ── Active Transfer Progress Cards ── */}
         {activeTransferList.length > 0 && (
-          <div className="w-full flex flex-col gap-3">
-            {activeTransferList.map((session) => (
-              <TransferProgress
-                key={session.id}
-                session={session}
-                onDismiss={(id) => setSessionStore((prev) => dismissActiveSession(prev, id))}
-                onCancel={(id) => {
-                  invoke("cancel_transfer", { sessionId: id }).catch(console.error);
-                  setSessionStore((prev) =>
-                    applyFailureEvent(prev, { sessionId: id, error: "Transfer cancelled by user" })
-                  );
-                }}
-              />
-            ))}
-          </div>
+          <Section
+            id="active-transfers"
+            title="Active transfers"
+            icon={<IconActivity />}
+          >
+            <div className="w-full flex flex-col gap-3">
+              {activeTransferList.map((session) => (
+                <TransferProgress
+                  key={session.id}
+                  session={session}
+                  onDismiss={(id) => setSessionStore((prev) => dismissActiveSession(prev, id))}
+                  onCancel={(id) => {
+                    invoke("cancel_transfer", { sessionId: id }).catch(console.error);
+                    setSessionStore((prev) =>
+                      applyFailureEvent(prev, { sessionId: id, error: "Transfer cancelled by user" })
+                    );
+                  }}
+                />
+              ))}
+            </div>
+          </Section>
         )}
 
         {/* ── Recent Transfers ── */}
@@ -445,46 +457,66 @@ const Home: React.FC = () => {
           icon={<IconClock />}
         >
           {sessionStore.recentTransfers.length > 0 ? (
-            <div className="w-full flex flex-col divide-y divide-white/[0.06] rounded-xl border border-white/[0.07] bg-neutral-900/40 overflow-hidden">
-              {sessionStore.recentTransfers.map((tx) => (
-                <div key={tx.id} className="flex items-center justify-between px-3 py-2 hover:bg-white/[0.02] transition-colors duration-150">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-neutral-800 border border-white/[0.06] ${
-                      tx.status === "completed" 
-                        ? tx.direction === "receive" ? "text-blue-400" : "text-emerald-400" 
-                        : "text-red-400"
-                    }`}>
-                      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                      </svg>
-                    </span>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-medium text-neutral-200 truncate leading-tight">{tx.fileName}</span>
-                      <span className="text-[11px] text-neutral-500 mt-0.5 leading-tight flex items-center gap-1">
-                        <span>{tx.direction === "receive" ? "↓ Received from" : "↑ Sent to"}</span>
-                        <span className="text-neutral-300 font-medium">{tx.deviceName}</span>
+            <div className="w-full flex flex-col rounded-xl border border-white/[0.07] bg-neutral-900/40 overflow-hidden select-none">
+              <div className="flex flex-col divide-y divide-white/[0.06]">
+                {sessionStore.recentTransfers.slice(0, 5).map((tx) => (
+                  <div key={tx.id} className="flex items-center justify-between px-3 py-2 hover:bg-white/[0.02] transition-colors duration-150">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-neutral-800 border border-white/[0.06] ${
+                        tx.status === "completed" 
+                          ? tx.direction === "receive" ? "text-blue-400" : "text-emerald-400" 
+                          : "text-red-400"
+                      }`}>
+                        <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                        </svg>
+                      </span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-medium text-neutral-200 truncate leading-tight">
+                          {tx.totalFiles > 1 ? `${tx.totalFiles} files` : tx.fileName}
+                        </span>
+                        <span className="text-[11px] text-neutral-500 mt-0.5 leading-tight flex items-center gap-1">
+                          <span>{tx.direction === "receive" ? "↓ Received from" : "↑ Sent to"}</span>
+                          <span className="text-neutral-300 font-medium">{tx.deviceName}</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 flex-shrink-0 text-right select-none">
+                      <div className="flex flex-col items-end">
+                        <span className="text-xs text-neutral-400 font-mono">{tx.size}</span>
+                        <span className="text-[10px] text-neutral-500 mt-0.5">{tx.timestamp}</span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
+                        tx.status === "completed" 
+                          ? tx.direction === "receive"
+                            ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                            : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                          : "bg-red-500/10 text-red-400 border-red-500/20"
+                      }`}>
+                        {tx.status === "completed" ? "Completed" : "Failed"}
                       </span>
                     </div>
                   </div>
+                ))}
+              </div>
 
-                  <div className="flex items-center gap-3 flex-shrink-0 text-right select-none">
-                    <div className="flex flex-col items-end">
-                      <span className="text-xs text-neutral-400 font-mono">{tx.size}</span>
-                      <span className="text-[10px] text-neutral-500 mt-0.5">{tx.timestamp}</span>
-                    </div>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
-                      tx.status === "completed" 
-                        ? tx.direction === "receive"
-                          ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                          : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
-                        : "bg-red-500/10 text-red-400 border-red-500/20"
-                    }`}>
-                      {tx.status === "completed" ? "Completed" : "Failed"}
-                    </span>
-                  </div>
+              {sessionStore.recentTransfers.length > 5 && (
+                <div className="flex items-center justify-between px-3.5 py-2.5 border-t border-white/[0.06] bg-neutral-950/60 text-xs">
+                  <span className="text-neutral-400 font-medium">
+                    Showing 5 of {sessionStore.recentTransfers.length} transfers
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => addToast("Full transfer history page coming in next release", "info")}
+                    className="text-blue-400 hover:text-blue-300 font-medium hover:underline flex items-center gap-1 cursor-pointer outline-none"
+                  >
+                    <span>View all transfers</span>
+                    <span>→</span>
+                  </button>
                 </div>
-              ))}
+              )}
             </div>
           ) : (
             <div className="py-1 select-none">
