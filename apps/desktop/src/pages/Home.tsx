@@ -141,6 +141,30 @@ const Home: React.FC = () => {
     );
   }, []);
 
+  // Hydrate persistent history from Rust backend on startup
+  useEffect(() => {
+    invoke<any>("get_app_state")
+      .then((appState) => {
+        if (appState && Array.isArray(appState.history) && appState.history.length > 0) {
+          setSessionStore((prev) => {
+            if (prev.recentTransfers.length > 0) return prev;
+            return {
+              ...prev,
+              recentTransfers: appState.history,
+            };
+          });
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  // Save history to Rust backend whenever recentTransfers changes
+  useEffect(() => {
+    if (sessionStore.recentTransfers.length > 0) {
+      invoke("save_history", { history: sessionStore.recentTransfers }).catch(console.error);
+    }
+  }, [sessionStore.recentTransfers]);
+
   // Long-lived central IPC event listeners registered once on mount
   useEffect(() => {
     let unlistenProgress: (() => void) | undefined;

@@ -1,4 +1,5 @@
 pub mod device_discovery;
+pub mod state_manager;
 pub mod transfer_manager;
 
 use std::sync::Mutex;
@@ -16,7 +17,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            let local_uuid = device_discovery::get_or_create_uuid(app.handle());
+            let app_state = state_manager::load_or_create_state(app.handle());
+            let local_uuid = app_state.device_uuid.clone();
+
             let discovery_engine = device_discovery::MdnsDiscoveryEngine::new(local_uuid.clone())
                 .expect("Failed to initialize mDNS engine");
 
@@ -25,6 +28,14 @@ pub fn run() {
                 .expect("Failed to start TCP transfer receiver");
             let bound_port = receiver.port();
             println!("[Lib] TCP Receiver successfully bound on port {bound_port}");
+
+            app.manage(state_manager::AppStateContainer {
+                state: Mutex::new(app_state),
+                state_file_path: app
+                    .path()
+                    .app_data_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            });
 
             app.manage(device_discovery::DiscoveryState {
                 engine: Box::new(discovery_engine),
@@ -50,6 +61,9 @@ pub fn run() {
             transfer_manager::engine::get_receive_dir,
             transfer_manager::engine::get_receiver_port,
             transfer_manager::engine::open_received_file,
+            state_manager::get_app_state,
+            state_manager::save_settings,
+            state_manager::save_history,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {

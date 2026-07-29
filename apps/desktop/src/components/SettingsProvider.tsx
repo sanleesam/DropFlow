@@ -208,11 +208,27 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [settings.accentColor]);
 
   useEffect(() => {
-    if (settings.deviceNameMode === "auto") {
+    invoke<any>("get_app_state")
+      .then((appState) => {
+        if (appState && appState.settings) {
+          const rustSet = appState.settings;
+          setSettings((prev) => ({
+            ...prev,
+            deviceName: rustSet.deviceName || prev.deviceName,
+            accentColor: (rustSet.accentColor as AccentColor) || prev.accentColor,
+            requireConfirmation: !rustSet.autoAccept,
+          }));
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    if (settings.deviceNameMode === "auto" && !settings.deviceName) {
       invoke<string>("get_system_computer_name")
         .then((sysName) => {
           setSettings((prev) => {
-            if (prev.deviceNameMode === "auto") {
+            if (prev.deviceNameMode === "auto" && !prev.deviceName) {
               return {
                 ...prev,
                 deviceName: sysName,
@@ -223,13 +239,24 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         })
         .catch(console.error);
     }
-  }, [settings.deviceNameMode]);
+  }, [settings.deviceNameMode, settings.deviceName]);
 
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
-    setSettings((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
+    setSettings((prev) => {
+      const next = { ...prev, [key]: value };
+      invoke("save_settings", {
+        settings: {
+          deviceName: next.deviceName,
+          receiveDirectory: "",
+          autoAccept: !next.requireConfirmation,
+          soundNotifications: next.autoOpenCompleted,
+          theme: next.darkTheme ? "dark" : "light",
+          accentColor: next.accentColor,
+          maxConcurrentTransfers: 3,
+        },
+      }).catch(console.error);
+      return next;
+    });
   };
 
   return (

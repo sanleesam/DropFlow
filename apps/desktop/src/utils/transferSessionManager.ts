@@ -114,6 +114,46 @@ export function startSendSession(
   };
 }
 
+export function formatHumanEta(seconds: number, speedBytesPerSec: number): string {
+  if (speedBytesPerSec <= 0 || !isFinite(seconds) || seconds < 0) {
+    return "Calculating...";
+  }
+
+  const secs = Math.ceil(seconds);
+
+  if (secs === 0) {
+    return "0 seconds remaining";
+  }
+
+  if (secs < 60) {
+    return `${secs} second${secs !== 1 ? "s" : ""} remaining`;
+  }
+
+  if (secs < 120) {
+    return "1 minute remaining";
+  }
+
+  if (secs < 3600) {
+    const mins = Math.floor(secs / 60);
+    return `${mins} minutes remaining`;
+  }
+
+  if (secs < 7200) {
+    const remMins = Math.floor((secs % 3600) / 60);
+    if (remMins === 0) {
+      return "1 hour remaining";
+    }
+    return `1 hour ${remMins} minute${remMins !== 1 ? "s" : ""} remaining`;
+  }
+
+  const hours = Math.floor(secs / 3600);
+  const remMins = Math.floor((secs % 3600) / 60);
+  if (remMins === 0) {
+    return `${hours} hours remaining`;
+  }
+  return `${hours} hours ${remMins} minute${remMins !== 1 ? "s" : ""} remaining`;
+}
+
 export function applyProgressEvent(
   store: SessionStateStore,
   payload: ProgressPayload
@@ -151,8 +191,8 @@ export function applyProgressEvent(
   }
 
   const remainingBytes = Math.max(0, sessionTotal - sessionSent);
-  const remainingSecs = speedBytes > 0 ? Math.ceil(remainingBytes / speedBytes) : 0;
-  const timeStr = `${remainingSecs} second${remainingSecs !== 1 ? "s" : ""}`;
+  const remainingSecs = speedBytes > 0 ? remainingBytes / speedBytes : -1;
+  const timeStr = formatHumanEta(remainingSecs, speedBytes);
 
   const direction = existing?.direction ?? "receive";
   const updatedSession: ActiveTransferSession = {

@@ -6,6 +6,7 @@ import {
   applyFailureEvent,
   dismissActiveSession,
   MAX_HISTORY_CAPACITY,
+  formatHumanEta,
 } from "./transferSessionManager.ts";
 
 function assertEqual(actual: any, expected: any, message: string) {
@@ -337,6 +338,19 @@ export function runLifecycleTests() {
     assertEqual(store.activeTransfers["tx-c3"].status, "Failed", "S15: Session 3 failed with timeout");
     assertEqual(store.recentTransfers.length, 1, "S15: Only completed session added to recent transfers");
     assertEqual(store.recentTransfers[0].id, "tx-c2", "S15: Correct session in recent transfers");
+  }
+
+  // ── Scenario 16: Human-Friendly ETA Formatting ────────────────────────────
+  {
+    assertEqual(formatHumanEta(-1, 1000), "Calculating...", "S16: Negative seconds -> Calculating...");
+    assertEqual(formatHumanEta(10, 0), "Calculating...", "S16: Zero speed -> Calculating...");
+    assertEqual(formatHumanEta(0, 1000), "0 seconds remaining", "S16: 0 sec -> 0 seconds remaining");
+    assertEqual(formatHumanEta(45, 1000), "45 seconds remaining", "S16: 45 sec -> 45 seconds remaining");
+    assertEqual(formatHumanEta(75, 1000), "1 minute remaining", "S16: 75 sec -> 1 minute remaining");
+    assertEqual(formatHumanEta(120, 1000), "2 minutes remaining", "S16: 120 sec -> 2 minutes remaining");
+    assertEqual(formatHumanEta(500, 1000), "8 minutes remaining", "S16: 500 sec -> 8 minutes remaining");
+    assertEqual(formatHumanEta(3700, 1000), "1 hour 1 minute remaining", "S16: 3700 sec -> 1 hour 1 minute remaining");
+    assertEqual(formatHumanEta(7200, 1000), "2 hours remaining", "S16: 7200 sec -> 2 hours remaining");
   }
 
   console.log("All Transfer Session Lifecycle & Path Propagation Tests PASSED cleanly! ✓");
