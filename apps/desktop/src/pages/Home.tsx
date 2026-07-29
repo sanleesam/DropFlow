@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import Header from "../components/Header";
 import DeviceCard, { Device } from "../components/DeviceCard";
 import FileDropZone, { SelectedFilePayload } from "../components/FileDropZone";
 import { TransferProgress } from "../components/TransferProgress";
@@ -103,7 +102,12 @@ async function triggerDesktopNotification(title: string, body: string) {
 
 // ─── Home page ────────────────────────────────────────────────────────────────
 
-const Home: React.FC = () => {
+interface HomeProps {
+  onNavigateHistory?: () => void;
+  sessionStore?: SessionStateStore;
+}
+
+export const Home: React.FC<HomeProps> = ({ onNavigateHistory }) => {
   const { settings } = useSettings();
   const { addToast } = useToast();
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
@@ -396,18 +400,8 @@ const Home: React.FC = () => {
   const activeTransferList = Object.values(sessionStore.activeTransfers);
 
   return (
-    <div className="df-app-shell flex h-screen w-screen flex-col overflow-hidden text-neutral-100">
-      <Header onSettingsClick={() => setIsSettingsOpen(true)} />
-
-      <main
-        id="main-content"
-        className="df-main flex-1 overflow-y-auto"
-        style={{
-          scrollbarWidth: "none",
-          msOverflowStyle: "none",
-        }}
-      >
-        {/* ── Nearby Devices ── */}
+    <div className="flex flex-col gap-5 w-full">
+      {/* ── Nearby Devices ── */}
         <Section
           id="nearby-devices"
           title="Nearby devices"
@@ -533,7 +527,7 @@ const Home: React.FC = () => {
                   </span>
                   <button
                     type="button"
-                    onClick={() => addToast("Full transfer history page coming in next release", "info")}
+                    onClick={() => onNavigateHistory ? onNavigateHistory() : addToast("History page available in menu", "info")}
                     className="text-blue-400 hover:text-blue-300 font-medium hover:underline flex items-center gap-1 cursor-pointer outline-none"
                   >
                     <span>View all transfers</span>
@@ -548,7 +542,6 @@ const Home: React.FC = () => {
             </div>
           )}
         </Section>
-      </main>
 
       {/* ── Settings Modal ── */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

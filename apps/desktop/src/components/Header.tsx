@@ -2,18 +2,23 @@ import React from "react";
 import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
 
 interface HeaderProps {
+  activePage?: "home" | "history";
+  onNavigate?: (page: "home" | "history") => void;
   /** Callback fired when the user clicks the Settings button */
   onSettingsClick?: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
+const Header: React.FC<HeaderProps> = ({ activePage = "home", onNavigate, onSettingsClick }) => {
   const { settings } = useSettings();
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
 
   return (
     <header className="df-header sticky top-0 z-50 flex items-center justify-between px-5 py-3 border-b border-white/[0.07] bg-[#101216]/80 backdrop-blur-xl">
       {/* Logo + Title */}
-      <div className="flex items-center gap-2.5 select-none">
+      <div
+        className="flex items-center gap-2.5 select-none cursor-pointer"
+        onClick={() => onNavigate && onNavigate("home")}
+      >
         {/* Icon mark */}
         <div className={`relative flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${accent.headerLogoGrad} shadow-sm`}>
           <svg
@@ -48,6 +53,34 @@ const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
           <span className="hidden text-[11px] text-neutral-500 sm:block">Private file transfer</span>
         </div>
       </div>
+
+      {/* Navigation Tabs */}
+      {onNavigate && (
+        <div className="flex items-center gap-1 bg-neutral-950/60 p-1 rounded-xl border border-white/[0.07] select-none">
+          <button
+            type="button"
+            onClick={() => onNavigate("home")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 ${
+              activePage === "home"
+                ? "bg-neutral-800 text-white shadow-sm border border-white/[0.08]"
+                : "text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            Dashboard
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate("history")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 ${
+              activePage === "history"
+                ? "bg-neutral-800 text-white shadow-sm border border-white/[0.08]"
+                : "text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            History
+          </button>
+        </div>
+      )}
 
       {/* Right: Settings */}
       <button

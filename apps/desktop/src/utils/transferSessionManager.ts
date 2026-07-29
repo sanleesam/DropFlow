@@ -27,6 +27,7 @@ export interface CompletedPayload {
   deviceName?: string;
   size?: string;
   timestamp?: string;
+  timestampMs?: number;
   totalFiles?: number;
   totalSizeBytes?: number;
   files?: FileMetadataPayload[];
@@ -62,6 +63,7 @@ export interface RecentTransfer {
   deviceName: string;
   size: string;
   timestamp: string;
+  timestampMs?: number;
   status: "completed" | "failed";
   direction: "send" | "receive";
   totalFiles: number;
@@ -219,6 +221,46 @@ export function applyProgressEvent(
   };
 }
 
+export function formatRelativeTimestamp(timestampMs?: number): string {
+  if (!timestampMs || !isFinite(timestampMs) || timestampMs <= 0) {
+    return "Just now";
+  }
+
+  const now = Date.now();
+  const diffMs = Math.max(0, now - timestampMs);
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffSecs < 60) {
+    return "Just now";
+  }
+
+  if (diffMins < 60) {
+    return `${diffMins} minute${diffMins !== 1 ? "s" : ""} ago`;
+  }
+
+  if (diffHours < 24) {
+    return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
+  }
+
+  if (diffDays === 1) {
+    return "Yesterday";
+  }
+
+  if (diffDays < 7) {
+    return `${diffDays} days ago`;
+  }
+
+  const d = new Date(timestampMs);
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const day = d.getDate();
+  const month = monthNames[d.getMonth()];
+  const year = d.getFullYear();
+  return `${day} ${month} ${year}`;
+}
+
 export function applyCompletionEvent(
   store: SessionStateStore,
   payload: CompletedPayload
@@ -244,17 +286,42 @@ export function applyCompletionEvent(
     displayName = `${first} (+${count - 1} other ${count - 1 === 1 ? "file" : "files"})`;
   }
 
-  const completedFiles = payload.files ?? active?.completedFiles ?? [];
+  const rawCompletedFiles = payload.files ?? active?.completedFiles ?? [];
+  const completedFiles: FileMetadataPayload[] = rawCompletedFiles.map((f) => ({
+    ...f,
+    sha256Checksum: f.sha256Checksum && f.sha256Checksum.trim() !== "" ? f.sha256Checksum : undefined,
+  }));
+
+  const computedTotalBytes =
+    payload.totalSizeBytes ??
+    (completedFiles.length > 0
+      ? completedFiles.reduce((acc, f) => acc + (f.sizeBytes || 0), 0)
+      : undefined);
+
+  let formattedSize = payload.size;
+  if (!formattedSize || formattedSize === "Complete") {
+    if (computedTotalBytes && computedTotalBytes > 0) {
+      const mb = computedTotalBytes / (1024 * 1024);
+      formattedSize = mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
+    } else {
+      formattedSize = "Complete";
+    }
+  }
+
+  const timestampMs = payload.timestampMs ?? Date.now();
+  const timestampStr = payload.timestamp || formatRelativeTimestamp(timestampMs);
 
   const newRecent: RecentTransfer = {
     id: sessionId,
     fileName: displayName,
     deviceName,
-    size: payload.size || "Complete",
-    timestamp: payload.timestamp || "Just now",
+    size: formattedSize,
+    timestamp: timestampStr,
+    timestampMs,
     status: "completed",
     direction,
     totalFiles,
+    totalSizeBytes: computedTotalBytes,
     files: completedFiles,
     receiveDir,
   };

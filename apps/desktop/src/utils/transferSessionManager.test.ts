@@ -7,6 +7,7 @@ import {
   dismissActiveSession,
   MAX_HISTORY_CAPACITY,
   formatHumanEta,
+  formatRelativeTimestamp,
 } from "./transferSessionManager.ts";
 
 function assertEqual(actual: any, expected: any, message: string) {
@@ -351,6 +352,32 @@ export function runLifecycleTests() {
     assertEqual(formatHumanEta(500, 1000), "8 minutes remaining", "S16: 500 sec -> 8 minutes remaining");
     assertEqual(formatHumanEta(3700, 1000), "1 hour 1 minute remaining", "S16: 3700 sec -> 1 hour 1 minute remaining");
     assertEqual(formatHumanEta(7200, 1000), "2 hours remaining", "S16: 7200 sec -> 2 hours remaining");
+  }
+
+  // ── Scenario 17: Timestamp formatting, totalSizeBytes & checksum cleaning ──
+  {
+    const now = Date.now();
+    assertEqual(formatRelativeTimestamp(now - 10000), "Just now", "S17: 10s ago -> Just now");
+    assertEqual(formatRelativeTimestamp(now - 300000), "5 minutes ago", "S17: 5m ago -> 5 minutes ago");
+    assertEqual(formatRelativeTimestamp(now - 7200000), "2 hours ago", "S17: 2h ago -> 2 hours ago");
+    assertEqual(formatRelativeTimestamp(now - 86400000), "Yesterday", "S17: 1d ago -> Yesterday");
+
+    let store = createInitialSessionStore();
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-17",
+      fileName: "bundle.zip",
+      files: [
+        { fileIndex: 0, relativePath: "part1.bin", sizeBytes: 1048576, sha256Checksum: "" },
+        { fileIndex: 1, relativePath: "part2.bin", sizeBytes: 2097152, sha256Checksum: "abc123def" },
+      ],
+      timestampMs: now - 300000,
+    });
+
+    const recent = store.recentTransfers[0];
+    assertEqual(recent.totalSizeBytes, 3145728, "S17: Summed totalSizeBytes for multi-file batch");
+    assertEqual(recent.files?.[0].sha256Checksum, undefined, "S17: Empty sha256Checksum cleaned to undefined");
+    assertEqual(recent.files?.[1].sha256Checksum, "abc123def", "S17: Valid sha256Checksum preserved");
+    assertEqual(recent.timestamp, "5 minutes ago", "S17: Relative timestamp string set cleanly");
   }
 
   console.log("All Transfer Session Lifecycle & Path Propagation Tests PASSED cleanly! ✓");

@@ -28,6 +28,8 @@ pub struct RecentTransferSchema {
     pub device_name: String,
     pub size: String,
     pub timestamp: String,
+    #[serde(default)]
+    pub timestamp_ms: Option<u64>,
     pub status: String,
     pub direction: String,
     pub total_files: u32,
@@ -55,9 +57,13 @@ pub struct UserSettings {
 
 impl Default for UserSettings {
     fn default() -> Self {
+        let default_dir = crate::transfer_manager::security::get_default_receive_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "".to_string());
+
         Self {
             device_name: "Desktop-Device".to_string(),
-            receive_directory: "".to_string(),
+            receive_directory: default_dir,
             auto_accept: false,
             sound_notifications: true,
             theme: "dark".to_string(),
@@ -264,6 +270,7 @@ mod tests {
             device_name: "Phone".to_string(),
             size: "1.2 MB".to_string(),
             timestamp: "Just now".to_string(),
+            timestamp_ms: Some(1722268800000),
             status: "completed".to_string(),
             direction: "send".to_string(),
             total_files: 1,
@@ -279,6 +286,7 @@ mod tests {
         assert_eq!(reloaded.settings.device_name, "Custom-PC");
         assert_eq!(reloaded.history.len(), 1);
         assert_eq!(reloaded.history[0].id, "tx-test-1");
+        assert_eq!(reloaded.history[0].timestamp_ms, Some(1722268800000));
     }
 
     #[test]
@@ -303,6 +311,13 @@ mod tests {
     }
 
     #[test]
+    fn test_default_receive_directory_non_empty() {
+        let defaults = UserSettings::default();
+        assert!(!defaults.receive_directory.is_empty());
+        assert!(defaults.receive_directory.contains("DropFlow"));
+    }
+
+    #[test]
     fn test_history_capacity_cap_500() {
         let dir = create_test_temp_dir();
         let state_path = dir.join("state.json");
@@ -315,6 +330,7 @@ mod tests {
                 device_name: "Remote".to_string(),
                 size: "1 KB".to_string(),
                 timestamp: "Just now".to_string(),
+                timestamp_ms: Some(1722268800000 + i as u64),
                 status: "completed".to_string(),
                 direction: "receive".to_string(),
                 total_files: 1,
