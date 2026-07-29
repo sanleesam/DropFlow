@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { X, CheckCircle2, FolderOpen, FileText, Ban } from "lucide-react";
 import { useToast } from "./ToastProvider";
 import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import { ActiveTransferSession } from "../utils/transferSessionManager";
 
@@ -24,14 +24,18 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
   const [isDismissing, setIsDismissing] = useState(false);
   const [receiveDir, setReceiveDir] = useState<string>("");
 
-  // Fetch receive directory path for Open Folder action
+  // Fetch receive directory path for Open Folder fallback
   useEffect(() => {
     if (session.direction === "receive") {
-      invoke<string>("get_receive_dir")
-        .then(setReceiveDir)
-        .catch(console.error);
+      if (session.receiveDir) {
+        setReceiveDir(session.receiveDir);
+      } else {
+        invoke<string>("get_receive_dir")
+          .then(setReceiveDir)
+          .catch(console.error);
+      }
     }
-  }, [session.direction]);
+  }, [session.direction, session.receiveDir]);
 
   const handleDismiss = () => {
     setIsDismissing(true);
@@ -44,24 +48,45 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
   const handleOpenFolder = async () => {
     try {
-      const dirPath = receiveDir || (await invoke<string>("get_receive_dir"));
+      const firstFile = session.completedFiles.find((f) => f.finalPath);
+      if (firstFile?.finalPath) {
+        await revealItemInDir(firstFile.finalPath);
+        return;
+      }
+
+      const dirPath = session.receiveDir || receiveDir || (await invoke<string>("get_receive_dir"));
       await openPath(dirPath);
     } catch (err) {
-      console.error("[TransferProgress] Failed to open folder:", err);
-      addToast("Failed to open receive folder.", "error");
+      console.error("[TransferProgress] Failed to reveal/open receive folder:", err);
+      try {
+        const dirPath = session.receiveDir || receiveDir || (await invoke<string>("get_receive_dir"));
+        await openPath(dirPath);
+      } catch (fallbackErr) {
+        console.error("[TransferProgress] Fallback openPath failed:", fallbackErr);
+        addToast("Failed to open receive folder.", "error");
+      }
     }
   };
 
-  const handleOpenFile = async (specificFileName?: string) => {
+  const handleOpenFile = async (specificFilePath?: string) => {
     try {
-      const targetName = specificFileName || session.fileName;
-      const dirPath = receiveDir || (await invoke<string>("get_receive_dir"));
-      const normalizedDir = dirPath.replace(/\\/g, "/").replace(/\/$/, "");
-      const fullPath = `${normalizedDir}/${targetName}`;
-      await openPath(fullPath);
+      let targetPath = specificFilePath;
+
+      if (!targetPath) {
+        const firstFile = session.completedFiles.find((f) => f.finalPath);
+        if (firstFile?.finalPath) {
+          targetPath = firstFile.finalPath;
+        }
+      }
+
+      if (!targetPath) {
+        throw new Error("No valid final file path available for received file");
+      }
+
+      await openPath(targetPath);
     } catch (err) {
-      console.error("[TransferProgress] Failed to open file:", err);
-      handleOpenFolder();
+      console.error("[TransferProgress] Failed to open received file:", err);
+      addToast("Failed to open received file.", "error");
     }
   };
 
@@ -216,7 +241,12 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
             {session.completedFiles.length > 1 && (
               <ul className="flex flex-col gap-1 max-h-24 overflow-y-auto py-1 pr-1 text-xs">
                 {session.completedFiles.map((f, i) => (
-                  <li key={i} className="flex items-center justify-between text-neutral-300">
+                  <li
+                    key={i}
+                    onClick={() => f.finalPath && handleOpenFile(f.finalPath)}
+                    className="flex items-center justify-between text-neutral-300 hover:text-white cursor-pointer hover:bg-emerald-500/10 px-1.5 py-0.5 rounded transition-colors"
+                    title={f.finalPath ? `Click to open ${f.relativePath}` : f.relativePath}
+                  >
                     <span className="truncate flex-1">{f.relativePath}</span>
                     <span className="font-mono text-[11px] text-neutral-400 ml-2">
                       {(f.sizeBytes / (1024 * 1024)).toFixed(1)} MB

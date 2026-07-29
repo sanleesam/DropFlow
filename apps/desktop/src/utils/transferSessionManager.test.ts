@@ -211,16 +211,55 @@ export function runLifecycleTests() {
       fileName: "image.jpg",
       totalFiles: 2,
       files: [
-        { fileIndex: 0, relativePath: "image.jpg", sizeBytes: 1000 },
-        { fileIndex: 1, relativePath: "video.mp4", sizeBytes: 5000 },
+        { fileIndex: 0, relativePath: "image.jpg", sizeBytes: 1000, finalPath: "/Users/test/Downloads/DropFlow/image.jpg" },
+        { fileIndex: 1, relativePath: "video.mp4", sizeBytes: 5000, finalPath: "/Users/test/Downloads/DropFlow/video.mp4" },
       ],
+      receiveDir: "/Users/test/Downloads/DropFlow",
     });
 
     assertTrue(store.recentTransfers[0].fileName === "image.jpg (+1 other file)", "S10: Formatted multi-file summary name");
-    assertEqual(store.recentTransfers.length, 1, "S10: 1 recent transfer for batch session");
+    assertEqual(store.recentTransfers[0].files?.length, 2, "S10: Preserves 2 completed file entries in recentTransfers");
+    assertEqual(store.recentTransfers[0].files?.[0].finalPath, "/Users/test/Downloads/DropFlow/image.jpg", "S10: Preserves finalPath for file 1");
+    assertEqual(store.recentTransfers[0].files?.[1].finalPath, "/Users/test/Downloads/DropFlow/video.mp4", "S10: Preserves finalPath for file 2");
+    assertEqual(store.activeTransfers["tx-10"].receiveDir, "/Users/test/Downloads/DropFlow", "S10: Preserves receiveDir");
   }
 
-  console.log("All 10 Transfer Session Lifecycle Scenarios PASSED cleanly! ✓");
+  // ── Scenario 11: Filenames with spaces, Unicode, collision paths & finalPath ──
+  {
+    let store = createInitialSessionStore();
+    const collisionPath = "/Users/test/Downloads/DropFlow/Screenshot 2026-07-28 165721 (1).png";
+    const unicodePath = "/Users/test/Downloads/DropFlow/写真_📷_test.png";
+
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-11",
+      fileName: "Screenshot 2026-07-28 165721.png",
+      deviceName: "Windows-PC",
+      size: "3.4 MB",
+      direction: "receive",
+      files: [
+        {
+          fileIndex: 0,
+          relativePath: "Screenshot 2026-07-28 165721.png",
+          sizeBytes: 3500000,
+          finalPath: collisionPath,
+        },
+        {
+          fileIndex: 1,
+          relativePath: "写真_📷_test.png",
+          sizeBytes: 1200000,
+          finalPath: unicodePath,
+        },
+      ],
+      receiveDir: "/Users/test/Downloads/DropFlow",
+    });
+
+    const activeSession = store.activeTransfers["tx-11"];
+    assertTrue(activeSession.completedFiles[0].finalPath === collisionPath, "S11: Authoritative collision finalPath preserved for space/collision file");
+    assertTrue(activeSession.completedFiles[1].finalPath === unicodePath, "S11: Authoritative unicode finalPath preserved for unicode file");
+    assertTrue(activeSession.receiveDir === "/Users/test/Downloads/DropFlow", "S11: receiveDir preserved");
+  }
+
+  console.log("All Transfer Session Lifecycle & Path Propagation Tests PASSED cleanly! ✓");
 }
 
 // Execute tests if run directly

@@ -59,6 +59,7 @@ pub fn send_files_over_tcp(
             relative_path: filename,
             size_bytes: file_size,
             sha256_checksum: String::new(), // Populated dynamically during streaming
+            final_path: path_str.clone(),
         });
     }
 
@@ -305,6 +306,7 @@ pub fn send_files_over_tcp(
             total_files: total_files_count,
             total_size_bytes,
             files: transfer_meta.files,
+            receive_dir: String::new(),
         },
     );
 

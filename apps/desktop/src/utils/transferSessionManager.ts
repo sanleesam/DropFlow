@@ -3,6 +3,7 @@ export interface FileMetadataPayload {
   relativePath: string;
   sizeBytes: number;
   sha256Checksum?: string;
+  finalPath?: string;
 }
 
 export interface ProgressPayload {
@@ -27,6 +28,7 @@ export interface CompletedPayload {
   totalFiles?: number;
   totalSizeBytes?: number;
   files?: FileMetadataPayload[];
+  receiveDir?: string;
   direction?: "send" | "receive";
 }
 
@@ -48,6 +50,7 @@ export interface ActiveTransferSession {
   bytesInfo: string;
   currentFileLabel: string;
   completedFiles: FileMetadataPayload[];
+  receiveDir?: string;
   error?: string;
 }
 
@@ -60,6 +63,8 @@ export interface RecentTransfer {
   status: "completed" | "failed";
   direction: "send" | "receive";
   totalFiles: number;
+  files?: FileMetadataPayload[];
+  receiveDir?: string;
 }
 
 export interface SessionStateStore {
@@ -186,6 +191,7 @@ export function applyCompletionEvent(
   const direction = payload.direction || active?.direction || "send";
   const totalFiles = payload.totalFiles ?? active?.totalFiles ?? 1;
   const deviceName = payload.deviceName || active?.deviceName || "Target Device";
+  const receiveDir = payload.receiveDir || active?.receiveDir;
 
   let displayName = payload.fileName || active?.fileName || "File";
   if (totalFiles > 1 && payload.files && payload.files.length > 0) {
@@ -193,6 +199,8 @@ export function applyCompletionEvent(
     const count = payload.files.length;
     displayName = `${first} (+${count - 1} other ${count - 1 === 1 ? "file" : "files"})`;
   }
+
+  const completedFiles = payload.files ?? active?.completedFiles ?? [];
 
   const newRecent: RecentTransfer = {
     id: sessionId,
@@ -203,6 +211,8 @@ export function applyCompletionEvent(
     status: "completed",
     direction,
     totalFiles,
+    files: completedFiles,
+    receiveDir,
   };
 
   const updatedActiveSession: ActiveTransferSession = {
@@ -217,7 +227,8 @@ export function applyCompletionEvent(
     timeRemaining: "0 seconds",
     bytesInfo: active?.bytesInfo ?? "",
     currentFileLabel: displayName,
-    completedFiles: payload.files ?? active?.completedFiles ?? [],
+    completedFiles,
+    receiveDir,
   };
 
   const nextCompletedIds = new Set(store.completedSessionIds);

@@ -50,6 +50,8 @@ pub struct FileMetadata {
     pub relative_path: String,
     pub size_bytes: u64,
     pub sha256_checksum: String,
+    #[serde(default)]
+    pub final_path: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -310,6 +312,7 @@ mod tests {
                     sha256_checksum:
                         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                             .to_string(),
+                    final_path: String::new(),
                 },
                 FileMetadata {
                     file_index: 1,
@@ -318,6 +321,7 @@ mod tests {
                     sha256_checksum:
                         "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e"
                             .to_string(),
+                    final_path: String::new(),
                 },
             ],
         };

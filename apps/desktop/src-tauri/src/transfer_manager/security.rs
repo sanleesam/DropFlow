@@ -186,4 +186,20 @@ mod tests {
         let part = get_part_file_path(&target);
         assert_eq!(part, PathBuf::from("/tmp/test.jpg.dropflow-part"));
     }
+
+    #[test]
+    fn test_sanitize_spaces_and_unicode() {
+        assert_eq!(
+            sanitize_filename("Screenshot 2026-07-28 165721.png"),
+            "Screenshot 2026-07-28 165721.png"
+        );
+        assert_eq!(sanitize_filename("写真_📷_test.png"), "写真_📷_test.png");
+    }
+
+    #[test]
+    fn test_resolve_collision_path_nonexistent() {
+        let target = PathBuf::from("/nonexistent/unique_file_12345.txt");
+        let resolved = resolve_collision_path(&target);
+        assert_eq!(resolved, target);
+    }
 }

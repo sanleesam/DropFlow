@@ -46,6 +46,7 @@ pub struct TransferCompletedPayload {
     pub total_files: u32,
     pub total_size_bytes: u64,
     pub files: Vec<FileMetadata>,
+    pub receive_dir: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -147,6 +148,8 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     let mut final_dest_paths: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut last_emit_time = Instant::now();
     let emit_interval = Duration::from_millis(50); // Max 20 FPS progress updates
+
+    let mut received_files_meta: Vec<FileMetadata> = Vec::new();
 
     println!("[Receiver] STREAMING {} files", metadata.total_files);
     for _file_idx in 0..metadata.total_files {
@@ -330,6 +333,14 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
             );
             return Err(err_msg);
         }
+
+        received_files_meta.push(FileMetadata {
+            file_index: file_header.file_index,
+            relative_path: file_header.relative_path.clone(),
+            size_bytes: file_header.size_bytes,
+            sha256_checksum: rx_checksum,
+            final_path: collision_resolved_path.to_string_lossy().to_string(),
+        });
     }
 
     // All files received & checksums verified cleanly!
@@ -418,7 +429,8 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
             timestamp: "Just now".to_string(),
             total_files: metadata.total_files,
             total_size_bytes: metadata.total_size_bytes,
-            files: metadata.files,
+            files: received_files_meta,
+            receive_dir: receive_dir.to_string_lossy().to_string(),
         },
     );
 
