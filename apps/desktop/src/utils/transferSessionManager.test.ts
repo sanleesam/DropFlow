@@ -259,6 +259,29 @@ export function runLifecycleTests() {
     assertTrue(activeSession.receiveDir === "/Users/test/Downloads/DropFlow", "S11: receiveDir preserved");
   }
 
+  // ── Scenario 12: Receiver side cancellation & cleanup ──────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = applyProgressEvent(store, {
+      sessionId: "rx-12",
+      currentFileName: "large_iso.iso",
+      percentage: 30,
+      totalFiles: 1,
+    });
+    assertTrue(store.activeTransfers["rx-12"].status === "Receiving...", "S12: Receiver status is Receiving...");
+
+    store = applyFailureEvent(store, {
+      sessionId: "rx-12",
+      error: "Transfer cancelled by receiver",
+    });
+    assertTrue(store.activeTransfers["rx-12"].status === "Failed", "S12: Receiver status set to Failed on cancel");
+    assertTrue(store.activeTransfers["rx-12"].error === "Transfer cancelled by receiver", "S12: Receiver cancellation error preserved");
+    assertEqual(store.recentTransfers.length, 0, "S12: No recent transfer added for cancelled receive");
+
+    store = dismissActiveSession(store, "rx-12");
+    assertTrue(store.activeTransfers["rx-12"] === undefined, "S12: Active card dismissed cleanly");
+  }
+
   console.log("All Transfer Session Lifecycle & Path Propagation Tests PASSED cleanly! ✓");
 }
 

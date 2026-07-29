@@ -11,6 +11,17 @@ export const AboutTab: React.FC = () => {
     setTimeout(() => setUpdateStatus("latest"), 1200);
   };
 
+  const getPlatformName = () => {
+    if (typeof window !== "undefined" && window.navigator) {
+      const userAgent = navigator.userAgent || "";
+      const platform = navigator.platform || "";
+      if (/mac/i.test(userAgent) || /mac/i.test(platform)) return "macOS (Tauri)";
+      if (/win/i.test(userAgent) || /win/i.test(platform)) return "Windows (Tauri)";
+      if (/linux/i.test(userAgent) || /linux/i.test(platform)) return "Linux (Tauri)";
+    }
+    return "Desktop (Tauri)";
+  };
+
   return (
     <div className="flex flex-col gap-5 animate-[backdrop-fade-in_0.15s_ease-out]">
       <div>
@@ -35,7 +46,7 @@ export const AboutTab: React.FC = () => {
             </div>
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">Platform</span>
-              <span className="text-neutral-200 font-medium">macOS (Tauri)</span>
+              <span className="text-neutral-200 font-medium">{getPlatformName()}</span>
             </div>
           </div>
         </div>

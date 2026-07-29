@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use super::protocol::{
     read_file_complete, read_file_header, read_frame_header, read_transfer_request,
@@ -125,6 +125,24 @@ fn cleanup_files(part_files: &[PathBuf]) {
     }
 }
 
+struct CancellationGuard<'a> {
+    app: &'a AppHandle,
+    session_id: String,
+}
+
+impl<'a> Drop for CancellationGuard<'a> {
+    fn drop(&mut self) {
+        if let Some(state) = self
+            .app
+            .try_state::<crate::transfer_manager::TransferState>()
+        {
+            if let Ok(mut cancellations) = state.active_cancellations.lock() {
+                cancellations.remove(&self.session_id);
+            }
+        }
+    }
+}
+
 fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result<(), String> {
     stream
         .set_read_timeout(Some(Duration::from_secs(30)))
@@ -136,6 +154,17 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
         "[Receiver] REQUEST_RECEIVED from '{}' ({} files, {} bytes)",
         metadata.sender_name, metadata.total_files, metadata.total_size_bytes
     );
+
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    if let Some(state) = app.try_state::<crate::transfer_manager::TransferState>() {
+        if let Ok(mut cancellations) = state.active_cancellations.lock() {
+            cancellations.insert(metadata.session_id.clone(), Arc::clone(&cancel_flag));
+        }
+    }
+    let _guard = CancellationGuard {
+        app,
+        session_id: metadata.session_id.clone(),
+    };
 
     // 2. Accept transfer
     write_response_frame(stream, FrameTag::TransferAccept, "ACCEPTED")?;
@@ -225,16 +254,16 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
                 }
             };
 
-            if tag == FrameTag::Cancel {
+            if cancel_flag.load(Ordering::Relaxed) || tag == FrameTag::Cancel {
                 cleanup_files(&created_part_files);
                 let _ = app.emit(
                     "transfer-failed",
                     TransferFailedPayload {
                         session_id: metadata.session_id.clone(),
-                        error: "Transfer cancelled by sender".to_string(),
+                        error: "Transfer cancelled".to_string(),
                     },
                 );
-                return Err("Transfer cancelled by sender".to_string());
+                return Err("Transfer cancelled".to_string());
             }
 
             if tag != FrameTag::DataChunk {

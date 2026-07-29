@@ -49,6 +49,7 @@ pub fn run() {
             transfer_manager::engine::cancel_transfer,
             transfer_manager::engine::get_receive_dir,
             transfer_manager::engine::get_receiver_port,
+            transfer_manager::engine::open_received_file,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {

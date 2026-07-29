@@ -83,7 +83,12 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         throw new Error("No valid final file path available for received file");
       }
 
-      await openPath(targetPath);
+      try {
+        await openPath(targetPath);
+      } catch (openerErr) {
+        console.warn("[TransferProgress] openPath failed, trying open_received_file fallback:", openerErr);
+        await invoke("open_received_file", { path: targetPath });
+      }
     } catch (err) {
       console.error("[TransferProgress] Failed to open received file:", err);
       addToast("Failed to open received file.", "error");

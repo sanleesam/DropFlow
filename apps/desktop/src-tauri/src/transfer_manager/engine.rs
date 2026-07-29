@@ -106,3 +106,46 @@ pub fn get_receiver_port(state: State<'_, TransferState>) -> Result<u16, String>
         .map(|r| r.port())
         .ok_or_else(|| "TCP receiver not initialized".to_string())
 }
+
+#[tauri::command]
+pub fn open_received_file(path: String) -> Result<(), String> {
+    let target = std::path::Path::new(&path);
+    if !target.exists() {
+        return Err(format!("File does not exist: {path}"));
+    }
+
+    let receive_dir = get_default_receive_dir()?;
+    if !target.starts_with(&receive_dir) {
+        return Err(format!(
+            "Security alert: path {:?} is outside receive directory {:?}",
+            target, receive_dir
+        ));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to launch file on macOS: {e}"))?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to launch file on Windows: {e}"))?;
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to launch file on Linux: {e}"))?;
+        Ok(())
+    }
+}
