@@ -17,6 +17,8 @@
     "opener:allow-reveal-item-in-dir",
     "opener:allow-open-url",
     "dialog:default",
-    "notification:default"
+    "notification:default",
+    "updater:default",
+    "process:allow-restart"
   ]
 }
