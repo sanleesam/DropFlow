@@ -18,12 +18,11 @@ import { useToast } from "../components/ToastProvider";
 
 interface HistoryPageProps {
   recentTransfers: RecentTransfer[];
-  onBackToHome?: () => void;
 }
 
 type FilterTab = "all" | "send" | "receive" | "failed";
 
-export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers, onBackToHome }) => {
+export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers }) => {
   const { addToast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
@@ -110,16 +109,6 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers, onBac
             Complete record of your sent and received files across local devices.
           </p>
         </div>
-
-        {onBackToHome && (
-          <button
-            type="button"
-            onClick={onBackToHome}
-            className="self-start sm:self-auto px-3 py-1.5 rounded-lg border border-white/[0.08] bg-neutral-900 text-xs font-medium text-neutral-300 hover:bg-neutral-800 transition-colors"
-          >
-            ← Back to Dashboard
-          </button>
-        )}
       </div>
 
       {/* ── Search & Filter Controls ── */}
