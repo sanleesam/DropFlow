@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import "./App.css";
-import { ToastProvider } from "./components/ToastProvider";
+import { ToastProvider, useToast } from "./components/ToastProvider";
 import { SettingsProvider } from "./components/SettingsProvider";
 import Header from "./components/Header";
 import { SettingsModal } from "./components/SettingsModal";
@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { RecentTransfer } from "./utils/transferSessionManager";
 
 function MainContent() {
+  const { addToast } = useToast();
   const [activePage, setActivePage] = useState<"home" | "history">("home");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [recentTransfers, setRecentTransfers] = useState<RecentTransfer[]>([]);
@@ -24,6 +25,17 @@ function MainContent() {
       })
       .catch(console.error);
   }, []);
+
+  const handleClearHistory = async () => {
+    try {
+      await invoke("clear_history");
+      setRecentTransfers([]);
+      addToast("Transfer history cleared.", "success");
+    } catch (err) {
+      console.error("Failed to clear transfer history:", err);
+      addToast("Failed to clear transfer history.", "error");
+    }
+  };
 
   return (
     <div className="df-app-shell flex h-screen w-screen flex-col overflow-hidden text-neutral-100">
@@ -48,7 +60,12 @@ function MainContent() {
         )}
       </main>
 
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        historyCount={recentTransfers.length}
+        onClearHistory={handleClearHistory}
+      />
     </div>
   );
 }

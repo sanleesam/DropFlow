@@ -231,6 +231,18 @@ pub fn save_history(
     Ok(())
 }
 
+#[tauri::command]
+pub fn clear_history(
+    app: AppHandle,
+    container: State<'_, AppStateContainer>,
+) -> Result<(), String> {
+    let mut state = container.state.lock().map_err(|e| e.to_string())?;
+    state.history.clear();
+    save_state_atomic(&app, &state)?;
+    println!("[StateManager] Cleared transfer history successfully");
+    Ok(())
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -347,5 +359,41 @@ mod tests {
         assert_eq!(reloaded.history.len(), 500);
         assert_eq!(reloaded.history[0].id, "tx-0");
         assert_eq!(reloaded.history[499].id, "tx-499");
+    }
+
+    #[test]
+    fn test_clear_history_preserves_settings_and_uuid() {
+        let dir = create_test_temp_dir();
+        let state_path = dir.join("state.json");
+
+        let mut state = load_or_create_state_at_path(&state_path);
+        let orig_uuid = state.device_uuid.clone();
+        state.settings.device_name = "Desktop-PC".to_string();
+        state.history.push(RecentTransferSchema {
+            id: "tx-1".to_string(),
+            file_name: "test.pdf".to_string(),
+            device_name: "Mac".to_string(),
+            size: "1 MB".to_string(),
+            timestamp: "Just now".to_string(),
+            timestamp_ms: Some(1234567),
+            status: "completed".to_string(),
+            direction: "send".to_string(),
+            total_files: 1,
+            total_size_bytes: Some(1000),
+            files: None,
+            receive_dir: None,
+            error: None,
+        });
+
+        save_state_atomic_at_path(&state_path, &state).unwrap();
+        assert_eq!(state.history.len(), 1);
+
+        state.history.clear();
+        save_state_atomic_at_path(&state_path, &state).unwrap();
+
+        let reloaded = load_or_create_state_at_path(&state_path);
+        assert_eq!(reloaded.history.len(), 0);
+        assert_eq!(reloaded.device_uuid, orig_uuid);
+        assert_eq!(reloaded.settings.device_name, "Desktop-PC");
     }
 }

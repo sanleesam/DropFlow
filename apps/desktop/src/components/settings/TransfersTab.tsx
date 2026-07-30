@@ -2,11 +2,19 @@ import React, { useState } from "react";
 import { useSettings, ACCENT_COLOR_MAPS } from "../SettingsProvider";
 import { Switch } from "../SettingsModal";
 
-export const TransfersTab: React.FC = () => {
+interface TransfersTabProps {
+  historyCount?: number;
+  onClearHistory?: () => void;
+}
+
+export const TransfersTab: React.FC<TransfersTabProps> = ({ historyCount = 0, onClearHistory }) => {
   const { settings, updateSetting } = useSettings();
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
   const [concurrentCount, setConcurrentCount] = useState(3);
   const [downloadPath, setDownloadPath] = useState("~/Downloads");
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  const hasHistory = historyCount > 0;
 
   const handleBrowseFolder = () => {
     const folders = [
@@ -101,7 +109,74 @@ export const TransfersTab: React.FC = () => {
             })}
           </div>
         </div>
+
+        {/* ── Data Section ── */}
+        <div className="pt-5 border-t border-white/[0.07]">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-4 select-none">
+            Data
+          </h3>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-white/[0.07] bg-neutral-950/40 select-none">
+            <div className="flex flex-col pr-2">
+              <span className="text-xs font-semibold text-neutral-200">Transfer history</span>
+              <span className="text-xs text-neutral-400 mt-0.5">
+                Erase all saved transfer history from this device.
+              </span>
+              <span className="text-[11px] text-neutral-500 mt-1">
+                This does not delete transferred files or modify your settings.
+              </span>
+            </div>
+
+            {hasHistory ? (
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(true)}
+                className="
+                  px-3.5 py-2 rounded-lg text-xs font-medium text-red-400 bg-red-500/10 border border-red-500/20
+                  hover:bg-red-500/20 hover:text-red-300 transition-colors duration-150 shrink-0 cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-red-500
+                "
+              >
+                Clear history
+              </button>
+            ) : (
+              <span className="text-xs text-neutral-500 italic shrink-0">
+                No transfer history to clear.
+              </span>
+            )}
+          </div>
+        </div>
       </div>
+
+      {/* Confirmation Modal */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-backdrop-fade-in">
+          <div className="flex flex-col w-full max-w-md rounded-xl border border-white/[0.1] bg-[#16181d] p-5 shadow-2xl animate-modal-scale-in select-none">
+            <h3 className="text-sm font-semibold text-neutral-100">Clear transfer history?</h3>
+            <p className="text-xs text-neutral-400 mt-2 leading-relaxed">
+              This will permanently remove all saved transfer history from this device. Your transferred files, settings, receive directory, and device identity will not be affected.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 mt-5">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="px-3.5 py-1.5 rounded-lg border border-white/[0.08] bg-neutral-800 text-xs font-medium text-neutral-300 hover:bg-neutral-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  onClearHistory?.();
+                }}
+                className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-xs font-medium text-white shadow-sm transition-colors"
+              >
+                Clear history
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

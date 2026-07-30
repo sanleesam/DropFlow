@@ -398,3 +398,12 @@ export function dismissActiveSession(
     activeTransfers: nextActive,
   };
 }
+
+export function clearHistorySessions(
+  store: SessionStateStore
+): SessionStateStore {
+  return {
+    ...store,
+    recentTransfers: [],
+  };
+}

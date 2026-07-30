@@ -8,6 +8,7 @@ import {
   MAX_HISTORY_CAPACITY,
   formatHumanEta,
   formatRelativeTimestamp,
+  clearHistorySessions,
 } from "./transferSessionManager.ts";
 
 function assertEqual(actual: any, expected: any, message: string) {
@@ -378,6 +379,17 @@ export function runLifecycleTests() {
     assertEqual(recent.files?.[0].sha256Checksum, undefined, "S17: Empty sha256Checksum cleaned to undefined");
     assertEqual(recent.files?.[1].sha256Checksum, "abc123def", "S17: Valid sha256Checksum preserved");
     assertEqual(recent.timestamp, "5 minutes ago", "S17: Relative timestamp string set cleanly");
+  }
+
+  // ── Scenario 18: Clearing in-memory transfer history ──────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = applyCompletionEvent(store, { sessionId: "tx-18-a", fileName: "file1.txt" });
+    store = applyCompletionEvent(store, { sessionId: "tx-18-b", fileName: "file2.txt" });
+    assertEqual(store.recentTransfers.length, 2, "S18: 2 sessions added to history");
+
+    store = clearHistorySessions(store);
+    assertEqual(store.recentTransfers.length, 0, "S18: Recent transfers cleared completely");
   }
 
   console.log("All Transfer Session Lifecycle & Path Propagation Tests PASSED cleanly! ✓");

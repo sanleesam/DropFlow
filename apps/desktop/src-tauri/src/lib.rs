@@ -64,6 +64,7 @@ pub fn run() {
             state_manager::get_app_state,
             state_manager::save_settings,
             state_manager::save_history,
+            state_manager::clear_history,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
