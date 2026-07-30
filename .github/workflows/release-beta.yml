@@ -1,0 +1,58 @@
+name: Release Beta
+
+on:
+  push:
+    tags:
+      - 'v*-beta.*'
+      - 'v*'
+
+jobs:
+  publish-beta:
+    permissions:
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target aarch64-apple-darwin'
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Install Frontend Dependencies
+        run: pnpm install
+        working-directory: ./apps/desktop
+
+      - name: Build and Publish Beta Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: ./apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'DropFlow ${{ github.ref_name }}'
+          releaseBody: 'DropFlow Beta Release ${{ github.ref_name }}. Includes local file transfer, power management sleep prevention, resumable transfers, and native updater integration.'
+          prerelease: true
+          includeUpdaterJson: true
