@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - 'v*-beta.*'
-      - 'v*'
 
 jobs:
   publish-beta:
@@ -53,6 +52,9 @@ jobs:
           projectPath: ./apps/desktop
           tagName: ${{ github.ref_name }}
           releaseName: 'DropFlow ${{ github.ref_name }}'
-          releaseBody: 'DropFlow Beta Release ${{ github.ref_name }}. Includes local file transfer, power management sleep prevention, resumable transfers, and native updater integration.'
+          releaseBody: |
+            DropFlow beta release ${{ github.ref_name }}
+
+            This build is for testing and feedback.
           prerelease: true
           includeUpdaterJson: true
