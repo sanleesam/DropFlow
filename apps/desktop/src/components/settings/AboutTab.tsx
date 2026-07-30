@@ -1,12 +1,27 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useSettings, ACCENT_COLOR_MAPS } from "../SettingsProvider";
 import { useUpdater } from "../../hooks/useUpdater";
 import { UPDATER_CONFIG } from "../../config/updaterConfig";
+
+interface ReleaseInfo {
+  version: string;
+  display_version: string;
+  release_tag: string;
+  channel: string;
+}
 
 export const AboutTab: React.FC = () => {
   const { settings } = useSettings();
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
   const { state, checkForUpdates, downloadUpdate, restartApplication } = useUpdater();
+  const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
+
+  useEffect(() => {
+    invoke<ReleaseInfo>("get_release_info")
+      .then((info) => setReleaseInfo(info))
+      .catch((err) => console.warn("[AboutTab] Failed to fetch release info:", err));
+  }, []);
 
   const getPlatformName = () => {
     if (typeof window !== "undefined" && window.navigator) {
@@ -41,6 +56,8 @@ export const AboutTab: React.FC = () => {
   };
 
   const isBusy = state.status === "checking" || state.status === "downloading" || state.status === "installing";
+  const displayVersion = releaseInfo?.display_version || state.versionInfo.currentVersion;
+  const channelDisplay = releaseInfo?.channel || UPDATER_CONFIG.channel;
 
   return (
     <div className="flex flex-col gap-5 animate-[backdrop-fade-in_0.15s_ease-out]">
@@ -54,11 +71,11 @@ export const AboutTab: React.FC = () => {
           <div className="grid grid-cols-2 gap-3 text-xs bg-neutral-950/40 border border-white/[0.08] rounded-xl p-3.5">
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">DropFlow</span>
-              <span className="text-neutral-200 font-medium">v{state.versionInfo.currentVersion}</span>
+              <span className="text-neutral-200 font-medium">v{displayVersion}</span>
             </div>
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">Channel</span>
-              <span className="text-neutral-200 font-medium capitalize">{UPDATER_CONFIG.channel}</span>
+              <span className="text-neutral-200 font-medium capitalize">{channelDisplay}</span>
             </div>
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">Tauri</span>

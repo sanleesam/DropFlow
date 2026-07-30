@@ -11,6 +11,39 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+#[derive(serde::Serialize)]
+pub struct ReleaseInfo {
+    pub version: String,
+    pub display_version: String,
+    pub release_tag: String,
+    pub channel: String,
+}
+
+#[tauri::command]
+fn get_release_info() -> ReleaseInfo {
+    let raw_tag = option_env!("DROPFLOW_RELEASE_TAG").unwrap_or("");
+    let app_version = env!("CARGO_PKG_VERSION");
+
+    let (display_version, channel, release_tag) = if !raw_tag.is_empty() {
+        let tag_clean = raw_tag.strip_prefix('v').unwrap_or(raw_tag);
+        let ch = if tag_clean.contains("-beta") {
+            "beta"
+        } else {
+            "stable"
+        };
+        (tag_clean.to_string(), ch.to_string(), raw_tag.to_string())
+    } else {
+        (app_version.to_string(), "stable".to_string(), String::new())
+    };
+
+    ReleaseInfo {
+        version: app_version.to_string(),
+        display_version,
+        release_tag,
+        channel,
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -75,6 +108,7 @@ pub fn run() {
             state_manager::clear_history,
             state_manager::get_incomplete_transfers,
             state_manager::remove_incomplete_transfer,
+            get_release_info,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
