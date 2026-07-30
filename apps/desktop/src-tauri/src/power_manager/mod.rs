@@ -10,8 +10,7 @@ mod platform_macos {
     pub type IOReturn = i32;
     pub type CFStringRef = *const c_void;
 
-    #[link(name = "IOKit", kind = "framework")]
-    #[link(name = "CoreFoundation")]
+    #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
         fn CFStringCreateWithCString(
             alloc: CFStringRef,
@@ -20,7 +19,10 @@ mod platform_macos {
         ) -> CFStringRef;
 
         fn CFRelease(cf: CFStringRef);
+    }
 
+    #[link(name = "IOKit", kind = "framework")]
+    extern "C" {
         fn IOPMAssertionCreateWithName(
             assertion_type: CFStringRef,
             assertion_level: u32,
