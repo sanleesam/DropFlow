@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 use super::protocol::{
@@ -28,6 +28,10 @@ pub fn send_files_over_tcp(
     cancel_flag: Arc<AtomicBool>,
     session_id: Option<String>,
 ) -> Result<String, String> {
+    let _sleep_guard = app
+        .try_state::<crate::power_manager::SleepState>()
+        .map(|s| s.sleep_manager.acquire());
+
     if file_paths.is_empty() {
         return Err("No files selected for transfer".to_string());
     }

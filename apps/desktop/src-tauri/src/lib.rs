@@ -1,8 +1,9 @@
 pub mod device_discovery;
+pub mod power_manager;
 pub mod state_manager;
 pub mod transfer_manager;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 #[tauri::command]
@@ -19,6 +20,11 @@ pub fn run() {
         .setup(|app| {
             let app_state = state_manager::load_or_create_state(app.handle());
             let local_uuid = app_state.device_uuid.clone();
+
+            let sleep_manager = power_manager::SleepManager::new();
+            app.manage(power_manager::SleepState {
+                sleep_manager: Arc::clone(&sleep_manager),
+            });
 
             let discovery_engine = device_discovery::MdnsDiscoveryEngine::new(local_uuid.clone())
                 .expect("Failed to initialize mDNS engine");

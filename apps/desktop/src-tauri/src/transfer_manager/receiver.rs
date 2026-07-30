@@ -144,6 +144,10 @@ impl<'a> Drop for CancellationGuard<'a> {
 }
 
 fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result<(), String> {
+    let _sleep_guard = app
+        .try_state::<crate::power_manager::SleepState>()
+        .map(|s| s.sleep_manager.acquire());
+
     stream
         .set_read_timeout(Some(Duration::from_secs(30)))
         .map_err(|e| format!("Failed to set socket read timeout: {e}"))?;
