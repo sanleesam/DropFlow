@@ -54,16 +54,22 @@ const Header: React.FC<HeaderProps> = ({ activePage = "home", onNavigate, onSett
         </div>
       </div>
 
-      {/* Navigation Tabs */}
+      {/* Native macOS Segmented Control */}
       {onNavigate && (
-        <div className="flex items-center gap-1 bg-neutral-950/60 p-1 rounded-xl border border-white/[0.07] select-none">
+        <div className="relative flex items-center bg-neutral-900/70 p-0.5 rounded-lg border border-white/[0.08] select-none">
+          {/* Sliding active pill indicator */}
+          <div
+            className="absolute top-0.5 bottom-0.5 rounded-[5px] bg-neutral-800 border border-white/[0.1] shadow-sm transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]"
+            style={{
+              width: "calc(50% - 2px)",
+              transform: activePage === "home" ? "translateX(0px)" : "translateX(100%)",
+            }}
+          />
           <button
             type="button"
             onClick={() => onNavigate("home")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 ${
-              activePage === "home"
-                ? "bg-neutral-800 text-white shadow-sm border border-white/[0.08]"
-                : "text-neutral-400 hover:text-neutral-200"
+            className={`relative z-10 px-3.5 py-1 text-xs font-medium transition-colors duration-150 ${
+              activePage === "home" ? "text-white font-semibold" : "text-neutral-400 hover:text-neutral-200"
             }`}
           >
             Dashboard
@@ -71,10 +77,8 @@ const Header: React.FC<HeaderProps> = ({ activePage = "home", onNavigate, onSett
           <button
             type="button"
             onClick={() => onNavigate("history")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 ${
-              activePage === "history"
-                ? "bg-neutral-800 text-white shadow-sm border border-white/[0.08]"
-                : "text-neutral-400 hover:text-neutral-200"
+            className={`relative z-10 px-3.5 py-1 text-xs font-medium transition-colors duration-150 ${
+              activePage === "history" ? "text-white font-semibold" : "text-neutral-400 hover:text-neutral-200"
             }`}
           >
             History

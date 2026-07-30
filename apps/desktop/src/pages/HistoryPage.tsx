@@ -96,7 +96,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers, onBac
   };
 
   return (
-    <div className="flex flex-col gap-5 w-full max-w-[980px] mx-auto p-4 sm:p-6 transition-opacity duration-150">
+    <div className="flex flex-col gap-5 w-full max-w-[980px] mx-auto p-4 sm:p-6 transition-opacity duration-120 ease-[cubic-bezier(0.22,1,0.36,1)]">
       {/* ── Page Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-white/[0.07]">
         <div>
@@ -152,11 +152,10 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers, onBac
               key={tab}
               type="button"
               onClick={() => setActiveTab(tab)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all duration-150 ${
-                activeTab === tab
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all duration-150 ${activeTab === tab
                   ? "bg-neutral-800 text-white shadow-sm border border-white/[0.08]"
                   : "text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.02]"
-              }`}
+                }`}
             >
               {tab === "all" ? "All" : tab === "send" ? "Sent" : tab === "receive" ? "Received" : "Failed"}
             </button>
@@ -186,13 +185,12 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers, onBac
                   <div className="flex items-center gap-3 min-w-0 flex-1 pr-3">
                     {/* Direction / Status Icon */}
                     <span
-                      className={`flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg border ${
-                        isFailed
+                      className={`flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg border ${isFailed
                           ? "bg-red-500/10 border-red-500/20 text-red-400"
                           : isReceive
-                          ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
-                          : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                      }`}
+                            ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
+                            : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                        }`}
                     >
                       {isFailed ? (
                         <XCircle size={16} />
@@ -229,9 +227,8 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers, onBac
                     <div className="flex flex-col items-end">
                       <span className="text-xs text-neutral-300 font-mono font-medium">{tx.size}</span>
                       <span
-                        className={`text-[10px] font-medium mt-0.5 ${
-                          isFailed ? "text-red-400" : "text-emerald-400"
-                        }`}
+                        className={`text-[10px] font-medium mt-0.5 ${isFailed ? "text-red-400" : "text-emerald-400"
+                          }`}
                       >
                         {isFailed ? "Failed" : "Completed"}
                       </span>
@@ -342,8 +339,8 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers, onBac
             {searchQuery
               ? `No transfers matching "${searchQuery}"`
               : activeTab !== "all"
-              ? `No transfers in category "${activeTab}"`
-              : "Your transfer history will appear here once you send or receive files."}
+                ? `No transfers in category "${activeTab}"`
+                : "Your transfer history will appear here once you send or receive files."}
           </p>
         </div>
       )}

@@ -112,10 +112,10 @@ export const Home: React.FC<HomeProps> = ({ onNavigateHistory }) => {
   const { settings } = useSettings();
   const { addToast } = useToast();
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
-  
+
   // Central Session Store managing active and recent transfers
   const [sessionStore, setSessionStore] = useState<SessionStateStore>(createInitialSessionStore);
-  
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const wasSettingsOpenRef = useRef(false);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -401,151 +401,151 @@ export const Home: React.FC<HomeProps> = ({ onNavigateHistory }) => {
   const activeTransferList = Object.values(sessionStore.activeTransfers);
 
   return (
-    <div className="flex flex-col gap-5 w-full">
+    <div className="flex flex-col gap-5 w-full transition-opacity duration-120 ease-[cubic-bezier(0.22,1,0.36,1)]">
       {/* ── Nearby Devices ── */}
-        <Section
-          id="nearby-devices"
-          title="Nearby devices"
-          icon={<IconRadar />}
+      <Section
+        id="nearby-devices"
+        title="Nearby devices"
+        icon={<IconRadar />}
+      >
+        <div
+          role="radiogroup"
+          aria-label="Nearby devices"
+          className="w-full"
         >
-          <div
-            role="radiogroup"
-            aria-label="Nearby devices"
-            className="w-full"
-          >
-            {devices.length > 0 ? (
-              <div className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                {devices.map((device) => (
-                  <DeviceCard
-                    key={device.id}
-                    device={device}
-                    selected={selectedDeviceId === device.id}
-                    onSelect={setSelectedDeviceId}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="py-2.5 text-left select-none">
-                <p className="text-xs font-medium text-neutral-400">Looking for devices…</p>
-                <p className="mt-0.5 text-[11px] text-neutral-500">
-                  Make sure DropFlow is open on your other device.
-                </p>
-              </div>
-            )}
-          </div>
-        </Section>
-
-        {/* ── Send Files ── */}
-        <Section
-          id="send-files"
-          title="Send files"
-          icon={<IconUpload />}
-        >
-          <FileDropZone selectedDeviceId={selectedDeviceId} onSend={handleSend} />
-        </Section>
-
-        {/* ── Active Transfer Progress Cards ── */}
-        {activeTransferList.length > 0 && (
-          <Section
-            id="active-transfers"
-            title="Active transfers"
-            icon={<IconActivity />}
-          >
-            <div className="w-full flex flex-col gap-3">
-              {activeTransferList.map((session) => (
-                <TransferProgress
-                  key={session.id}
-                  session={session}
-                  onDismiss={(id) => setSessionStore((prev) => dismissActiveSession(prev, id))}
-                  onCancel={(id) => {
-                    invoke("cancel_transfer", { sessionId: id }).catch(console.error);
-                    setSessionStore((prev) =>
-                      applyFailureEvent(prev, { sessionId: id, error: "Transfer cancelled by user" })
-                    );
-                  }}
+          {devices.length > 0 ? (
+            <div className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              {devices.map((device) => (
+                <DeviceCard
+                  key={device.id}
+                  device={device}
+                  selected={selectedDeviceId === device.id}
+                  onSelect={setSelectedDeviceId}
                 />
               ))}
             </div>
-          </Section>
-        )}
-
-        {/* ── Recent Transfer Summary ── */}
-        <Section
-          id="recent-transfers"
-          title="Recent transfer"
-          icon={<IconClock />}
-        >
-          {sessionStore.recentTransfers.length > 0 ? (
-            (() => {
-              const latest = sessionStore.recentTransfers[0];
-              const isReceive = latest.direction === "receive";
-              const isFailed = latest.status === "failed";
-              const displayTime = latest.timestampMs
-                ? formatRelativeTimestamp(latest.timestampMs)
-                : latest.timestamp;
-
-              return (
-                <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/40 select-none">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span
-                      className={`flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg border ${
-                        isFailed
-                          ? "bg-red-500/10 border-red-500/20 text-red-400"
-                          : isReceive
-                          ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
-                          : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                      }`}
-                    >
-                      <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                      </svg>
-                    </span>
-
-                    <div className="flex flex-col min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-neutral-100 truncate">
-                          {latest.totalFiles > 1 ? `${latest.totalFiles} files` : latest.fileName}
-                        </span>
-                        <span className="text-[10px] font-mono text-neutral-400">{latest.size}</span>
-                      </div>
-                      <span className="text-[11px] text-neutral-400 mt-0.5 flex items-center gap-1.5 truncate">
-                        <span>{isReceive ? "↓ Received from" : "↑ Sent to"}</span>
-                        <span className="text-neutral-200 font-medium">{latest.deviceName}</span>
-                        <span>•</span>
-                        <span>{displayTime}</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => onNavigateHistory ? onNavigateHistory() : addToast("History page available in menu", "info")}
-                    className="self-start sm:self-auto text-xs font-medium text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 shrink-0 cursor-pointer outline-none"
-                  >
-                    <span>View transfer history</span>
-                    <span>→</span>
-                  </button>
-                </div>
-              );
-            })()
           ) : (
-            <div className="flex items-center justify-between p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/30 select-none">
-              <div className="flex flex-col">
-                <span className="text-xs font-medium text-neutral-300">No recent transfers</span>
-                <span className="text-[11px] text-neutral-500 mt-0.5">Transferred files will appear here</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => onNavigateHistory ? onNavigateHistory() : addToast("History page available in menu", "info")}
-                className="text-xs font-medium text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 shrink-0 cursor-pointer outline-none"
-              >
-                <span>View transfer history</span>
-                <span>→</span>
-              </button>
+            <div className="py-2.5 text-left select-none">
+              <p className="text-xs font-medium text-neutral-400">Looking for devices…</p>
+              <p className="mt-0.5 text-[11px] text-neutral-500">
+                Make sure DropFlow is open on your other device.
+              </p>
             </div>
           )}
+        </div>
+      </Section>
+
+      {/* ── Send Files ── */}
+      <Section
+        id="send-files"
+        title="Send files"
+        icon={<IconUpload />}
+      >
+        <FileDropZone selectedDeviceId={selectedDeviceId} onSend={handleSend} />
+      </Section>
+
+      {/* ── Active Transfer Progress Cards ── */}
+      {activeTransferList.length > 0 && (
+        <Section
+          id="active-transfers"
+          title="Active transfers"
+          icon={<IconActivity />}
+        >
+          <div className="w-full flex flex-col gap-3">
+            {activeTransferList.map((session) => (
+              <TransferProgress
+                key={session.id}
+                session={session}
+                onDismiss={(id) => setSessionStore((prev) => dismissActiveSession(prev, id))}
+                onCancel={(id) => {
+                  invoke("cancel_transfer", { sessionId: id }).catch(console.error);
+                  setSessionStore((prev) =>
+                    applyFailureEvent(prev, { sessionId: id, error: "Transfer cancelled by user" })
+                  );
+                }}
+              />
+            ))}
+          </div>
         </Section>
+      )}
+
+      {/* ── Recent Transfer Summary ── */}
+      <Section
+        id="recent-transfers"
+        title="Recent transfer"
+        icon={<IconClock />}
+      >
+        {sessionStore.recentTransfers.length > 0 ? (
+          (() => {
+            const latest = sessionStore.recentTransfers[0];
+            const isReceive = latest.direction === "receive";
+            const isFailed = latest.status === "failed";
+            const displayTime = latest.timestampMs
+              ? formatRelativeTimestamp(latest.timestampMs)
+              : latest.timestamp;
+
+            return (
+              <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/40 select-none">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span
+                    className={`flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg border ${
+                      isFailed
+                        ? "bg-red-500/10 border-red-500/20 text-red-400"
+                        : isReceive
+                        ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
+                        : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                    }`}
+                  >
+                    <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                  </span>
+
+                  <div className="flex flex-col min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-neutral-100 truncate">
+                        {latest.totalFiles > 1 ? `${latest.totalFiles} files` : latest.fileName}
+                      </span>
+                      <span className="text-[10px] font-mono text-neutral-400">{latest.size}</span>
+                    </div>
+                    <span className="text-[11px] text-neutral-400 mt-0.5 flex items-center gap-1.5 truncate">
+                      <span>{isReceive ? "↓ Received from" : "↑ Sent to"}</span>
+                      <span className="text-neutral-200 font-medium">{latest.deviceName}</span>
+                      <span>•</span>
+                      <span>{displayTime}</span>
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => (onNavigateHistory ? onNavigateHistory() : addToast("History page available in menu", "info"))}
+                  className="self-start sm:self-auto text-xs font-medium text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 shrink-0 cursor-pointer outline-none"
+                >
+                  <span>View transfer history</span>
+                  <span>→</span>
+                </button>
+              </div>
+            );
+          })()
+        ) : (
+          <div className="flex items-center justify-between p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/30 select-none">
+            <div className="flex flex-col">
+              <span className="text-xs font-medium text-neutral-300">No recent transfers</span>
+              <span className="text-[11px] text-neutral-500 mt-0.5">Transferred files will appear here</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => (onNavigateHistory ? onNavigateHistory() : addToast("History page available in menu", "info"))}
+              className="text-xs font-medium text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 shrink-0 cursor-pointer outline-none"
+            >
+              <span>View transfer history</span>
+              <span>→</span>
+            </button>
+          </div>
+        )}
+      </Section>
 
       {/* ── Settings Modal ── */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
