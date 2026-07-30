@@ -54,7 +54,7 @@ function MainContent() {
         }}
       >
         {activePage === "home" ? (
-          <Home onNavigateHistory={() => setActivePage("history")} />
+          <Home />
         ) : (
           <HistoryPage recentTransfers={recentTransfers} />
         )}

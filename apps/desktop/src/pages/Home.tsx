@@ -108,7 +108,7 @@ interface HomeProps {
   sessionStore?: SessionStateStore;
 }
 
-export const Home: React.FC<HomeProps> = ({ onNavigateHistory }) => {
+export const Home: React.FC<HomeProps> = () => {
   const { settings } = useSettings();
   const { addToast } = useToast();
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
@@ -485,7 +485,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigateHistory }) => {
               : latest.timestamp;
 
             return (
-              <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/40 select-none">
+              <div className="w-full flex items-center justify-between gap-3 p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/40 select-none">
                 <div className="flex items-center gap-3 min-w-0">
                   <span
                     className={`flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg border ${
@@ -517,15 +517,6 @@ export const Home: React.FC<HomeProps> = ({ onNavigateHistory }) => {
                     </span>
                   </div>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => (onNavigateHistory ? onNavigateHistory() : addToast("History page available in menu", "info"))}
-                  className="self-start sm:self-auto text-xs font-medium text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 shrink-0 cursor-pointer outline-none"
-                >
-                  <span>View transfer history</span>
-                  <span>→</span>
-                </button>
               </div>
             );
           })()
@@ -535,14 +526,6 @@ export const Home: React.FC<HomeProps> = ({ onNavigateHistory }) => {
               <span className="text-xs font-medium text-neutral-300">No recent transfers</span>
               <span className="text-[11px] text-neutral-500 mt-0.5">Transferred files will appear here</span>
             </div>
-            <button
-              type="button"
-              onClick={() => (onNavigateHistory ? onNavigateHistory() : addToast("History page available in menu", "info"))}
-              className="text-xs font-medium text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 shrink-0 cursor-pointer outline-none"
-            >
-              <span>View transfer history</span>
-              <span>→</span>
-            </button>
           </div>
         )}
       </Section>
