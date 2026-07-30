@@ -56,19 +56,18 @@ const Header: React.FC<HeaderProps> = ({ activePage = "home", onNavigate, onSett
 
       {/* Native macOS Segmented Control */}
       {onNavigate && (
-        <div className="relative flex items-center bg-neutral-900/70 p-0.5 rounded-lg border border-white/[0.08] select-none">
+        <div className="relative inline-flex items-center bg-neutral-900/80 p-0.5 rounded-lg border border-white/[0.08] select-none">
           {/* Sliding active pill indicator */}
           <div
-            className="absolute top-0.5 bottom-0.5 rounded-[5px] bg-neutral-800 border border-white/[0.1] shadow-sm transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]"
+            className="absolute top-0.5 bottom-0.5 left-0.5 w-[calc(50%-2px)] rounded-[5px] bg-neutral-800 border border-white/[0.12] shadow-sm transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]"
             style={{
-              width: "calc(50% - 2px)",
-              transform: activePage === "home" ? "translateX(0px)" : "translateX(100%)",
+              transform: activePage === "home" ? "translateX(0%)" : "translateX(100%)",
             }}
           />
           <button
             type="button"
             onClick={() => onNavigate("home")}
-            className={`relative z-10 px-3.5 py-1 text-xs font-medium transition-colors duration-150 ${
+            className={`relative z-10 w-24 py-1 text-center text-xs font-medium transition-colors duration-150 ${
               activePage === "home" ? "text-white font-semibold" : "text-neutral-400 hover:text-neutral-200"
             }`}
           >
@@ -77,7 +76,7 @@ const Header: React.FC<HeaderProps> = ({ activePage = "home", onNavigate, onSett
           <button
             type="button"
             onClick={() => onNavigate("history")}
-            className={`relative z-10 px-3.5 py-1 text-xs font-medium transition-colors duration-150 ${
+            className={`relative z-10 w-24 py-1 text-center text-xs font-medium transition-colors duration-150 ${
               activePage === "history" ? "text-white font-semibold" : "text-neutral-400 hover:text-neutral-200"
             }`}
           >
