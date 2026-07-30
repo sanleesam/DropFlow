@@ -40,6 +40,20 @@ export interface FailedPayload {
   error?: string;
 }
 
+export interface IncompleteTransfer {
+  sessionId: string;
+  fileName: string;
+  deviceName: string;
+  totalFiles: number;
+  totalSizeBytes: number;
+  bytesCompleted: number;
+  direction: "send" | "receive";
+  receiveDir?: string;
+  filePaths?: string[];
+  files?: FileMetadataPayload[];
+  timestampMs?: number;
+}
+
 export interface ActiveTransferSession {
   id: string;
   deviceName: string;

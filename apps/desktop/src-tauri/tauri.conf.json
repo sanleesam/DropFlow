@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "appsdesktop",
+  "productName": "DropFlow",
   "version": "0.1.0",
-  "identifier": "com.sanleesam.appsdesktop",
+  "identifier": "com.dropflow.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "appsdesktop",
+        "title": "DropFlow",
         "width": 800,
         "height": 600
       }

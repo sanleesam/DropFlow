@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{Shutdown, TcpStream};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,9 +11,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 use super::protocol::{
-    read_frame_header, write_file_complete, write_file_header, write_frame_header,
-    write_transfer_request, FileCompletePayload, FileHeaderPayload, FileMetadata, FrameTag,
-    TransferMetadata, DEFAULT_CHUNK_SIZE,
+    read_frame_header, read_transfer_ack, write_file_complete, write_file_header,
+    write_frame_header, write_transfer_request, FileCompletePayload, FileHeaderPayload,
+    FileMetadata, FrameTag, TransferAckPayload, TransferMetadata, DEFAULT_CHUNK_SIZE,
 };
 use super::receiver::{TransferCompletedPayload, TransferFailedPayload, TransferProgressPayload};
 
@@ -98,6 +98,32 @@ pub fn send_files_over_tcp(
     write_transfer_request(&mut stream, &transfer_meta)?;
     println!("[Sender] REQUEST_SENT");
 
+    crate::state_manager::update_incomplete_session(
+        app,
+        crate::state_manager::IncompleteTransferSchema {
+            session_id: session_id.clone(),
+            file_name: transfer_meta
+                .files
+                .first()
+                .map(|f| f.relative_path.clone())
+                .unwrap_or_default(),
+            device_name: peer_address.to_string(),
+            total_files: total_files_count,
+            total_size_bytes,
+            bytes_completed: 0,
+            direction: "send".to_string(),
+            receive_dir: None,
+            file_paths: Some(file_paths.clone()),
+            files: None,
+            timestamp_ms: Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64,
+            ),
+        },
+    );
+
     // 2. Read acceptance frame header & payload
     let (resp_tag, resp_len) = read_frame_header(&mut stream)
         .map_err(|e| format!("Failed to read peer acceptance response header: {e}"))?;
@@ -154,11 +180,30 @@ pub fn send_files_over_tcp(
             relative_path: file_meta.relative_path.clone(),
             size_bytes: file_meta.size_bytes,
             sha256_checksum: String::new(),
+            resume_offset: 0,
         };
         write_file_header(&mut stream, &file_header_payload)?;
 
-        let mut hasher = Sha256::new();
+        // Read TransferAck from receiver to negotiate resume_offset
+        let ack = read_transfer_ack(&mut stream).unwrap_or_else(|_| TransferAckPayload {
+            status: "ACCEPTED".to_string(),
+            resume_offset: 0,
+        });
+
         let mut file_bytes_sent: u64 = 0;
+        if ack.resume_offset > 0
+            && ack.resume_offset < file_meta.size_bytes
+            && file.seek(SeekFrom::Start(ack.resume_offset)).is_ok()
+        {
+            file_bytes_sent = ack.resume_offset;
+            total_sent_bytes += ack.resume_offset;
+            println!(
+                "[Sender] RESUMING file '{}' from offset {}",
+                file_meta.relative_path, ack.resume_offset
+            );
+        }
+
+        let mut hasher = Sha256::new();
         let mut file_buffer = vec![0u8; DEFAULT_CHUNK_SIZE];
 
         loop {
@@ -285,6 +330,8 @@ pub fn send_files_over_tcp(
         .shutdown(Shutdown::Write)
         .map_err(|e| format!("Failed to shutdown TCP write stream: {e}"))?;
     println!("[Sender] SHUTDOWN");
+
+    crate::state_manager::remove_incomplete_session(app, &session_id);
 
     let size_mb = (total_size_bytes as f64) / (1024.0 * 1024.0);
     let formatted_size = if size_mb >= 1.0 {

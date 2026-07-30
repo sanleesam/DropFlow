@@ -142,6 +142,18 @@ pub fn get_part_file_path(target_path: &Path) -> PathBuf {
     PathBuf::from(os_string)
 }
 
+/// Returns session-specific `.dropflow-part` path for deterministic resume matching.
+pub fn get_session_part_file_path(target_path: &Path, session_id: &str) -> PathBuf {
+    let parent = target_path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = target_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
+    let safe_session = sanitize_filename(session_id);
+    let part_name = format!("{file_name}.{safe_session}.dropflow-part");
+    parent.join(part_name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -72,6 +72,8 @@ pub struct FileHeaderPayload {
     pub relative_path: String,
     pub size_bytes: u64,
     pub sha256_checksum: String,
+    #[serde(default)]
+    pub resume_offset: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -80,6 +82,14 @@ pub struct FileCompletePayload {
     pub file_index: u32,
     pub bytes_written: u64,
     pub sha256_checksum: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferAckPayload {
+    pub status: String,
+    #[serde(default)]
+    pub resume_offset: u64,
 }
 
 // ─── Binary Frame Encoding & Decoding Helpers ────────────────────────────────
@@ -292,6 +302,58 @@ pub fn write_response_frame<W: Write>(
     Ok(())
 }
 
+/// Sends a structured `TransferAckPayload` frame.
+pub fn write_transfer_ack<W: Write>(
+    writer: &mut W,
+    payload: &TransferAckPayload,
+) -> Result<(), String> {
+    let json_bytes = serde_json::to_vec(payload)
+        .map_err(|e| format!("Failed to serialize TransferAckPayload: {e}"))?;
+
+    write_frame_header(writer, FrameTag::TransferAck, json_bytes.len() as u32)?;
+    writer
+        .write_all(&json_bytes)
+        .map_err(|e| format!("Failed to write TransferAck payload: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Failed to flush stream: {e}"))?;
+
+    Ok(())
+}
+
+/// Reads a `TransferAckPayload` or legacy response frame.
+pub fn read_transfer_ack<R: Read>(reader: &mut R) -> Result<TransferAckPayload, String> {
+    let (tag, payload_len) = read_frame_header(reader)?;
+    if tag != FrameTag::TransferAck && tag != FrameTag::TransferAccept {
+        return Err(format!(
+            "Expected TransferAck or TransferAccept tag, received {:?}",
+            tag
+        ));
+    }
+
+    let mut payload = vec![0u8; payload_len as usize];
+    reader
+        .read_exact(&mut payload)
+        .map_err(|e| format!("Failed to read TransferAck payload: {e}"))?;
+
+    if let Ok(ack) = serde_json::from_slice::<TransferAckPayload>(&payload) {
+        return Ok(ack);
+    }
+
+    let msg = String::from_utf8_lossy(&payload);
+    let mut resume_offset = 0;
+    if let Some(stripped) = msg.strip_prefix("RESUME:") {
+        if let Ok(off) = stripped.parse::<u64>() {
+            resume_offset = off;
+        }
+    }
+
+    Ok(TransferAckPayload {
+        status: msg.to_string(),
+        resume_offset,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,6 +404,7 @@ mod tests {
             relative_path: "images/vacation.png".to_string(),
             size_bytes: 2048576,
             sha256_checksum: "d41d8cd98f00b204e9800998ecf8427e".to_string(),
+            resume_offset: 0,
         };
 
         let mut buffer = Vec::new();
@@ -368,6 +431,28 @@ mod tests {
         let decoded = read_file_complete(&mut cursor).unwrap();
 
         assert_eq!(complete, decoded);
+    }
+
+    #[test]
+    fn test_transfer_ack_roundtrip_and_fallback() {
+        let ack = TransferAckPayload {
+            status: "ACCEPTED".to_string(),
+            resume_offset: 1048576,
+        };
+
+        let mut buffer = Vec::new();
+        write_transfer_ack(&mut buffer, &ack).unwrap();
+
+        let mut cursor = std::io::Cursor::new(buffer);
+        let decoded = read_transfer_ack(&mut cursor).unwrap();
+        assert_eq!(ack, decoded);
+
+        // Test fallback string parsing
+        let mut string_buf = Vec::new();
+        write_response_frame(&mut string_buf, FrameTag::TransferAccept, "RESUME:5242880").unwrap();
+        let mut cursor2 = std::io::Cursor::new(string_buf);
+        let decoded_str = read_transfer_ack(&mut cursor2).unwrap();
+        assert_eq!(decoded_str.resume_offset, 5242880);
     }
 
     #[test]

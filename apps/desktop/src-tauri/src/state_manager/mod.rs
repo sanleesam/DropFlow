@@ -75,11 +75,33 @@ impl Default for UserSettings {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct IncompleteTransferSchema {
+    pub session_id: String,
+    pub file_name: String,
+    pub device_name: String,
+    pub total_files: u32,
+    pub total_size_bytes: u64,
+    pub bytes_completed: u64,
+    pub direction: String,
+    #[serde(default)]
+    pub receive_dir: Option<String>,
+    #[serde(default)]
+    pub file_paths: Option<Vec<String>>,
+    #[serde(default)]
+    pub files: Option<Vec<FileMetadataSchema>>,
+    #[serde(default)]
+    pub timestamp_ms: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct AppStateSchema {
     pub version: u32,
     pub device_uuid: String,
     pub settings: UserSettings,
     pub history: Vec<RecentTransferSchema>,
+    #[serde(default)]
+    pub incomplete_transfers: Vec<IncompleteTransferSchema>,
 }
 
 pub struct AppStateContainer {
@@ -135,6 +157,7 @@ pub fn load_or_create_state_at_path(path: &PathBuf) -> AppStateSchema {
         device_uuid: Uuid::new_v4().to_string(),
         settings: UserSettings::default(),
         history: Vec::new(),
+        incomplete_transfers: Vec::new(),
     };
 
     save_state_atomic_at_path(path, &default_state).ok();
@@ -240,6 +263,47 @@ pub fn clear_history(
     state.history.clear();
     save_state_atomic(&app, &state)?;
     println!("[StateManager] Cleared transfer history successfully");
+    Ok(())
+}
+
+pub fn update_incomplete_session(app: &AppHandle, incomplete: IncompleteTransferSchema) {
+    if let Some(container) = app.try_state::<AppStateContainer>() {
+        if let Ok(mut state) = container.state.lock() {
+            state
+                .incomplete_transfers
+                .retain(|item| item.session_id != incomplete.session_id);
+            state.incomplete_transfers.push(incomplete);
+            save_state_atomic(app, &state).ok();
+        }
+    }
+}
+
+pub fn remove_incomplete_session(app: &AppHandle, session_id: &str) {
+    if let Some(container) = app.try_state::<AppStateContainer>() {
+        if let Ok(mut state) = container.state.lock() {
+            state
+                .incomplete_transfers
+                .retain(|item| item.session_id != session_id);
+            save_state_atomic(app, &state).ok();
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_incomplete_transfers(
+    container: State<'_, AppStateContainer>,
+) -> Result<Vec<IncompleteTransferSchema>, String> {
+    let state = container.state.lock().map_err(|e| e.to_string())?;
+    Ok(state.incomplete_transfers.clone())
+}
+
+#[tauri::command]
+pub fn remove_incomplete_transfer(
+    app: AppHandle,
+    _container: State<'_, AppStateContainer>,
+    session_id: String,
+) -> Result<(), String> {
+    remove_incomplete_session(&app, &session_id);
     Ok(())
 }
 
@@ -395,5 +459,35 @@ mod tests {
         assert_eq!(reloaded.history.len(), 0);
         assert_eq!(reloaded.device_uuid, orig_uuid);
         assert_eq!(reloaded.settings.device_name, "Desktop-PC");
+    }
+
+    #[test]
+    fn test_incomplete_transfers_persistence() {
+        let dir = create_test_temp_dir();
+        let state_path = dir.join("state.json");
+
+        let mut state = load_or_create_state_at_path(&state_path);
+        assert_eq!(state.incomplete_transfers.len(), 0);
+
+        state.incomplete_transfers.push(IncompleteTransferSchema {
+            session_id: "tx-resume-101".to_string(),
+            file_name: "movie.mkv".to_string(),
+            device_name: "MacBook".to_string(),
+            total_files: 1,
+            total_size_bytes: 104857600,
+            bytes_completed: 52428800,
+            direction: "receive".to_string(),
+            receive_dir: Some("/Users/test/Downloads/DropFlow".to_string()),
+            file_paths: None,
+            files: None,
+            timestamp_ms: Some(1722268800000),
+        });
+
+        save_state_atomic_at_path(&state_path, &state).unwrap();
+
+        let reloaded = load_or_create_state_at_path(&state_path);
+        assert_eq!(reloaded.incomplete_transfers.len(), 1);
+        assert_eq!(reloaded.incomplete_transfers[0].session_id, "tx-resume-101");
+        assert_eq!(reloaded.incomplete_transfers[0].bytes_completed, 52428800);
     }
 }

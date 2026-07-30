@@ -1,4 +1,4 @@
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -13,11 +13,12 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use super::protocol::{
     read_file_complete, read_file_header, read_frame_header, read_transfer_request,
-    write_response_frame, FileMetadata, FrameTag,
+    write_response_frame, write_transfer_ack, FileMetadata, FrameTag, TransferAckPayload,
+    DEFAULT_CHUNK_SIZE,
 };
 use super::security::{
-    get_default_receive_dir, get_part_file_path, resolve_collision_path, sanitize_relative_path,
-    verify_safe_target_path,
+    get_default_receive_dir, get_session_part_file_path, resolve_collision_path,
+    sanitize_relative_path, verify_safe_target_path,
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -175,6 +176,32 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     println!("[Receiver] ACCEPT_SENT");
 
     let receive_dir = get_default_receive_dir()?;
+
+    crate::state_manager::update_incomplete_session(
+        app,
+        crate::state_manager::IncompleteTransferSchema {
+            session_id: metadata.session_id.clone(),
+            file_name: metadata
+                .files
+                .first()
+                .map(|f| f.relative_path.clone())
+                .unwrap_or_default(),
+            device_name: metadata.sender_name.clone(),
+            total_files: metadata.total_files,
+            total_size_bytes: metadata.total_size_bytes,
+            bytes_completed: 0,
+            direction: "receive".to_string(),
+            receive_dir: Some(receive_dir.to_string_lossy().to_string()),
+            file_paths: None,
+            files: None,
+            timestamp_ms: Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64,
+            ),
+        },
+    );
     let mut total_received_bytes: u64 = 0;
     let start_time = Instant::now();
     let mut created_part_files: Vec<PathBuf> = Vec::new();
@@ -212,7 +239,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
         };
 
         let collision_resolved_path = resolve_collision_path(&final_target_path);
-        let part_file_path = get_part_file_path(&collision_resolved_path);
+        let part_file_path = get_session_part_file_path(&final_target_path, &metadata.session_id);
 
         if let Some(parent) = part_file_path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
@@ -224,23 +251,71 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
             }
         }
 
-        let mut out_file = match File::create(&part_file_path) {
-            Ok(f) => {
-                created_part_files.push(part_file_path.clone());
-                final_dest_paths.push((part_file_path.clone(), collision_resolved_path.clone()));
-                f
+        let mut resume_offset: u64 = 0;
+        if part_file_path.exists() {
+            if let Ok(meta) = fs::metadata(&part_file_path) {
+                let len = meta.len();
+                if len > 0 && len < file_header.size_bytes {
+                    resume_offset = len;
+                    println!(
+                        "[Receiver] RESUMING file '{}' from offset {}",
+                        file_header.relative_path, resume_offset
+                    );
+                }
             }
-            Err(e) => {
-                cleanup_files(&created_part_files);
-                return Err(format!(
-                    "Failed to create part file {:?}: {e}",
-                    part_file_path
-                ));
+        }
+
+        // Send TransferAck with resume_offset negotiation to sender
+        let ack_payload = TransferAckPayload {
+            status: "ACCEPTED".to_string(),
+            resume_offset,
+        };
+        if let Err(e) = write_transfer_ack(stream, &ack_payload) {
+            cleanup_files(&created_part_files);
+            return Err(format!("Failed to send TransferAck to sender: {e}"));
+        }
+
+        created_part_files.push(part_file_path.clone());
+        final_dest_paths.push((part_file_path.clone(), collision_resolved_path.clone()));
+
+        let mut file_hasher = Sha256::new();
+
+        let mut out_file = if resume_offset > 0 {
+            // Hash existing bytes on disk for complete SHA-256 integrity verification
+            if let Ok(mut existing_file) = File::open(&part_file_path) {
+                let mut hasher_buf = vec![0u8; DEFAULT_CHUNK_SIZE];
+                let mut read_remaining = resume_offset;
+                while read_remaining > 0 {
+                    let to_read = (read_remaining as usize).min(hasher_buf.len());
+                    match existing_file.read(&mut hasher_buf[..to_read]) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            file_hasher.update(&hasher_buf[..n]);
+                            read_remaining -= n as u64;
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+            match OpenOptions::new().append(true).open(&part_file_path) {
+                Ok(f) => f,
+                Err(e) => {
+                    cleanup_files(&created_part_files);
+                    return Err(format!("Failed to open part file in append mode: {e}"));
+                }
+            }
+        } else {
+            match File::create(&part_file_path) {
+                Ok(f) => f,
+                Err(e) => {
+                    cleanup_files(&created_part_files);
+                    return Err(format!("Failed to create part file: {e}"));
+                }
             }
         };
 
-        let mut file_hasher = Sha256::new();
-        let mut file_bytes_received: u64 = 0;
+        let mut file_bytes_received: u64 = resume_offset;
+        total_received_bytes += resume_offset;
 
         while file_bytes_received < file_header.size_bytes {
             let (tag, payload_len) = match read_frame_header(stream) {
@@ -437,6 +512,8 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     }
     println!("[Receiver] ACK_SENT");
     println!("[Receiver] CONNECTION_CLOSED");
+
+    crate::state_manager::remove_incomplete_session(app, &metadata.session_id);
 
     // Format human-readable file size string
     let size_mb = (metadata.total_size_bytes as f64) / (1024.0 * 1024.0);
