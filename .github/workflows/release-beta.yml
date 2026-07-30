@@ -17,6 +17,9 @@ jobs:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
 
+          - platform: 'windows-latest'
+            args: ''
+
     runs-on: ${{ matrix.platform }}
 
     steps:
@@ -35,8 +38,6 @@ jobs:
 
       - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
 
       - name: Install Frontend Dependencies
         run: pnpm install
