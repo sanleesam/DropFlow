@@ -60,3 +60,4 @@ jobs:
             This build is for testing and feedback.
           prerelease: true
           includeUpdaterJson: true
+          updaterJsonPreferNsis: true
