@@ -63,12 +63,22 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
+      - name: Locate and Debug Manifest Files
+        shell: bash
+        run: |
+          echo "=== Debugging latest.json location ==="
+          find . -name "latest.json" -type f
+
       - name: Upload Platform Manifest Artifact
         uses: actions/upload-artifact@v4
         with:
           name: manifest-${{ matrix.platform }}
           path: |
-            apps/desktop/src-tauri/target/**/release/bundle/latest.json
+            apps/desktop/src-tauri/target/**/latest.json
+            apps/desktop/src-tauri/target/release/bundle/latest.json
+            apps/desktop/src-tauri/target/release/latest.json
+            apps/desktop/src-tauri/latest.json
+            apps/desktop/latest.json
           if-no-files-found: error
 
   sync-beta-manifest:
