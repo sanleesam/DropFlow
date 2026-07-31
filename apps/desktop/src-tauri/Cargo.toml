@@ -1,6 +1,6 @@
 [package]
 name = "Dropflow"
-version = "0.1.0"
+version = "0.1.0-beta.2"
 description = "DropFlow Local File Transfer Application"
 authors = ["DropFlow Team"]
 edition = "2021"

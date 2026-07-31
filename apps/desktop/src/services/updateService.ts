@@ -118,14 +118,20 @@ class UpdateService {
       }
     } catch (error) {
       console.error("[UpdateService] Check for updates failed:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const rawError = error instanceof Error ? error.message : String(error);
+      let userFriendlyError = rawError;
+
+      if (rawError.includes("404") || rawError.includes("NotFound")) {
+        userFriendlyError = "No release manifest found at update endpoint (404).";
+      } else if (rawError.includes("signature") || rawError.includes("minisign")) {
+        userFriendlyError = "Update signature verification failed.";
+      } else if (rawError.includes("Could not fetch") || rawError.includes("network") || rawError.includes("dns")) {
+        userFriendlyError = "Unable to reach update server. Check network connection.";
+      }
 
       this.setState({
         status: "error",
-        error: errorMessage.includes("Could not fetch")
-          ? "Unable to reach update server. Check network connection."
-          : errorMessage,
+        error: userFriendlyError,
         lastCheckedAt: Date.now(),
       });
     }
