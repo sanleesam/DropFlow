@@ -63,22 +63,28 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
-      - name: Locate and Debug Manifest Files
+      - name: Copy Platform Manifest to Known Location
         shell: bash
         run: |
-          echo "=== Debugging latest.json location ==="
-          find . -name "latest.json" -type f
+          mkdir -p /tmp/platform-manifest
+          MANIFEST_FILE=$(find apps/desktop/src-tauri/target -path "*/bundle/latest.json" -type f | head -n 1)
+          if [ -z "$MANIFEST_FILE" ]; then
+            MANIFEST_FILE=$(find apps/desktop/src-tauri/target -name "latest.json" -type f | head -n 1)
+          fi
+
+          if [ -n "$MANIFEST_FILE" ]; then
+            echo "Selected updater manifest: $MANIFEST_FILE"
+            cp "$MANIFEST_FILE" /tmp/platform-manifest/latest.json
+          else
+            echo "::error::Could not locate bundle latest.json output from tauri-action in apps/desktop/src-tauri/target"
+            exit 1
+          fi
 
       - name: Upload Platform Manifest Artifact
         uses: actions/upload-artifact@v4
         with:
           name: manifest-${{ matrix.platform }}
-          path: |
-            apps/desktop/src-tauri/target/**/latest.json
-            apps/desktop/src-tauri/target/release/bundle/latest.json
-            apps/desktop/src-tauri/target/release/latest.json
-            apps/desktop/src-tauri/latest.json
-            apps/desktop/latest.json
+          path: /tmp/platform-manifest/latest.json
           if-no-files-found: error
 
   sync-beta-manifest:
