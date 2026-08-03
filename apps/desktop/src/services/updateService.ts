@@ -117,21 +117,22 @@ class UpdateService {
         });
       }
     } catch (error) {
-      console.error("[UpdateService] Check for updates failed:", error);
-      const rawError = error instanceof Error ? error.message : String(error);
-      let userFriendlyError = rawError;
+      const errName = error instanceof Error ? error.name : "UnknownError";
+      const errMessage = error instanceof Error ? error.message : String(error);
+      const errStack = error instanceof Error ? error.stack : undefined;
 
-      if (rawError.includes("404") || rawError.includes("NotFound")) {
-        userFriendlyError = "No release manifest found at update endpoint (404).";
-      } else if (rawError.includes("signature") || rawError.includes("minisign")) {
-        userFriendlyError = "Update signature verification failed.";
-      } else if (rawError.includes("Could not fetch") || rawError.includes("network") || rawError.includes("dns")) {
-        userFriendlyError = "Unable to reach update server. Check network connection.";
-      }
+      console.error("[UpdateService] Check for updates failed with error object:", error);
+      console.error("[UpdateService] Error.name:", errName);
+      console.error("[UpdateService] Error.message:", errMessage);
+      console.error("[UpdateService] Error.stack:", errStack);
+
+      const debugErrorMessage = error instanceof Error
+        ? `${errName}: ${errMessage}${errStack ? `\nStack:\n${errStack}` : ""}`
+        : String(error);
 
       this.setState({
         status: "error",
-        error: userFriendlyError,
+        error: debugErrorMessage,
         lastCheckedAt: Date.now(),
       });
     }

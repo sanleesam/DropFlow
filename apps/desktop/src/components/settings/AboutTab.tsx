@@ -150,7 +150,7 @@ export const AboutTab: React.FC = () => {
 
             {/* Error Message */}
             {state.status === "error" && state.error && (
-              <div className="text-[11px] text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-2.5">
+              <div className="text-[10px] font-mono whitespace-pre-wrap text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-2.5 max-h-36 overflow-y-auto">
                 {state.error}
               </div>
             )}
