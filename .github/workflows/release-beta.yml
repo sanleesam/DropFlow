@@ -63,31 +63,7 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
-      - name: Copy Platform Manifest to Known Location
-        shell: bash
-        run: |
-          mkdir -p /tmp/platform-manifest
-          MANIFEST_FILE=$(find apps/desktop/src-tauri/target -path "*/bundle/latest.json" -type f | head -n 1)
-          if [ -z "$MANIFEST_FILE" ]; then
-            MANIFEST_FILE=$(find apps/desktop/src-tauri/target -name "latest.json" -type f | head -n 1)
-          fi
-
-          if [ -n "$MANIFEST_FILE" ]; then
-            echo "Selected updater manifest: $MANIFEST_FILE"
-            cp "$MANIFEST_FILE" /tmp/platform-manifest/latest.json
-          else
-            echo "::error::Could not locate bundle latest.json output from tauri-action in apps/desktop/src-tauri/target"
-            exit 1
-          fi
-
-      - name: Upload Platform Manifest Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: manifest-${{ matrix.platform }}
-          path: /tmp/platform-manifest/latest.json
-          if-no-files-found: error
-
-  sync-beta-manifest:
+  sync-beta-channel:
     needs: publish-beta
     runs-on: ubuntu-latest
     permissions:
@@ -97,54 +73,37 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download Platform Manifest Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/manifests
-
-      - name: Merge Multi-Platform Manifests
-        run: |
-          python3 -c '
-          import json, glob, os, sys
-
-          merged = {}
-          manifest_files = glob.glob("/tmp/manifests/**/latest.json", recursive=True)
-          print(f"Found {len(manifest_files)} manifest files: {manifest_files}")
-
-          if len(manifest_files) < 2:
-              print(f"ERROR: Expected at least 2 platform manifests (macOS and Windows), but found {len(manifest_files)}.", file=sys.stderr)
-              sys.exit(1)
-
-          for path in manifest_files:
-              with open(path) as f:
-                  data = json.load(f)
-                  if not merged:
-                      merged = data
-                  else:
-                      if "platforms" in data:
-                          if "platforms" not in merged:
-                              merged["platforms"] = {}
-                          merged["platforms"].update(data["platforms"])
-
-          required_platforms = ["darwin-aarch64", "windows-x86_64"]
-          missing = [p for p in required_platforms if p not in merged.get("platforms", {})]
-          if missing:
-              print(f"ERROR: Merged manifest is missing required platform(s): {missing}", file=sys.stderr)
-              sys.exit(1)
-
-          os.makedirs("/tmp/merged", exist_ok=True)
-          out_path = "/tmp/merged/latest.json"
-          with open(out_path, "w") as f:
-              json.dump(merged, f, indent=2)
-
-          print("Successfully generated complete multi-platform manifest:")
-          print(json.dumps(merged, indent=2))
-          '
-
-      - name: Upload Merged Manifest to Release Tag & Beta Channel
+      - name: Download and Verify Merged Manifest from Release Tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${{ github.ref_name }}" /tmp/merged/latest.json --clobber
+          mkdir -p /tmp/beta-manifest
+          gh release download "${{ github.ref_name }}" --pattern "latest.json" --dir /tmp/beta-manifest --clobber
+
+          python3 -c '
+          import json, sys
+
+          path = "/tmp/beta-manifest/latest.json"
+          with open(path) as f:
+              data = json.load(f)
+
+          print("Downloaded manifest from GitHub Release:")
+          print(json.dumps(data, indent=2))
+
+          platforms = data.get("platforms", {})
+          required = ["darwin-aarch64", "windows-x86_64"]
+          missing = [p for p in required if p not in platforms]
+
+          if missing:
+              print(f"ERROR: Published latest.json is missing platform(s): {missing}", file=sys.stderr)
+              sys.exit(1)
+
+          print("Validation successful: All target platforms present in manifest.")
+          '
+
+      - name: Publish Manifest to Beta Channel Floating Tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           gh release create beta --title "DropFlow Beta Channel" --notes "DropFlow beta release channel updater manifest" --prerelease 2>/dev/null || true
-          gh release upload beta /tmp/merged/latest.json --clobber
+          gh release upload beta /tmp/beta-manifest/latest.json --clobber
