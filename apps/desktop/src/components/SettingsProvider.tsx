@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 // ─── Types & Interfaces ──────────────────────────────────────────────────────
 
@@ -252,6 +253,24 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     reloadSettings();
+
+    let unlistenTrusted: (() => void) | undefined;
+    listen<TrustedDevice[]>("trusted-devices-updated", (event) => {
+      if (Array.isArray(event.payload)) {
+        setSettings((prev) => ({
+          ...prev,
+          trustedDevices: event.payload,
+        }));
+      }
+    })
+      .then((unlistenFn) => {
+        unlistenTrusted = unlistenFn;
+      })
+      .catch(console.error);
+
+    return () => {
+      if (unlistenTrusted) unlistenTrusted();
+    };
   }, []);
 
   useEffect(() => {

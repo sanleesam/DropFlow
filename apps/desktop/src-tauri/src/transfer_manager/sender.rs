@@ -73,6 +73,7 @@ pub fn send_files_over_tcp(
         session_id: session_id.clone(),
         sender_id: local_uuid.to_string(),
         sender_name: local_device_name.to_string(),
+        sender_platform: crate::device_discovery::get_system_platform(),
         total_files: total_files_count,
         total_size_bytes,
         files: files_metadata.clone(),

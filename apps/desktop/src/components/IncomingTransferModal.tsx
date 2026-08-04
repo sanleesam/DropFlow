@@ -7,6 +7,7 @@ export interface IncomingTransferRequestData {
   sessionId: string;
   senderId: string;
   senderName: string;
+  senderPlatform?: string;
   totalFiles: number;
   totalSizeBytes: number;
   files: Array<{
@@ -51,7 +52,8 @@ export const IncomingTransferModal: React.FC<IncomingTransferModalProps> = ({ re
     }
   };
 
-  const isMobile = request.senderName.toLowerCase().includes("android") || request.senderName.toLowerCase().includes("phone");
+  const rawPlatform = (request.senderPlatform || request.senderName).toLowerCase();
+  const isMobile = rawPlatform.includes("mobile") || rawPlatform.includes("android") || rawPlatform.includes("phone");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md animate-[backdrop-fade-in_0.15s_ease-out]">

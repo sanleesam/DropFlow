@@ -54,12 +54,18 @@ pub struct FileMetadata {
     pub final_path: String,
 }
 
+fn default_platform() -> String {
+    "Desktop".to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferMetadata {
     pub session_id: String,
     pub sender_id: String,
     pub sender_name: String,
+    #[serde(default = "default_platform")]
+    pub sender_platform: String,
     pub total_files: u32,
     pub total_size_bytes: u64,
     pub files: Vec<FileMetadata>,
@@ -364,6 +370,7 @@ mod tests {
             session_id: "test-session-123".to_string(),
             sender_id: "sender-uuid-456".to_string(),
             sender_name: "MacBook Pro".to_string(),
+            sender_platform: "Desktop".to_string(),
             total_files: 2,
             total_size_bytes: 104857600,
             files: vec![

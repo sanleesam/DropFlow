@@ -27,6 +27,7 @@ pub struct IncomingTransferRequestPayload {
     pub session_id: String,
     pub sender_id: String,
     pub sender_name: String,
+    pub sender_platform: String,
     pub total_files: u32,
     pub total_size_bytes: u64,
     pub files: Vec<FileMetadata>,
@@ -219,6 +220,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
                 session_id: metadata.session_id.clone(),
                 sender_id: metadata.sender_id.clone(),
                 sender_name: metadata.sender_name.clone(),
+                sender_platform: metadata.sender_platform.clone(),
                 total_files: metadata.total_files,
                 total_size_bytes: metadata.total_size_bytes,
                 files: metadata.files.clone(),
@@ -254,13 +256,18 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
 
         if auth_response.trust_device {
             if let Some(container) = app.try_state::<crate::state_manager::AppStateContainer>() {
+                let platform_name = if metadata.sender_platform.is_empty() {
+                    "Desktop".to_string()
+                } else {
+                    metadata.sender_platform.clone()
+                };
                 let trusted_entry = crate::state_manager::TrustedDeviceSchema {
                     device_id: metadata.sender_id.clone(),
                     device_name: metadata.sender_name.clone(),
-                    first_seen: "Recently".to_string(),
+                    first_seen: "Just now".to_string(),
                     last_seen: "Just now".to_string(),
                     public_key: None,
-                    platform: "Desktop/Mobile".to_string(),
+                    platform: platform_name,
                 };
                 let _ = crate::state_manager::add_trusted_device(
                     app.clone(),

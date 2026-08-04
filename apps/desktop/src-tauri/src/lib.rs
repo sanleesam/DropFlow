@@ -98,6 +98,7 @@ pub fn run() {
             device_discovery::get_local_uuid,
             device_discovery::get_current_peers,
             device_discovery::get_system_computer_name,
+            device_discovery::get_system_platform,
             transfer_manager::engine::send_files,
             transfer_manager::engine::cancel_transfer,
             transfer_manager::engine::get_receive_dir,

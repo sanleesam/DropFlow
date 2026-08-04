@@ -7,6 +7,7 @@ import { SettingsModal } from "./components/SettingsModal";
 import { Home } from "./pages/Home";
 import { HistoryPage } from "./pages/HistoryPage";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { RecentTransfer } from "./utils/transferSessionManager";
 
 function MainContent() {
@@ -15,7 +16,7 @@ function MainContent() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [recentTransfers, setRecentTransfers] = useState<RecentTransfer[]>([]);
 
-  // Hydrate persistent history on startup
+  // Hydrate persistent history on startup and listen for live updates
   useEffect(() => {
     invoke<any>("get_app_state")
       .then((appState) => {
@@ -24,6 +25,21 @@ function MainContent() {
         }
       })
       .catch(console.error);
+
+    let unlistenHistory: (() => void) | undefined;
+    listen<RecentTransfer[]>("history-updated", (event) => {
+      if (Array.isArray(event.payload)) {
+        setRecentTransfers(event.payload);
+      }
+    })
+      .then((unlistenFn) => {
+        unlistenHistory = unlistenFn;
+      })
+      .catch(console.error);
+
+    return () => {
+      if (unlistenHistory) unlistenHistory();
+    };
   }, []);
 
   const handleClearHistory = async () => {

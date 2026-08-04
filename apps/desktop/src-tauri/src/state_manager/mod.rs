@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -291,6 +291,7 @@ pub fn save_history(
     }
     state.history = bounded_history;
     save_state_atomic(&app, &state)?;
+    let _ = app.emit("history-updated", &state.history);
     Ok(())
 }
 
@@ -302,6 +303,7 @@ pub fn clear_history(
     let mut state = container.state.lock().map_err(|e| e.to_string())?;
     state.history.clear();
     save_state_atomic(&app, &state)?;
+    let _ = app.emit("history-updated", &state.history);
     println!("[StateManager] Cleared transfer history successfully");
     Ok(())
 }
@@ -313,9 +315,19 @@ pub fn add_trusted_device(
     device: TrustedDeviceSchema,
 ) -> Result<(), String> {
     let mut state = container.state.lock().map_err(|e| e.to_string())?;
-    state.trusted_devices.retain(|d| d.device_id != device.device_id);
-    state.trusted_devices.push(device);
+    if let Some(existing) = state
+        .trusted_devices
+        .iter_mut()
+        .find(|d| d.device_id == device.device_id)
+    {
+        existing.device_name = device.device_name;
+        existing.platform = device.platform;
+        existing.last_seen = device.last_seen;
+    } else {
+        state.trusted_devices.push(device);
+    }
     save_state_atomic(&app, &state)?;
+    let _ = app.emit("trusted-devices-updated", &state.trusted_devices);
     println!("[StateManager] Added/updated trusted device successfully");
     Ok(())
 }
@@ -329,6 +341,7 @@ pub fn remove_trusted_device(
     let mut state = container.state.lock().map_err(|e| e.to_string())?;
     state.trusted_devices.retain(|d| d.device_id != device_id);
     save_state_atomic(&app, &state)?;
+    let _ = app.emit("trusted-devices-updated", &state.trusted_devices);
     println!("[StateManager] Removed trusted device {device_id} successfully");
     Ok(())
 }

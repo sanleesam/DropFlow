@@ -34,7 +34,10 @@ export const SecurityTab: React.FC = () => {
           ) : (
             <div className="flex flex-col gap-2 mt-2">
               {trustedDevices.map((device) => {
-                const isMobile = device.platform?.toLowerCase().includes("android") || device.platform?.toLowerCase().includes("mobile");
+                const rawPlatform = (device.platform || "Desktop").toLowerCase();
+                const isMobile = rawPlatform.includes("mobile") || rawPlatform.includes("android") || rawPlatform.includes("phone");
+                const platformLabel = isMobile ? "Mobile" : "Desktop";
+
                 return (
                   <div
                     key={device.deviceId}
@@ -42,12 +45,12 @@ export const SecurityTab: React.FC = () => {
                   >
                     <div className="flex items-center gap-3">
                       <div className="p-2 rounded-lg bg-neutral-800 text-neutral-300">
-                        {isMobile ? <Smartphone className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
+                        {isMobile ? <Smartphone className="w-4 h-4 text-blue-400" /> : <Monitor className="w-4 h-4 text-blue-400" />}
                       </div>
                       <div className="flex flex-col">
                         <span className="text-xs font-semibold text-neutral-200">{device.deviceName}</span>
                         <span className="text-[11px] text-neutral-500">
-                          {device.platform} • First seen {device.firstSeen || "recently"}
+                          {platformLabel} • First seen {device.firstSeen || "recently"}
                         </span>
                       </div>
                     </div>

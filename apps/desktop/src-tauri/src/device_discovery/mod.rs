@@ -606,6 +606,18 @@ pub fn get_system_computer_name() -> String {
 }
 
 #[tauri::command]
+pub fn get_system_platform() -> String {
+    #[cfg(target_os = "android")]
+    {
+        "Mobile".to_string()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        "Desktop".to_string()
+    }
+}
+
+#[tauri::command]
 pub fn update_advertisement(
     state: State<'_, DiscoveryState>,
     transfer_state: State<'_, crate::transfer_manager::TransferState>,
