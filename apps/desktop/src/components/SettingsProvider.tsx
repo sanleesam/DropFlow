@@ -5,6 +5,15 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type AccentColor = "blue" | "indigo" | "purple" | "pink" | "emerald";
 
+export interface TrustedDevice {
+  deviceId: string;
+  deviceName: string;
+  firstSeen: string;
+  lastSeen: string;
+  publicKey?: string;
+  platform: string;
+}
+
 export interface Settings {
   accentColor: AccentColor;
   askBeforeOverwrite: boolean;
@@ -12,14 +21,21 @@ export interface Settings {
   deviceName: string;
   deviceNameMode: "auto" | "custom";
   deviceVisibility: boolean;
+  receiveDirectory: string;
   requireConfirmation: boolean;
+  autoAcceptTrustedDevices: boolean;
+  maxConcurrentTransfers: number;
   darkTheme: boolean;
   reduceAnimations: boolean;
+  trustedDevices: TrustedDevice[];
 }
 
 interface SettingsContextType {
   settings: Settings;
   updateSetting: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+  addTrustedDevice: (device: TrustedDevice) => Promise<void>;
+  removeTrustedDevice: (deviceId: string) => Promise<void>;
+  reloadSettings: () => Promise<void>;
 }
 
 // ─── Accent Color Tailwind Styles Map ─────────────────────────────────────────
@@ -184,12 +200,16 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     deviceName: "",
     deviceNameMode: "auto",
     deviceVisibility: true,
+    receiveDirectory: "",
     requireConfirmation: true,
+    autoAcceptTrustedDevices: true,
+    maxConcurrentTransfers: 3,
     darkTheme: true,
     reduceAnimations: false,
+    trustedDevices: [],
   });
 
-  // Dynamically inject CSS variables onto the document root based on active accent color
+  // Dynamically inject CSS variables onto document root based on active accent color
   useEffect(() => {
     const colors: Record<AccentColor, { primary: string; hover: string; soft: string; shadow: string; from: string; to: string }> = {
       blue: { primary: "#2563eb", hover: "#3b82f6", soft: "rgba(37, 99, 235, 0.12)", shadow: "rgba(37, 99, 235, 0.15)", from: "#2563eb", to: "#3b82f6" },
@@ -207,28 +227,39 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     document.documentElement.style.setProperty("--df-accent-to", active.to);
   }, [settings.accentColor]);
 
+  const reloadSettings = async () => {
+    try {
+      const appState = await invoke<any>("get_app_state");
+      if (appState && appState.settings) {
+        const rustSet = appState.settings;
+        setSettings((prev) => ({
+          ...prev,
+          deviceName: rustSet.deviceName || prev.deviceName,
+          receiveDirectory: rustSet.receiveDirectory || prev.receiveDirectory,
+          accentColor: (rustSet.accentColor as AccentColor) || prev.accentColor,
+          requireConfirmation: typeof rustSet.requireConfirmation === "boolean" ? rustSet.requireConfirmation : !rustSet.autoAccept,
+          askBeforeOverwrite: typeof rustSet.askBeforeOverwrite === "boolean" ? rustSet.askBeforeOverwrite : prev.askBeforeOverwrite,
+          autoOpenCompleted: typeof rustSet.autoOpenCompleted === "boolean" ? rustSet.autoOpenCompleted : prev.autoOpenCompleted,
+          autoAcceptTrustedDevices: typeof rustSet.autoAcceptTrustedDevices === "boolean" ? rustSet.autoAcceptTrustedDevices : prev.autoAcceptTrustedDevices,
+          maxConcurrentTransfers: rustSet.maxConcurrentTransfers || prev.maxConcurrentTransfers,
+          trustedDevices: appState.trustedDevices || [],
+        }));
+      }
+    } catch (e) {
+      console.error("[SettingsProvider] Error fetching state:", e);
+    }
+  };
+
   useEffect(() => {
-    invoke<any>("get_app_state")
-      .then((appState) => {
-        if (appState && appState.settings) {
-          const rustSet = appState.settings;
-          setSettings((prev) => ({
-            ...prev,
-            deviceName: rustSet.deviceName || prev.deviceName,
-            accentColor: (rustSet.accentColor as AccentColor) || prev.accentColor,
-            requireConfirmation: !rustSet.autoAccept,
-          }));
-        }
-      })
-      .catch(console.error);
+    reloadSettings();
   }, []);
 
   useEffect(() => {
-    if (settings.deviceNameMode === "auto" && !settings.deviceName) {
+    if (!settings.deviceName) {
       invoke<string>("get_system_computer_name")
         .then((sysName) => {
           setSettings((prev) => {
-            if (prev.deviceNameMode === "auto" && !prev.deviceName) {
+            if (!prev.deviceName) {
               return {
                 ...prev,
                 deviceName: sysName,
@@ -239,7 +270,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         })
         .catch(console.error);
     }
-  }, [settings.deviceNameMode, settings.deviceName]);
+  }, [settings.deviceName]);
 
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((prev) => {
@@ -247,20 +278,34 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       invoke("save_settings", {
         settings: {
           deviceName: next.deviceName,
-          receiveDirectory: "",
+          receiveDirectory: next.receiveDirectory,
           autoAccept: !next.requireConfirmation,
           soundNotifications: next.autoOpenCompleted,
           theme: next.darkTheme ? "dark" : "light",
           accentColor: next.accentColor,
-          maxConcurrentTransfers: 3,
+          maxConcurrentTransfers: next.maxConcurrentTransfers,
+          askBeforeOverwrite: next.askBeforeOverwrite,
+          autoOpenCompleted: next.autoOpenCompleted,
+          requireConfirmation: next.requireConfirmation,
+          autoAcceptTrustedDevices: next.autoAcceptTrustedDevices,
         },
       }).catch(console.error);
       return next;
     });
   };
 
+  const addTrustedDevice = async (device: TrustedDevice) => {
+    await invoke("add_trusted_device", { device });
+    await reloadSettings();
+  };
+
+  const removeTrustedDevice = async (deviceId: string) => {
+    await invoke("remove_trusted_device", { deviceId });
+    await reloadSettings();
+  };
+
   return (
-    <SettingsContext.Provider value={{ settings, updateSetting }}>
+    <SettingsContext.Provider value={{ settings, updateSetting, addTrustedDevice, removeTrustedDevice, reloadSettings }}>
       {children}
     </SettingsContext.Provider>
   );

@@ -108,6 +108,9 @@ pub fn run() {
             state_manager::clear_history,
             state_manager::get_incomplete_transfers,
             state_manager::remove_incomplete_transfer,
+            state_manager::add_trusted_device,
+            state_manager::remove_trusted_device,
+            state_manager::get_trusted_devices,
             get_release_info,
         ])
         .on_window_event(|window, event| {

@@ -43,6 +43,10 @@ pub struct RecentTransferSchema {
     pub error: Option<String>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UserSettings {
@@ -53,6 +57,14 @@ pub struct UserSettings {
     pub theme: String,
     pub accent_color: String,
     pub max_concurrent_transfers: u32,
+    #[serde(default = "default_true")]
+    pub ask_before_overwrite: bool,
+    #[serde(default)]
+    pub auto_open_completed: bool,
+    #[serde(default = "default_true")]
+    pub require_confirmation: bool,
+    #[serde(default = "default_true")]
+    pub auto_accept_trusted_devices: bool,
 }
 
 impl Default for UserSettings {
@@ -60,17 +72,34 @@ impl Default for UserSettings {
         let default_dir = crate::transfer_manager::security::get_default_receive_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| "".to_string());
+        let sys_name = crate::device_discovery::get_system_computer_name();
 
         Self {
-            device_name: "Desktop-Device".to_string(),
+            device_name: sys_name,
             receive_directory: default_dir,
             auto_accept: false,
             sound_notifications: true,
             theme: "dark".to_string(),
             accent_color: "blue".to_string(),
             max_concurrent_transfers: 3,
+            ask_before_overwrite: true,
+            auto_open_completed: false,
+            require_confirmation: true,
+            auto_accept_trusted_devices: true,
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrustedDeviceSchema {
+    pub device_id: String,
+    pub device_name: String,
+    pub first_seen: String,
+    pub last_seen: String,
+    #[serde(default)]
+    pub public_key: Option<String>,
+    pub platform: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -102,6 +131,8 @@ pub struct AppStateSchema {
     pub history: Vec<RecentTransferSchema>,
     #[serde(default)]
     pub incomplete_transfers: Vec<IncompleteTransferSchema>,
+    #[serde(default)]
+    pub trusted_devices: Vec<TrustedDeviceSchema>,
 }
 
 pub struct AppStateContainer {
@@ -132,6 +163,14 @@ pub fn load_or_create_state_at_path(path: &PathBuf) -> AppStateSchema {
                         if Uuid::parse_str(&parsed.device_uuid).is_err() {
                             parsed.device_uuid = Uuid::new_v4().to_string();
                         }
+                        // Replace default/empty device_name with detected OS computer name
+                        if parsed.settings.device_name.is_empty()
+                            || parsed.settings.device_name == "Desktop-Device"
+                        {
+                            parsed.settings.device_name =
+                                crate::device_discovery::get_system_computer_name();
+                            save_state_atomic_at_path(path, &parsed).ok();
+                        }
                         // Cap history to max 500
                         if parsed.history.len() > MAX_PERSISTED_HISTORY_CAPACITY {
                             parsed.history.truncate(MAX_PERSISTED_HISTORY_CAPACITY);
@@ -158,6 +197,7 @@ pub fn load_or_create_state_at_path(path: &PathBuf) -> AppStateSchema {
         settings: UserSettings::default(),
         history: Vec::new(),
         incomplete_transfers: Vec::new(),
+        trusted_devices: Vec::new(),
     };
 
     save_state_atomic_at_path(path, &default_state).ok();
@@ -264,6 +304,41 @@ pub fn clear_history(
     save_state_atomic(&app, &state)?;
     println!("[StateManager] Cleared transfer history successfully");
     Ok(())
+}
+
+#[tauri::command]
+pub fn add_trusted_device(
+    app: AppHandle,
+    container: State<'_, AppStateContainer>,
+    device: TrustedDeviceSchema,
+) -> Result<(), String> {
+    let mut state = container.state.lock().map_err(|e| e.to_string())?;
+    state.trusted_devices.retain(|d| d.device_id != device.device_id);
+    state.trusted_devices.push(device);
+    save_state_atomic(&app, &state)?;
+    println!("[StateManager] Added/updated trusted device successfully");
+    Ok(())
+}
+
+#[tauri::command]
+pub fn remove_trusted_device(
+    app: AppHandle,
+    container: State<'_, AppStateContainer>,
+    device_id: String,
+) -> Result<(), String> {
+    let mut state = container.state.lock().map_err(|e| e.to_string())?;
+    state.trusted_devices.retain(|d| d.device_id != device_id);
+    save_state_atomic(&app, &state)?;
+    println!("[StateManager] Removed trusted device {device_id} successfully");
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_trusted_devices(
+    container: State<'_, AppStateContainer>,
+) -> Result<Vec<TrustedDeviceSchema>, String> {
+    let state = container.state.lock().map_err(|e| e.to_string())?;
+    Ok(state.trusted_devices.clone())
 }
 
 pub fn update_incomplete_session(app: &AppHandle, incomplete: IncompleteTransferSchema) {

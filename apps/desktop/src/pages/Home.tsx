@@ -200,6 +200,13 @@ export const Home: React.FC<HomeProps> = () => {
                 "DropFlow — Transfer Complete",
                 `${payload.fileName || "file"}\nReceived from ${payload.deviceName || "Peer Device"}`
               );
+
+              if (settings.autoOpenCompleted) {
+                const targetPath = payload.finalPath || payload.receiveDir || payload.filePath;
+                if (targetPath) {
+                  invoke("open_received_file", { path: targetPath }).catch(console.error);
+                }
+              }
             }
             return next;
           });
