@@ -5,3 +5,10 @@ target/
 .vscode/
 *.log
 Thumbs.db
+.agents/
+.claude-flow/
+.codex/
+.swarm/
+*.db
+
+CLAUDE.md

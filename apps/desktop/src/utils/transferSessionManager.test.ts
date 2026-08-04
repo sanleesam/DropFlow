@@ -1,0 +1,399 @@
+import {
+  createInitialSessionStore,
+  startSendSession,
+  applyProgressEvent,
+  applyCompletionEvent,
+  applyFailureEvent,
+  dismissActiveSession,
+  MAX_HISTORY_CAPACITY,
+  formatHumanEta,
+  formatRelativeTimestamp,
+  clearHistorySessions,
+} from "./transferSessionManager.ts";
+
+function assertEqual(actual: any, expected: any, message: string) {
+  const actualStr = JSON.stringify(actual);
+  const expectedStr = JSON.stringify(expected);
+  if (actualStr !== expectedStr) {
+    throw new Error(`[FAIL] ${message}\nExpected: ${expectedStr}\nActual:   ${actualStr}`);
+  }
+}
+
+function assertTrue(condition: boolean, message: string) {
+  if (!condition) {
+    throw new Error(`[FAIL] ${message}`);
+  }
+}
+
+export function runLifecycleTests() {
+  console.log("Running Transfer Session Lifecycle Tests (10 Scenarios)...");
+
+  // ── Scenario 1: create → progress → complete ────────────────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-1", "Windows PC", "photo.png", 1);
+    assertTrue(store.activeTransfers["tx-1"].progress === 0, "S1: Initial progress 0%");
+
+    store = applyProgressEvent(store, {
+      sessionId: "tx-1",
+      currentFileIndex: 0,
+      currentFileName: "photo.png",
+      percentage: 50,
+      speedBytesPerSec: 10485760,
+      sessionBytesSent: 500000,
+      sessionTotalBytes: 1000000,
+    });
+    assertTrue(store.activeTransfers["tx-1"].progress === 50, "S1: Progress updated to 50%");
+    assertTrue(store.activeTransfers["tx-1"].status === "Sending...", "S1: Status is Sending...");
+
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-1",
+      fileName: "photo.png",
+      deviceName: "Windows PC",
+      size: "1.0 MB",
+      direction: "send",
+    });
+    assertTrue(store.activeTransfers["tx-1"].progress === 100, "S1: Completed progress 100%");
+    assertTrue(store.activeTransfers["tx-1"].status === "Completed", "S1: Completed status");
+    assertEqual(store.recentTransfers.length, 1, "S1: Exactly 1 recent transfer added");
+  }
+
+  // ── Scenario 2: create → complete with no progress event ─────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-2", "MacBook", "document.pdf", 1);
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-2",
+      fileName: "document.pdf",
+      deviceName: "MacBook",
+      size: "2.5 MB",
+    });
+    assertTrue(store.activeTransfers["tx-2"].progress === 100, "S2: Progress jumps to 100%");
+    assertEqual(store.recentTransfers.length, 1, "S2: Exactly 1 recent transfer added");
+  }
+
+  // ── Scenario 3: completion before invoke resolves ───────────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-3", "Linux Desktop", "archive.zip", 1);
+    
+    // Event fires first
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-3",
+      fileName: "archive.zip",
+      deviceName: "Linux Desktop",
+      size: "10.0 MB",
+    });
+    
+    // invoke() resolution fallback fires second
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-3",
+      fileName: "archive.zip",
+      deviceName: "Linux Desktop",
+      size: "10.0 MB",
+    });
+    assertEqual(store.recentTransfers.length, 1, "S3: Idempotent: 1 recent transfer despite dual completion triggers");
+  }
+
+  // ── Scenario 4: invoke resolves before completion event ─────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-4", "Tablet", "notes.txt", 1);
+
+    // invoke() resolution fallback fires first
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-4",
+      fileName: "notes.txt",
+      deviceName: "Tablet",
+      size: "12 KB",
+    });
+
+    // Event fires second
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-4",
+      fileName: "notes.txt",
+      deviceName: "Tablet",
+      size: "12 KB",
+    });
+    assertEqual(store.recentTransfers.length, 1, "S4: Idempotent: 1 recent transfer when invoke resolves first");
+  }
+
+  // ── Scenario 5: duplicate completion ───────────────────────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-5", "Phone", "video.mp4", 1);
+    store = applyCompletionEvent(store, { sessionId: "tx-5", fileName: "video.mp4" });
+    store = applyCompletionEvent(store, { sessionId: "tx-5", fileName: "video.mp4" });
+    store = applyCompletionEvent(store, { sessionId: "tx-5", fileName: "video.mp4" });
+    assertEqual(store.recentTransfers.length, 1, "S5: Duplicate completions ignored cleanly");
+  }
+
+  // ── Scenario 6: failure ──────────────────────────────────────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-6", "Desktop", "data.db", 1);
+    store = applyFailureEvent(store, { sessionId: "tx-6", error: "Connection reset by peer" });
+    assertTrue(store.activeTransfers["tx-6"].status === "Failed", "S6: Status set to Failed");
+    assertTrue(store.activeTransfers["tx-6"].error === "Connection reset by peer", "S6: Error message preserved");
+    assertEqual(store.recentTransfers.length, 0, "S6: No recent transfer added on failure");
+  }
+
+  // ── Scenario 7: cancellation ────────────────────────────────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-7", "Laptop", "iso_image.iso", 1);
+    store = applyFailureEvent(store, { sessionId: "tx-7", error: "Transfer cancelled by user" });
+    assertTrue(store.activeTransfers["tx-7"].status === "Cancelled", "S7: Cancelled transfer sets Cancelled status");
+    assertEqual(store.recentTransfers.length, 0, "S7: No history entry created for cancelled transfer");
+
+    store = dismissActiveSession(store, "tx-7");
+    assertTrue(store.activeTransfers["tx-7"] === undefined, "S7: Dismiss removes session cleanly");
+  }
+
+  // ── Scenario 8: two concurrent sessions ────────────────────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-8A", "Device A", "fileA.txt", 1);
+    store = startSendSession(store, "tx-8B", "Device B", "fileB.txt", 1);
+
+    store = applyProgressEvent(store, { sessionId: "tx-8A", percentage: 40 });
+    store = applyProgressEvent(store, { sessionId: "tx-8B", percentage: 80 });
+
+    assertTrue(store.activeTransfers["tx-8A"].progress === 40, "S8: Session A progress 40%");
+    assertTrue(store.activeTransfers["tx-8B"].progress === 80, "S8: Session B progress 80%");
+
+    store = applyCompletionEvent(store, { sessionId: "tx-8A", fileName: "fileA.txt" });
+    assertTrue(store.activeTransfers["tx-8A"].status === "Completed", "S8: Session A completed");
+    assertTrue(store.activeTransfers["tx-8B"].status === "Sending...", "S8: Session B still sending");
+    assertEqual(store.recentTransfers.length, 1, "S8: 1 recent transfer for A");
+  }
+
+  // ── Scenario 9: fast tiny transfer ─────────────────────────────────────────
+  {
+    let store = createInitialSessionStore();
+    // Receiving tiny transfer directly via event before local state initialization
+    store = applyProgressEvent(store, {
+      sessionId: "tx-9",
+      currentFileName: "small.png",
+      percentage: 100,
+      totalFiles: 1,
+    });
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-9",
+      fileName: "small.png",
+      direction: "receive",
+    });
+    assertTrue(store.activeTransfers["tx-9"].progress === 100, "S9: Fast receive transfer 100%");
+    assertEqual(store.recentTransfers.length, 1, "S9: 1 recent transfer added for tiny receive");
+  }
+
+  // ── Scenario 10: multi-file transfer ────────────────────────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-10", "MacBook", "image.jpg (+1 other file)", 2);
+
+    store = applyProgressEvent(store, {
+      sessionId: "tx-10",
+      currentFileIndex: 0,
+      currentFileName: "image.jpg",
+      totalFiles: 2,
+      percentage: 25,
+    });
+    assertTrue(store.activeTransfers["tx-10"].currentFileLabel === "[1/2] image.jpg", "S10: Per-file label [1/2]");
+
+    store = applyProgressEvent(store, {
+      sessionId: "tx-10",
+      currentFileIndex: 1,
+      currentFileName: "video.mp4",
+      totalFiles: 2,
+      percentage: 75,
+    });
+    assertTrue(store.activeTransfers["tx-10"].currentFileLabel === "[2/2] video.mp4", "S10: Per-file label [2/2]");
+
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-10",
+      fileName: "image.jpg",
+      totalFiles: 2,
+      files: [
+        { fileIndex: 0, relativePath: "image.jpg", sizeBytes: 1000, finalPath: "/Users/test/Downloads/DropFlow/image.jpg" },
+        { fileIndex: 1, relativePath: "video.mp4", sizeBytes: 5000, finalPath: "/Users/test/Downloads/DropFlow/video.mp4" },
+      ],
+      receiveDir: "/Users/test/Downloads/DropFlow",
+    });
+
+    assertTrue(store.recentTransfers[0].fileName === "image.jpg (+1 other file)", "S10: Formatted multi-file summary name");
+    assertEqual(store.recentTransfers[0].files?.length, 2, "S10: Preserves 2 completed file entries in recentTransfers");
+    assertEqual(store.recentTransfers[0].files?.[0].finalPath, "/Users/test/Downloads/DropFlow/image.jpg", "S10: Preserves finalPath for file 1");
+    assertEqual(store.recentTransfers[0].files?.[1].finalPath, "/Users/test/Downloads/DropFlow/video.mp4", "S10: Preserves finalPath for file 2");
+    assertEqual(store.activeTransfers["tx-10"].receiveDir, "/Users/test/Downloads/DropFlow", "S10: Preserves receiveDir");
+  }
+
+  // ── Scenario 11: Filenames with spaces, Unicode, collision paths & finalPath ──
+  {
+    let store = createInitialSessionStore();
+    const collisionPath = "/Users/test/Downloads/DropFlow/Screenshot 2026-07-28 165721 (1).png";
+    const unicodePath = "/Users/test/Downloads/DropFlow/写真_📷_test.png";
+
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-11",
+      fileName: "Screenshot 2026-07-28 165721.png",
+      deviceName: "Windows-PC",
+      size: "3.4 MB",
+      direction: "receive",
+      files: [
+        {
+          fileIndex: 0,
+          relativePath: "Screenshot 2026-07-28 165721.png",
+          sizeBytes: 3500000,
+          finalPath: collisionPath,
+        },
+        {
+          fileIndex: 1,
+          relativePath: "写真_📷_test.png",
+          sizeBytes: 1200000,
+          finalPath: unicodePath,
+        },
+      ],
+      receiveDir: "/Users/test/Downloads/DropFlow",
+    });
+
+    const activeSession = store.activeTransfers["tx-11"];
+    assertTrue(activeSession.completedFiles[0].finalPath === collisionPath, "S11: Authoritative collision finalPath preserved for space/collision file");
+    assertTrue(activeSession.completedFiles[1].finalPath === unicodePath, "S11: Authoritative unicode finalPath preserved for unicode file");
+    assertTrue(activeSession.receiveDir === "/Users/test/Downloads/DropFlow", "S11: receiveDir preserved");
+  }
+
+  // ── Scenario 12: Receiver side cancellation & cleanup ──────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = applyProgressEvent(store, {
+      sessionId: "rx-12",
+      currentFileName: "large_iso.iso",
+      percentage: 30,
+      totalFiles: 1,
+    });
+    assertTrue(store.activeTransfers["rx-12"].status === "Receiving...", "S12: Receiver status is Receiving...");
+
+    store = applyFailureEvent(store, {
+      sessionId: "rx-12",
+      error: "Transfer cancelled by receiver",
+    });
+    store = applyFailureEvent(store, {
+      sessionId: "rx-12",
+      error: "Transfer cancelled by receiver",
+    });
+    assertTrue(store.activeTransfers["rx-12"].status === "Cancelled", "S12: Receiver status set to Cancelled");
+    assertEqual(store.recentTransfers.length, 0, "S12: No recent transfer added for cancelled receive");
+
+    store = dismissActiveSession(store, "rx-12");
+    assertTrue(store.activeTransfers["rx-12"] === undefined, "S12: Active card dismissed cleanly");
+  }
+
+  // ── Scenario 13: 500-Session History Capacity Limit ────────────────────────
+  {
+    let store = createInitialSessionStore();
+    for (let i = 0; i < 550; i++) {
+      store = applyCompletionEvent(store, {
+        sessionId: `tx-cap-${i}`,
+        fileName: `file_${i}.dat`,
+        size: "1 MB",
+      });
+    }
+
+    assertEqual(store.recentTransfers.length, MAX_HISTORY_CAPACITY, "S13: History length capped at MAX_HISTORY_CAPACITY (500)");
+    assertEqual(store.recentTransfers[0].id, "tx-cap-549", "S13: Newest session is at index 0");
+    assertEqual(store.recentTransfers[MAX_HISTORY_CAPACITY - 1].id, "tx-cap-50", "S13: Oldest retained session is at index 499");
+  }
+
+  // ── Scenario 14: Active Card Dismissal Isolation ───────────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-card-14", "Pixel 8", "document.pdf", 1);
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-card-14",
+      fileName: "document.pdf",
+      size: "2.1 MB",
+    });
+
+    assertTrue(store.activeTransfers["tx-card-14"] !== undefined, "S14: Active card exists before auto-dismiss");
+    assertEqual(store.recentTransfers.length, 1, "S14: Recent transfer history entry exists");
+
+    store = dismissActiveSession(store, "tx-card-14");
+    assertTrue(store.activeTransfers["tx-card-14"] === undefined, "S14: Active card removed on dismiss");
+    assertEqual(store.recentTransfers.length, 1, "S14: Recent transfer history entry STILL EXISTS after card dismiss");
+    assertEqual(store.recentTransfers[0].id, "tx-card-14", "S14: Correct history item preserved");
+  }
+
+  // ── Scenario 15: Concurrency Mixed Outcomes (Active + Complete + Fail) ──────
+  {
+    let store = createInitialSessionStore();
+    store = startSendSession(store, "tx-c1", "Device 1", "file1.zip", 1);
+    store = startSendSession(store, "tx-c2", "Device 2", "file2.zip", 1);
+    store = startSendSession(store, "tx-c3", "Device 3", "file3.zip", 1);
+
+    store = applyProgressEvent(store, { sessionId: "tx-c1", percentage: 50 });
+    store = applyCompletionEvent(store, { sessionId: "tx-c2", fileName: "file2.zip" });
+    store = applyFailureEvent(store, { sessionId: "tx-c3", error: "Connection timed out" });
+
+    assertEqual(store.activeTransfers["tx-c1"].status, "Sending...", "S15: Session 1 remains active sending");
+    assertEqual(store.activeTransfers["tx-c2"].status, "Completed", "S15: Session 2 completed");
+    assertEqual(store.activeTransfers["tx-c3"].status, "Failed", "S15: Session 3 failed with timeout");
+    assertEqual(store.recentTransfers.length, 1, "S15: Only completed session added to recent transfers");
+    assertEqual(store.recentTransfers[0].id, "tx-c2", "S15: Correct session in recent transfers");
+  }
+
+  // ── Scenario 16: Human-Friendly ETA Formatting ────────────────────────────
+  {
+    assertEqual(formatHumanEta(-1, 1000), "Calculating...", "S16: Negative seconds -> Calculating...");
+    assertEqual(formatHumanEta(10, 0), "Calculating...", "S16: Zero speed -> Calculating...");
+    assertEqual(formatHumanEta(0, 1000), "0 seconds remaining", "S16: 0 sec -> 0 seconds remaining");
+    assertEqual(formatHumanEta(45, 1000), "45 seconds remaining", "S16: 45 sec -> 45 seconds remaining");
+    assertEqual(formatHumanEta(75, 1000), "1 minute remaining", "S16: 75 sec -> 1 minute remaining");
+    assertEqual(formatHumanEta(120, 1000), "2 minutes remaining", "S16: 120 sec -> 2 minutes remaining");
+    assertEqual(formatHumanEta(500, 1000), "8 minutes remaining", "S16: 500 sec -> 8 minutes remaining");
+    assertEqual(formatHumanEta(3700, 1000), "1 hour 1 minute remaining", "S16: 3700 sec -> 1 hour 1 minute remaining");
+    assertEqual(formatHumanEta(7200, 1000), "2 hours remaining", "S16: 7200 sec -> 2 hours remaining");
+  }
+
+  // ── Scenario 17: Timestamp formatting, totalSizeBytes & checksum cleaning ──
+  {
+    const now = Date.now();
+    assertEqual(formatRelativeTimestamp(now - 10000), "Just now", "S17: 10s ago -> Just now");
+    assertEqual(formatRelativeTimestamp(now - 300000), "5 minutes ago", "S17: 5m ago -> 5 minutes ago");
+    assertEqual(formatRelativeTimestamp(now - 7200000), "2 hours ago", "S17: 2h ago -> 2 hours ago");
+    assertEqual(formatRelativeTimestamp(now - 86400000), "Yesterday", "S17: 1d ago -> Yesterday");
+
+    let store = createInitialSessionStore();
+    store = applyCompletionEvent(store, {
+      sessionId: "tx-17",
+      fileName: "bundle.zip",
+      files: [
+        { fileIndex: 0, relativePath: "part1.bin", sizeBytes: 1048576, sha256Checksum: "" },
+        { fileIndex: 1, relativePath: "part2.bin", sizeBytes: 2097152, sha256Checksum: "abc123def" },
+      ],
+      timestampMs: now - 300000,
+    });
+
+    const recent = store.recentTransfers[0];
+    assertEqual(recent.totalSizeBytes, 3145728, "S17: Summed totalSizeBytes for multi-file batch");
+    assertEqual(recent.files?.[0].sha256Checksum, undefined, "S17: Empty sha256Checksum cleaned to undefined");
+    assertEqual(recent.files?.[1].sha256Checksum, "abc123def", "S17: Valid sha256Checksum preserved");
+    assertEqual(recent.timestamp, "5 minutes ago", "S17: Relative timestamp string set cleanly");
+  }
+
+  // ── Scenario 18: Clearing in-memory transfer history ──────────────────────
+  {
+    let store = createInitialSessionStore();
+    store = applyCompletionEvent(store, { sessionId: "tx-18-a", fileName: "file1.txt" });
+    store = applyCompletionEvent(store, { sessionId: "tx-18-b", fileName: "file2.txt" });
+    assertEqual(store.recentTransfers.length, 2, "S18: 2 sessions added to history");
+
+    store = clearHistorySessions(store);
+    assertEqual(store.recentTransfers.length, 0, "S18: Recent transfers cleared completely");
+  }
+
+  console.log("All Transfer Session Lifecycle & Path Propagation Tests PASSED cleanly! ✓");
+}
+
+// Execute tests if run directly
+runLifecycleTests();

@@ -1,34 +1,38 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useToast } from "./ToastProvider";
 import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
+import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface SelectedFile {
+export interface SelectedFilePayload {
   /** Unique key for React list rendering */
   uid: string;
-  file: File;
+  /** Absolute filesystem path (e.g., "/Users/name/Desktop/file.png") */
+  path: string;
+  /** Display file name (e.g., "file.png") */
+  name: string;
 }
 
 interface FileDropZoneProps {
   /** ID of the currently selected device (null = none) */
   selectedDeviceId: string | null;
-  /** Callback fired when user initiates file sending */
-  onSend?: (fileName: string) => void;
+  /** Callback fired when user initiates file sending with native absolute paths */
+  onSend?: (selectedFiles: SelectedFilePayload[]) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
-
 function uid(): string {
   return Math.random().toString(36).slice(2, 10);
+}
+
+function extractFilename(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, "/");
+  const parts = normalized.split("/");
+  return parts[parts.length - 1] || filePath;
 }
 
 // ─── File type icon ───────────────────────────────────────────────────────────
@@ -63,12 +67,10 @@ const IconFile: React.FC<{ name: string }> = ({ name }) => (
   </svg>
 );
 
-// ─── Empty / drop state ───────────────────────────────────────────────────────
-
 const IconUploadLarge: React.FC = () => (
   <svg
     viewBox="0 0 48 48"
-    className="w-8 h-8"
+    className="w-7 h-7 text-neutral-400"
     fill="none"
     stroke="currentColor"
     strokeWidth="1.5"
@@ -76,8 +78,7 @@ const IconUploadLarge: React.FC = () => (
     strokeLinejoin="round"
     aria-hidden="true"
   >
-    <path d="M24 28V10" />
-    <path d="M16 18l8-8 8 8" />
+    <path d="M24 32V12M16 20l8-8 8 8" />
     <path d="M8 36h32" opacity="0.4" />
   </svg>
 );
@@ -88,13 +89,78 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
   const { addToast } = useToast();
   const { settings } = useSettings();
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
-  const [files, setFiles] = useState<SelectedFile[]>([]);
+  const [files, setFiles] = useState<SelectedFilePayload[]>([]);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const hasFiles = files.length > 0;
   const hasDevice = selectedDeviceId !== null;
   const canSend = hasFiles && hasDevice;
+
+  const addFilePaths = useCallback((incomingPaths: string[]) => {
+    if (!incomingPaths || incomingPaths.length === 0) return;
+    const newItems: SelectedFilePayload[] = incomingPaths.map((filePath) => ({
+      uid: uid(),
+      path: filePath,
+      name: extractFilename(filePath),
+    }));
+    setFiles((prev) => [...prev, ...newItems]);
+  }, []);
+
+  const removeFile = useCallback((id: string) => {
+    setFiles((prev) => prev.filter((f) => f.uid !== id));
+  }, []);
+
+  // ── Native Tauri drag-and-drop listener ────────────────────────────────────
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupNativeDragDrop = async () => {
+      try {
+        unlisten = await getCurrentWindow().onDragDropEvent((event) => {
+          if (event.payload.type === "enter" || event.payload.type === "over") {
+            setIsDraggingOver(true);
+          } else if (event.payload.type === "drop") {
+            setIsDraggingOver(false);
+            const paths = event.payload.paths;
+            if (paths && paths.length > 0) {
+              addFilePaths(paths);
+            }
+          } else if (event.payload.type === "leave") {
+            setIsDraggingOver(false);
+          }
+        });
+      } catch (err) {
+        console.error("[FileDropZone] Native drag drop listener error:", err);
+      }
+    };
+
+    setupNativeDragDrop();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [addFilePaths]);
+
+  // ── Click-to-browse via Tauri Native Dialog ────────────────────────────────
+
+  const onZoneClick = useCallback(async () => {
+    try {
+      const selected = await open({
+        multiple: true,
+        directory: false,
+        title: "Select Files to Send",
+      });
+
+      if (selected) {
+        const paths = Array.isArray(selected) ? selected : [selected];
+        addFilePaths(paths);
+      }
+    } catch (err) {
+      console.error("[FileDropZone] Native file dialog error:", err);
+      addToast("Failed to open native file dialog.", "error");
+    }
+  }, [addFilePaths, addToast]);
 
   // ── Send button handler ─────────────────────────────────────────────────────
 
@@ -108,89 +174,21 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
     } else {
       addToast("Preparing transfer...", "info");
       if (onSend) {
-        const firstFileName = files[0]?.file.name || "file";
-        onSend(firstFileName);
+        onSend(files);
+        setFiles([]); // Clear list after initiating transfer
       }
     }
   }, [hasDevice, hasFiles, addToast, onSend, files]);
 
-  // ── File ingestion ──────────────────────────────────────────────────────────
-
-  const addFiles = useCallback((incoming: FileList | null) => {
-    if (!incoming) return;
-    const next: SelectedFile[] = Array.from(incoming).map((file) => ({
-      uid: uid(),
-      file,
-    }));
-    setFiles((prev) => [...prev, ...next]);
-  }, []);
-
-  const removeFile = useCallback((id: string) => {
-    setFiles((prev) => prev.filter((f) => f.uid !== id));
-  }, []);
-
-  // ── Drag handlers ───────────────────────────────────────────────────────────
-
-  const onDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingOver(true);
-  }, []);
-
-  const onDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingOver(false);
-  }, []);
-
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDraggingOver(false);
-      addFiles(e.dataTransfer.files);
-    },
-    [addFiles],
-  );
-
-  // ── Click-to-browse ─────────────────────────────────────────────────────────
-
-  const onZoneClick = useCallback(() => {
-    inputRef.current?.click();
-  }, []);
-
-  const onInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      addFiles(e.target.files);
-      e.target.value = "";
-    },
-    [addFiles],
-  );
-
   return (
     <div className="flex w-full flex-col gap-2.5">
-      {/* Hidden file input */}
-      <input
-        ref={inputRef}
-        id="file-browse-input"
-        type="file"
-        multiple
-        className="sr-only"
-        aria-label="Browse files"
-        onChange={onInputChange}
-        tabIndex={-1}
-      />
-
       {/* ── Drop zone ── */}
       <div
         role="button"
         tabIndex={0}
         aria-label="Drop files here or click to browse"
         onClick={onZoneClick}
-        onKeyDown={(e) => e.key === "Enter" || e.key === " " ? onZoneClick() : undefined}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " " ? onZoneClick() : undefined)}
         className={[
           "relative flex min-h-[130px] flex-col items-center justify-center gap-2 overflow-hidden",
           "rounded-xl border border-dashed px-4 py-5",
@@ -200,69 +198,45 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
           accent.ringFocus,
         ].join(" ")}
       >
-        {/* Icon */}
-        <span
-          className={[
-            "transition-colors duration-150",
-            isDraggingOver ? accent.dropZoneIcon : "text-neutral-500",
-          ].join(" ")}
-        >
-          <IconUploadLarge />
-        </span>
+        <IconUploadLarge />
 
-        {/* Copy */}
-        <div className="flex items-center gap-1.5 text-center text-xs">
-          <span
-            className={[
-              "font-medium transition-colors duration-150",
-              isDraggingOver ? accent.dropZoneTitle : "text-neutral-200",
-            ].join(" ")}
-          >
-            {isDraggingOver ? "Release to add files" : "Drop files here"}
-          </span>
-          <span className="text-neutral-500">or</span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onZoneClick();
-            }}
-            className="text-blue-400 hover:text-blue-300 font-medium underline underline-offset-2 cursor-pointer outline-none"
-          >
-            choose files
-          </button>
+        <div className="flex flex-col items-center gap-0.5 text-center">
+          <p className="text-xs font-medium text-neutral-200">
+            Drop files here or <span className={accent.progressText}>choose files</span>
+          </p>
         </div>
       </div>
 
-      {/* ── Selected files panel ── */}
+      {/* ── File list preview ── */}
       {hasFiles && (
-        <div className="flex flex-col gap-1 overflow-hidden rounded-xl border border-white/[0.08] bg-neutral-900/60">
+        <div className="w-full flex flex-col gap-1">
           <ul
             aria-label="Selected files"
-            className="divide-y divide-white/[0.06]"
+            className="flex w-full flex-col gap-1 max-h-40 overflow-y-auto pr-0.5"
           >
-            {files.map(({ uid: id, file }) => (
+            {files.map(({ uid: id, path, name }) => (
               <li
                 key={id}
-                className="group flex items-center gap-3 px-3 py-2 transition-colors duration-150 hover:bg-white/[0.03]"
+                className="
+                  group flex items-center justify-between gap-3
+                  rounded-lg border border-white/[0.06] bg-neutral-900/60 px-3 py-2
+                  text-xs transition-colors hover:bg-neutral-800/60
+                "
               >
-                {/* File icon */}
-                <IconFile name={file.name} />
-
-                {/* Name + size */}
-                <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                  <span className="text-xs text-neutral-200 font-medium truncate leading-tight">
-                    {file.name}
-                  </span>
-                  <span className="text-[10px] text-neutral-500 leading-tight">
-                    {formatBytes(file.size)}
-                  </span>
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <IconFile name={name} />
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <span className="truncate font-medium text-neutral-200">{name}</span>
+                    <span className="truncate text-[10px] text-neutral-500 font-mono" title={path}>
+                      {path}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Remove button */}
                 <button
                   type="button"
-                  aria-label={`Remove ${file.name}`}
+                  aria-label={`Remove ${name}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     removeFile(id);
@@ -318,12 +292,12 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({ selectedDeviceId, onSend })
 
         {/* Helper text */}
         {!canSend && (
-          <p
-            role="status"
-            aria-live="polite"
-            className="text-[11px] text-neutral-400 text-center select-none"
-          >
-            Select a device and files to continue
+          <p className="text-[11px] text-neutral-500 select-none">
+            {!hasDevice && !hasFiles
+              ? "Select a device and files to continue"
+              : !hasDevice
+              ? "Select a device to send files"
+              : "Add files to send"}
           </p>
         )}
       </div>

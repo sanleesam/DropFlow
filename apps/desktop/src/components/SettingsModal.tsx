@@ -14,6 +14,10 @@ interface SettingsModalProps {
   isOpen: boolean;
   /** Callback fired to close the modal */
   onClose: () => void;
+  /** Current number of history items stored */
+  historyCount?: number;
+  /** Callback fired when clear history is confirmed */
+  onClearHistory?: () => void;
 }
 
 // ─── Reusable Switch Component ────────────────────────────────────────────────
@@ -69,7 +73,12 @@ export const Switch: React.FC<SwitchProps> = ({
 
 type TabID = "transfers" | "network" | "security" | "appearance" | "about";
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({
+  isOpen,
+  onClose,
+  historyCount = 0,
+  onClearHistory,
+}) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<TabID>("transfers");
 
@@ -179,7 +188,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
           {/* Active Panel Content Pane */}
           <div className="flex-1 overflow-y-auto p-5 scrollbar-none sm:p-6 bg-[#121418]">
-            {activeTab === "transfers" && <TransfersTab />}
+            {activeTab === "transfers" && (
+              <TransfersTab historyCount={historyCount} onClearHistory={onClearHistory} />
+            )}
             {activeTab === "network" && <NetworkTab />}
             {activeTab === "security" && <SecurityTab />}
             {activeTab === "appearance" && <AppearanceTab />}

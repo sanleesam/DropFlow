@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<incidents format="6" by="lint 8.5.2" type="incidents">
+
+    <incident
+        id="RedundantLabel"
+        severity="warning"
+        message="Redundant label can be removed">
+        <fix-attribute
+            description="Delete label"
+            namespace="http://schemas.android.com/apk/res/android"
+            attribute="label"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*manifest*0}"
+            line="23"
+            column="13"
+            startOffset="1010"
+            endLine="23"
+            endColumn="45"
+            endOffset="1042"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 26. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <fix-data file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/mipmap-anydpi-v26" folderName="mipmap-anydpi" requiresApi="26"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/mipmap-anydpi-v26"/>
+    </incident>
+
+    <incident
+        id="MonochromeLauncherIcon"
+        severity="warning"
+        message="The application adaptive icon is missing a monochrome tag">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/mipmap-anydpi-v26/ic_launcher.xml"
+            line="2"
+            column="1"
+            startOffset="39"
+            endLine="5"
+            endColumn="17"
+            endOffset="272"/>
+    </incident>
+
+    <incident
+        id="MonochromeLauncherIcon"
+        severity="warning"
+        message="The application adaptive roundIcon is missing a monochrome tag">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/mipmap-anydpi-v26/ic_launcher_round.xml"
+            line="2"
+            column="1"
+            startOffset="39"
+            endLine="5"
+            endColumn="17"
+            endOffset="272"/>
+    </incident>
+
+    <incident
+        id="ModifierParameter"
+        severity="warning"
+        message="Modifier parameter should be the first optional parameter">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/dropflow/android/ui/about/AboutScreen.kt"
+            line="43"
+            column="5"
+            startOffset="1793"
+            endLine="43"
+            endColumn="13"
+            endOffset="1801"/>
+    </incident>
+
+    <incident
+        id="ModifierParameter"
+        severity="warning"
+        message="Modifier parameter should be the first optional parameter">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/dropflow/android/ui/components/DeviceCard.kt"
+            line="49"
+            column="5"
+            startOffset="2088"
+            endLine="49"
+            endColumn="13"
+            endOffset="2096"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.core:core-ktx than 1.13.1 is available: 1.19.0">
+        <fix-replace
+            description="Change to 1.19.0"
+            family="Update versions"
+            oldString="1.13.1"
+            replacement="1.19.0"
+            priority="0"/>
+        <location
+            file="$HOME/Desktop/DropFlow/apps/android/gradle/libs.versions.toml"
+            line="4"
+            column="11"
+            startOffset="53"
+            endLine="4"
+            endColumn="19"
+            endOffset="61"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.8.4 is available: 2.11.0">
+        <fix-replace
+            description="Change to 2.11.0"
+            family="Update versions"
+            oldString="2.8.4"
+            replacement="2.11.0"
+            priority="0"/>
+        <location
+            file="$HOME/Desktop/DropFlow/apps/android/gradle/libs.versions.toml"
+            line="5"
+            column="23"
+            startOffset="84"
+            endLine="5"
+            endColumn="30"
+            endOffset="91"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-compose than 2.8.4 is available: 2.11.0">
+        <fix-replace
+            description="Change to 2.11.0"
+            family="Update versions"
+            oldString="2.8.4"
+            replacement="2.11.0"
+            priority="0"/>
+        <location
+            file="$HOME/Desktop/DropFlow/apps/android/gradle/libs.versions.toml"
+            line="5"
+            column="23"
+            startOffset="84"
+            endLine="5"
+            endColumn="30"
+            endOffset="91"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.activity:activity-compose than 1.9.1 is available: 1.13.0">
+        <fix-replace
+            description="Change to 1.13.0"
+            family="Update versions"
+            oldString="1.9.1"
+            replacement="1.13.0"
+            priority="0"/>
+        <location
+            file="$HOME/Desktop/DropFlow/apps/android/gradle/libs.versions.toml"
+            line="6"
+            column="19"
+            startOffset="110"
+            endLine="6"
+            endColumn="26"
+            endOffset="117"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.compose:compose-bom than 2024.06.00 is available: 2026.06.01">
+        <fix-replace
+            description="Change to 2026.06.01"
+            family="Update versions"
+            oldString="2024.06.00"
+            replacement="2026.06.01"
+            priority="0"/>
+        <location
+            file="$HOME/Desktop/DropFlow/apps/android/gradle/libs.versions.toml"
+            line="7"
+            column="14"
+            startOffset="131"
+            endLine="7"
+            endColumn="26"
+            endOffset="143"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.navigation:navigation-compose than 2.7.7 is available: 2.9.8">
+        <fix-replace
+            description="Change to 2.9.8"
+            family="Update versions"
+            oldString="2.7.7"
+            replacement="2.9.8"
+            priority="0"/>
+        <location
+            file="$HOME/Desktop/DropFlow/apps/android/gradle/libs.versions.toml"
+            line="8"
+            column="21"
+            startOffset="164"
+            endLine="8"
+            endColumn="28"
+            endOffset="171"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.datastore:datastore-preferences than 1.1.1 is available: 1.2.1">
+        <fix-replace
+            description="Change to 1.2.1"
+            family="Update versions"
+            oldString="1.1.1"
+            replacement="1.2.1"
+            priority="0"/>
+        <location
+            file="$HOME/Desktop/DropFlow/apps/android/gradle/libs.versions.toml"
+            line="9"
+            column="24"
+            startOffset="195"
+            endLine="9"
+            endColumn="31"
+            endOffset="202"/>
+    </incident>
+
+    <incident
+        id="AndroidGradlePluginVersion"
+        severity="warning"
+        message="A newer version of com.android.application than 8.5.2 is available: 9.3.1">
+        <fix-replace
+            description="Change to 9.3.1"
+            family="Update versions"
+            oldString="8.5.2"
+            replacement="9.3.1"
+            priority="0"/>
+        <location
+            file="$HOME/Desktop/DropFlow/apps/android/gradle/libs.versions.toml"
+            line="2"
+            column="7"
+            startOffset="17"
+            endLine="2"
+            endColumn="14"
+            endOffset="24"/>
+    </incident>
+
+    <incident
+        id="IconLocation"
+        severity="warning"
+        message="Found bitmap drawable `res/drawable/ic_dropflow_logo.png` in densityless folder">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*resDir*0}/drawable/ic_dropflow_logo.png"/>
+    </incident>
+
+</incidents>

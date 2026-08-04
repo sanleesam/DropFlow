@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "appsdesktop",
-  "version": "0.1.0",
-  "identifier": "com.sanleesam.appsdesktop",
+  "productName": "DropFlow",
+  "version": "0.1.0-beta.2",
+  "identifier": "com.dropflow.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "appsdesktop",
+        "title": "DropFlow",
         "width": 800,
         "height": 600
       }
@@ -23,7 +23,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "app",
+      "dmg",
+      "nsis"
+    ],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -31,5 +36,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI5RDYxNzBDNDZDMkUxMkQKUldRdDRjSkdEQmZXS1NCTzJpWHlhRGpMWVRrWExkNk5QOHVsUmIvU1cxY0Z1eFlHS3lTRXNuVEgK",
+      "endpoints": [
+        "https://github.com/sanleesam/DropFlow/releases/download/beta/latest.json",
+        "https://github.com/sanleesam/DropFlow/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

@@ -1,44 +1,27 @@
 import React from "react";
-import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
+import logoImg from "../assets/logo.png";
 
 interface HeaderProps {
+  activePage?: "home" | "history";
+  onNavigate?: (page: "home" | "history") => void;
   /** Callback fired when the user clicks the Settings button */
   onSettingsClick?: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
-  const { settings } = useSettings();
-  const accent = ACCENT_COLOR_MAPS[settings.accentColor];
-
+const Header: React.FC<HeaderProps> = ({ activePage = "home", onNavigate, onSettingsClick }) => {
   return (
     <header className="df-header sticky top-0 z-50 flex items-center justify-between px-5 py-3 border-b border-white/[0.07] bg-[#101216]/80 backdrop-blur-xl">
       {/* Logo + Title */}
-      <div className="flex items-center gap-2.5 select-none">
+      <div
+        className="flex items-center gap-2.5 select-none cursor-pointer"
+        onClick={() => onNavigate && onNavigate("home")}
+      >
         {/* Icon mark */}
-        <div className={`relative flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${accent.headerLogoGrad} shadow-sm`}>
-          <svg
-            viewBox="0 0 32 32"
-            className="absolute inset-0 h-full w-full p-1.5"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            aria-hidden="true"
-          >
-            <path
-              d="M16 4L4 12V20L16 28L28 20V12L16 4Z"
-              stroke="white"
-              strokeWidth="2"
-              strokeLinejoin="round"
-              fill="none"
-            />
-            <path
-              d="M16 4V28M4 12L28 20M28 12L4 20"
-              stroke="white"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              opacity="0.5"
-            />
-          </svg>
-        </div>
+        <img
+          src={logoImg}
+          alt="DropFlow Logo"
+          className="h-8 w-auto object-contain flex-shrink-0"
+        />
 
         {/* Wordmark */}
         <div>
@@ -48,6 +31,37 @@ const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
           <span className="hidden text-[11px] text-neutral-500 sm:block">Private file transfer</span>
         </div>
       </div>
+
+      {/* Native macOS Segmented Control */}
+      {onNavigate && (
+        <div className="relative inline-flex items-center bg-neutral-900/80 p-0.5 rounded-lg border border-white/[0.08] select-none">
+          {/* Sliding active pill indicator */}
+          <div
+            className="absolute top-0.5 bottom-0.5 left-0.5 w-[calc(50%-2px)] rounded-[5px] bg-neutral-800 border border-white/[0.12] shadow-sm transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]"
+            style={{
+              transform: activePage === "home" ? "translateX(0%)" : "translateX(100%)",
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => onNavigate("home")}
+            className={`relative z-10 w-24 py-1 text-center text-xs font-medium transition-colors duration-150 ${
+              activePage === "home" ? "text-white font-semibold" : "text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            Dashboard
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate("history")}
+            className={`relative z-10 w-24 py-1 text-center text-xs font-medium transition-colors duration-150 ${
+              activePage === "history" ? "text-white font-semibold" : "text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            History
+          </button>
+        </div>
+      )}
 
       {/* Right: Settings */}
       <button

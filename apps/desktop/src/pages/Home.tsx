@@ -1,12 +1,25 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import Header from "../components/Header";
 import DeviceCard, { Device } from "../components/DeviceCard";
-import FileDropZone from "../components/FileDropZone";
+import FileDropZone, { SelectedFilePayload } from "../components/FileDropZone";
 import { TransferProgress } from "../components/TransferProgress";
 import { SettingsModal } from "../components/SettingsModal";
 import { useSettings } from "../components/SettingsProvider";
+import { useToast } from "../components/ToastProvider";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { IncomingTransferModal, IncomingTransferRequestData } from "../components/IncomingTransferModal";
+
+import {
+  createInitialSessionStore,
+  startSendSession,
+  applyProgressEvent,
+  applyCompletionEvent,
+  applyFailureEvent,
+  dismissActiveSession,
+  SessionStateStore,
+  formatRelativeTimestamp,
+} from "../utils/transferSessionManager";
 
 // ─── Section wrapper ────────────────────────────────────────────────────────
 
@@ -61,6 +74,12 @@ const IconUpload: React.FC = () => (
   </svg>
 );
 
+const IconActivity: React.FC = () => (
+  <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <polyline points="2 8 5 8 7 3 9 13 11 8 14 8" />
+  </svg>
+);
+
 const IconClock: React.FC = () => (
   <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <circle cx="8" cy="8" r="6.5" />
@@ -68,36 +87,41 @@ const IconClock: React.FC = () => (
   </svg>
 );
 
-// ─── Home page ────────────────────────────────────────────────────────────────
-
-interface RecentTransfer {
-  id: string;
-  fileName: string;
-  deviceName: string;
-  size: string;
-  timestamp: string;
-  status: "completed" | "failed";
+async function triggerDesktopNotification(title: string, body: string) {
+  try {
+    let granted = await isPermissionGranted();
+    if (!granted) {
+      const permission = await requestPermission();
+      granted = permission === "granted";
+    }
+    if (granted) {
+      sendNotification({ title, body });
+    }
+  } catch (err) {
+    console.error("[Notification] Failed to send desktop notification:", err);
+  }
 }
 
-const Home: React.FC = () => {
+// ─── Home page ────────────────────────────────────────────────────────────────
+
+interface HomeProps {
+  onNavigateHistory?: () => void;
+  sessionStore?: SessionStateStore;
+}
+
+export const Home: React.FC<HomeProps> = () => {
   const { settings } = useSettings();
+  const { addToast } = useToast();
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
-  const [activeTransfer, setActiveTransfer] = useState<{
-    id: string;
-    deviceName: string;
-    fileName: string;
-  } | null>(null);
+
+  // Central Session Store managing active and recent transfers
+  const [sessionStore, setSessionStore] = useState<SessionStateStore>(createInitialSessionStore);
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const wasSettingsOpenRef = useRef(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [localUuid, setLocalUuid] = useState<string>("");
   const discoveryEventRevision = useRef(0);
-
-  // Production state starts clean with zero mock transfers
-  const [recentTransfers, setRecentTransfers] = useState<RecentTransfer[]>([]);
-
-  // Prevent duplicate completion handling across re-renders
-  const completedTransferIdsRef = useRef<Set<string>>(new Set());
 
   // Restore focus to Settings button after modal is closed
   useEffect(() => {
@@ -122,6 +146,105 @@ const Home: React.FC = () => {
         : selectedId,
     );
   }, []);
+
+  // Hydrate persistent history from Rust backend on startup
+  useEffect(() => {
+    invoke<any>("get_app_state")
+      .then((appState) => {
+        if (appState && Array.isArray(appState.history) && appState.history.length > 0) {
+          setSessionStore((prev) => {
+            if (prev.recentTransfers.length > 0) return prev;
+            return {
+              ...prev,
+              recentTransfers: appState.history,
+            };
+          });
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  // Save history to Rust backend whenever recentTransfers changes
+  useEffect(() => {
+    if (sessionStore.recentTransfers.length > 0) {
+      invoke("save_history", { history: sessionStore.recentTransfers }).catch(console.error);
+    }
+  }, [sessionStore.recentTransfers]);
+
+  const [incomingRequest, setIncomingRequest] = useState<IncomingTransferRequestData | null>(null);
+
+  // Long-lived central IPC event listeners registered once on mount
+  useEffect(() => {
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenCompleted: (() => void) | undefined;
+    let unlistenFailed: (() => void) | undefined;
+    let unlistenRequest: (() => void) | undefined;
+    let unlistenDismiss: (() => void) | undefined;
+
+    const setupCentralListeners = async () => {
+      try {
+        unlistenRequest = await listen<IncomingTransferRequestData>("incoming-transfer-request", (event) => {
+          setIncomingRequest(event.payload);
+        });
+
+        unlistenDismiss = await listen<string>("incoming-transfer-dismiss", (event) => {
+          setIncomingRequest((prev) => (prev?.sessionId === event.payload ? null : prev));
+        });
+
+        unlistenProgress = await listen<any>("transfer-progress", (event) => {
+          setSessionStore((prev) => applyProgressEvent(prev, event.payload));
+        });
+
+        unlistenCompleted = await listen<any>("transfer-completed", (event) => {
+          const payload = event.payload;
+          setSessionStore((prev) => {
+            const isReceive =
+              payload.direction === "receive" ||
+              prev.activeTransfers[payload.sessionId]?.direction === "receive";
+
+            const next = applyCompletionEvent(prev, payload);
+
+            if (isReceive && !prev.completedSessionIds.has(payload.sessionId)) {
+              addToast(
+                `Received ${payload.fileName || "file"} from ${payload.deviceName || "Peer Device"}`,
+                "success"
+              );
+              triggerDesktopNotification(
+                "DropFlow — Transfer Complete",
+                `${payload.fileName || "file"}\nReceived from ${payload.deviceName || "Peer Device"}`
+              );
+
+              if (settings.autoOpenCompleted) {
+                const targetPath = payload.finalPath || payload.receiveDir || payload.filePath;
+                if (targetPath) {
+                  invoke("open_received_file", { path: targetPath }).catch(console.error);
+                }
+              }
+            }
+            return next;
+          });
+        });
+
+        unlistenFailed = await listen<any>("transfer-failed", (event) => {
+          const payload = event.payload;
+          setSessionStore((prev) => applyFailureEvent(prev, payload));
+          addToast(`Transfer failed: ${payload.error || "Unknown error"}`, "error");
+        });
+      } catch (err) {
+        console.error("[Home] Failed to setup central event listeners:", err);
+      }
+    };
+
+    setupCentralListeners();
+
+    return () => {
+      if (unlistenRequest) unlistenRequest();
+      if (unlistenDismiss) unlistenDismiss();
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenCompleted) unlistenCompleted();
+      if (unlistenFailed) unlistenFailed();
+    };
+  }, [addToast, settings.autoOpenCompleted]);
 
   // Subscribe before browsing, then hydrate from the backend source of truth.
   useEffect(() => {
@@ -221,7 +344,7 @@ const Home: React.FC = () => {
         deviceId: localUuid,
         deviceName: settings.deviceName,
         deviceType: "laptop",
-        port: 42382,
+        port: 1, // Non-zero value instructing Rust to advertise bound receiver port
       }).catch(console.error);
     } else {
       invoke("update_advertisement", {
@@ -233,152 +356,212 @@ const Home: React.FC = () => {
     }
   }, [settings.deviceName, settings.deviceVisibility, localUuid]);
 
-  const handleSend = useCallback((fileName: string) => {
-    const device = devices.find((d) => d.id === selectedDeviceId);
-    const deviceName = device ? device.name : "Unknown Device";
-    setActiveTransfer({
-      id: `tx-${Date.now()}`,
-      deviceName,
-      fileName,
-    });
-  }, [devices, selectedDeviceId]);
+  const handleSend = useCallback(
+    async (selectedFiles: SelectedFilePayload[]) => {
+      if (selectedFiles.length === 0) return;
 
-  const handleTransferComplete = useCallback(() => {
-    setActiveTransfer((currentActive) => {
-      if (currentActive && !completedTransferIdsRef.current.has(currentActive.id)) {
-        completedTransferIdsRef.current.add(currentActive.id);
-        const newTransfer: RecentTransfer = {
-          id: currentActive.id,
-          fileName: currentActive.fileName,
-          deviceName: currentActive.deviceName,
-          size: "Complete",
-          timestamp: "Just now",
-          status: "completed",
-        };
-        setRecentTransfers((prev) => [newTransfer, ...prev]);
+      const targetDevice = devices.find((d) => d.id === selectedDeviceId);
+      if (!targetDevice) {
+        addToast("Selected device is no longer available.", "error");
+        return;
       }
-      return null; // Clear activeTransfer so TransferProgress unmounts
-    });
-  }, []);
+
+      const peerAddress = targetDevice.addresses[0]?.address || "127.0.0.1";
+      const peerPort = targetDevice.port;
+
+      const filePaths = selectedFiles.map((f) => f.path);
+      const totalCount = selectedFiles.length;
+      const primaryName = selectedFiles[0].name;
+
+      const displayFileName = totalCount > 1
+        ? `${primaryName} (+${totalCount - 1} other ${totalCount - 1 === 1 ? "file" : "files"})`
+        : primaryName;
+
+      // Single canonical session ID created by frontend and passed to Rust
+      const sessionId = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+      setSessionStore((prev) =>
+        startSendSession(prev, sessionId, targetDevice.name, displayFileName, totalCount)
+      );
+
+      try {
+        await invoke<string>("send_files", {
+          sessionId,
+          peerAddress,
+          peerPort,
+          localUuid,
+          localDeviceName: settings.deviceName || "DropFlow Device",
+          filePaths,
+        });
+
+        // Robust fallback completion upon invoke resolution
+        setSessionStore((prev) =>
+          applyCompletionEvent(prev, {
+            sessionId,
+            fileName: displayFileName,
+            deviceName: targetDevice.name,
+            size: "Complete",
+            timestamp: "Just now",
+            direction: "send",
+            totalFiles: totalCount,
+          })
+        );
+      } catch (err: any) {
+        console.error("[Home] Send failed:", err);
+        setSessionStore((prev) =>
+          applyFailureEvent(prev, {
+            sessionId,
+            error: String(err),
+          })
+        );
+        addToast(`Transfer error: ${err}`, "error");
+      }
+    },
+    [devices, selectedDeviceId, localUuid, settings.deviceName, addToast],
+  );
+
+  const activeTransferList = Object.values(sessionStore.activeTransfers);
 
   return (
-    <div className="df-app-shell flex h-screen w-screen flex-col overflow-hidden text-neutral-100">
-      <Header onSettingsClick={() => setIsSettingsOpen(true)} />
-
-      <main
-        id="main-content"
-        className="df-main flex-1 overflow-y-auto"
-        style={{
-          scrollbarWidth: "none",
-          msOverflowStyle: "none",
-        }}
+    <div className="flex flex-col gap-5 w-full transition-opacity duration-120 ease-[cubic-bezier(0.22,1,0.36,1)]">
+      {/* ── Nearby Devices ── */}
+      <Section
+        id="nearby-devices"
+        title="Nearby devices"
+        icon={<IconRadar />}
       >
-        {/* ── Nearby Devices ── */}
-        <Section
-          id="nearby-devices"
-          title="Nearby devices"
-          icon={<IconRadar />}
+        <div
+          role="radiogroup"
+          aria-label="Nearby devices"
+          className="w-full"
         >
-          <div
-            role="radiogroup"
-            aria-label="Nearby devices"
-            className="w-full"
-          >
-            {devices.length > 0 ? (
-              <div className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                {devices.map((device) => (
-                  <DeviceCard
-                    key={device.id}
-                    device={device}
-                    selected={selectedDeviceId === device.id}
-                    onSelect={setSelectedDeviceId}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="py-2.5 text-left select-none">
-                <p className="text-xs font-medium text-neutral-400">Looking for devices…</p>
-                <p className="mt-0.5 text-[11px] text-neutral-500">
-                  Make sure DropFlow is open on your other device.
-                </p>
-              </div>
-            )}
-          </div>
-        </Section>
-
-        {/* ── Send Files ── */}
-        <Section
-          id="send-files"
-          title="Send files"
-          icon={<IconUpload />}
-        >
-          <FileDropZone selectedDeviceId={selectedDeviceId} onSend={handleSend} />
-        </Section>
-
-        {/* ── Active Transfer Progress ── */}
-        {activeTransfer && (
-          <TransferProgress
-            key={activeTransfer.id}
-            deviceName={activeTransfer.deviceName}
-            fileName={activeTransfer.fileName}
-            onClose={() => setActiveTransfer(null)}
-            onComplete={handleTransferComplete}
-          />
-        )}
-
-        {/* ── Recent Transfers ── */}
-        <Section
-          id="recent-transfers"
-          title="Recent transfers"
-          icon={<IconClock />}
-        >
-          {recentTransfers.length > 0 ? (
-            <div className="w-full flex flex-col divide-y divide-white/[0.06] rounded-xl border border-white/[0.07] bg-neutral-900/40 overflow-hidden">
-              {recentTransfers.map((tx) => (
-                <div key={tx.id} className="flex items-center justify-between px-3 py-2 hover:bg-white/[0.02] transition-colors duration-150">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className={`flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-neutral-800 border border-white/[0.06] ${
-                      tx.status === "completed" ? "text-emerald-400" : "text-red-400"
-                    }`}>
-                      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                      </svg>
-                    </span>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-medium text-neutral-200 truncate leading-tight">{tx.fileName}</span>
-                      <span className="text-[11px] text-neutral-500 mt-0.5 leading-tight">
-                        {tx.status === "completed" ? "Sent to" : "Failed sending to"} <span className="text-neutral-300 font-medium">{tx.deviceName}</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 flex-shrink-0 text-right select-none">
-                    <div className="flex flex-col items-end">
-                      <span className="text-xs text-neutral-400 font-mono">{tx.size}</span>
-                      <span className="text-[10px] text-neutral-500 mt-0.5">{tx.timestamp}</span>
-                    </div>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
-                      tx.status === "completed" 
-                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
-                        : "bg-red-500/10 text-red-400 border-red-500/20"
-                    }`}>
-                      {tx.status === "completed" ? "Completed" : "Failed"}
-                    </span>
-                  </div>
-                </div>
+          {devices.length > 0 ? (
+            <div className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              {devices.map((device) => (
+                <DeviceCard
+                  key={device.id}
+                  device={device}
+                  selected={selectedDeviceId === device.id}
+                  onSelect={setSelectedDeviceId}
+                />
               ))}
             </div>
           ) : (
-            <div className="py-1 select-none">
-              <p className="text-xs text-neutral-500">No transfers yet</p>
+            <div className="py-2.5 text-left select-none">
+              <p className="text-xs font-medium text-neutral-400">Looking for devices…</p>
+              <p className="mt-0.5 text-[11px] text-neutral-500">
+                Make sure DropFlow is open on your other device.
+              </p>
             </div>
           )}
+        </div>
+      </Section>
+
+      {/* ── Send Files ── */}
+      <Section
+        id="send-files"
+        title="Send files"
+        icon={<IconUpload />}
+      >
+        <FileDropZone selectedDeviceId={selectedDeviceId} onSend={handleSend} />
+      </Section>
+
+      {/* ── Active Transfer Progress Cards ── */}
+      {activeTransferList.length > 0 && (
+        <Section
+          id="active-transfers"
+          title="Active transfers"
+          icon={<IconActivity />}
+        >
+          <div className="w-full flex flex-col gap-3">
+            {activeTransferList.map((session) => (
+              <TransferProgress
+                key={session.id}
+                session={session}
+                onDismiss={(id) => setSessionStore((prev) => dismissActiveSession(prev, id))}
+                onCancel={(id) => {
+                  invoke("cancel_transfer", { sessionId: id }).catch(console.error);
+                  setSessionStore((prev) =>
+                    applyFailureEvent(prev, { sessionId: id, error: "Transfer cancelled by user" })
+                  );
+                }}
+              />
+            ))}
+          </div>
         </Section>
-      </main>
+      )}
+
+      {/* ── Recent Transfer Summary ── */}
+      <Section
+        id="recent-transfers"
+        title="Recent transfer"
+        icon={<IconClock />}
+      >
+        {sessionStore.recentTransfers.length > 0 ? (
+          (() => {
+            const latest = sessionStore.recentTransfers[0];
+            const isReceive = latest.direction === "receive";
+            const isFailed = latest.status === "failed";
+            const displayTime = latest.timestampMs
+              ? formatRelativeTimestamp(latest.timestampMs)
+              : latest.timestamp;
+
+            return (
+              <div className="w-full flex items-center justify-between gap-3 p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/40 select-none">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span
+                    className={`flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg border ${
+                      isFailed
+                        ? "bg-red-500/10 border-red-500/20 text-red-400"
+                        : isReceive
+                        ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
+                        : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                    }`}
+                  >
+                    <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                  </span>
+
+                  <div className="flex flex-col min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-neutral-100 truncate">
+                        {latest.totalFiles > 1 ? `${latest.totalFiles} files` : latest.fileName}
+                      </span>
+                      <span className="text-[10px] font-mono text-neutral-400">{latest.size}</span>
+                    </div>
+                    <span className="text-[11px] text-neutral-400 mt-0.5 flex items-center gap-1.5 truncate">
+                      <span>{isReceive ? "↓ Received from" : "↑ Sent to"}</span>
+                      <span className="text-neutral-200 font-medium">{latest.deviceName}</span>
+                      <span>•</span>
+                      <span>{displayTime}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()
+        ) : (
+          <div className="flex items-center justify-between p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/30 select-none">
+            <div className="flex flex-col">
+              <span className="text-xs font-medium text-neutral-300">No recent transfers</span>
+              <span className="text-[11px] text-neutral-500 mt-0.5">Transferred files will appear here</span>
+            </div>
+          </div>
+        )}
+      </Section>
 
       {/* ── Settings Modal ── */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+
+      {/* ── Incoming Transfer Authorization Dialog ── */}
+      {incomingRequest && (
+        <IncomingTransferModal
+          request={incomingRequest}
+          onClose={() => setIncomingRequest(null)}
+        />
+      )}
     </div>
   );
 };

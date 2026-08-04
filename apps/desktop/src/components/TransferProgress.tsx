@@ -1,107 +1,124 @@
-import React, { useEffect, useRef, useState } from "react";
-import { X, CheckCircle2 } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { X, CheckCircle2, FolderOpen, FileText, Ban } from "lucide-react";
 import { useToast } from "./ToastProvider";
 import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { invoke } from "@tauri-apps/api/core";
+import { ActiveTransferSession } from "../utils/transferSessionManager";
 
 interface TransferProgressProps {
-  /** Name of the destination device */
-  deviceName: string;
-  /** Name of the file being sent */
-  fileName: string;
-  /** Callback fired when the user closes/dismisses the card */
-  onClose: () => void;
-  /** Callback fired when transfer reaches 100% */
-  onComplete?: () => void;
+  session: ActiveTransferSession;
+  onDismiss: (sessionId: string) => void;
+  onCancel: (sessionId: string) => void;
 }
 
-type TransferStatus = "Preparing..." | "Sending..." | "Finishing..." | "Completed";
-
 export const TransferProgress: React.FC<TransferProgressProps> = ({
-  deviceName,
-  fileName,
-  onClose,
-  onComplete,
+  session,
+  onDismiss,
+  onCancel,
 }) => {
   const { addToast } = useToast();
   const { settings } = useSettings();
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
 
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState<TransferStatus>("Preparing...");
-  const [speed, setSpeed] = useState("125 MB/s");
-  const [timeRemaining, setTimeRemaining] = useState("12 seconds");
   const [isDismissing, setIsDismissing] = useState(false);
+  const [receiveDir, setReceiveDir] = useState<string>("");
 
-  // Keep a stable ref to onComplete to prevent prop identity changes from restarting the timer
-  const onCompleteRef = useRef(onComplete);
+  // Fetch receive directory path for Open Folder fallback
   useEffect(() => {
-    onCompleteRef.current = onComplete;
-  }, [onComplete]);
-
-  // Track if completion logic has already executed for this mounted transfer
-  const hasCompletedRef = useRef(false);
+    if (session.direction === "receive") {
+      if (session.receiveDir) {
+        setReceiveDir(session.receiveDir);
+      } else {
+        invoke<string>("get_receive_dir")
+          .then(setReceiveDir)
+          .catch(console.error);
+      }
+    }
+  }, [session.direction, session.receiveDir]);
 
   const handleDismiss = () => {
     setIsDismissing(true);
-    setTimeout(onClose, 150);
+    setTimeout(() => onDismiss(session.id), 150);
   };
 
-  useEffect(() => {
-    hasCompletedRef.current = false;
-    setProgress(0);
-    setStatus("Preparing...");
-    setSpeed("125 MB/s");
-    setTimeRemaining("12 seconds");
+  const handleCancelTransfer = () => {
+    onCancel(session.id);
+  };
 
-    let currentProgress = 0;
-    const duration = 4000;
-    const intervalTime = 40;
-    const totalSteps = duration / intervalTime;
-    const stepIncrement = 100 / totalSteps;
+  const handleOpenFolder = async () => {
+    try {
+      const firstFile = session.completedFiles.find((f) => f.finalPath);
+      if (firstFile?.finalPath) {
+        await revealItemInDir(firstFile.finalPath);
+        return;
+      }
 
-    const timer = setInterval(() => {
-      currentProgress += stepIncrement;
-      
-      if (currentProgress >= 100) {
-        currentProgress = 100;
-        setProgress(100);
-        setStatus("Completed");
-        setSpeed("0 MB/s");
-        setTimeRemaining("0 seconds");
-        clearInterval(timer);
+      const dirPath = session.receiveDir || receiveDir || (await invoke<string>("get_receive_dir"));
+      await openPath(dirPath);
+    } catch (err) {
+      console.error("[TransferProgress] Failed to reveal/open receive folder:", err);
+      try {
+        const dirPath = session.receiveDir || receiveDir || (await invoke<string>("get_receive_dir"));
+        await openPath(dirPath);
+      } catch (fallbackErr) {
+        console.error("[TransferProgress] Fallback openPath failed:", fallbackErr);
+        addToast("Failed to open receive folder.", "error");
+      }
+    }
+  };
 
-        if (!hasCompletedRef.current) {
-          hasCompletedRef.current = true;
-          addToast("Transfer completed.", "success");
-          if (onCompleteRef.current) {
-            onCompleteRef.current();
-          }
-        }
-      } else {
-        const roundedProgress = Math.round(currentProgress);
-        setProgress(roundedProgress);
+  const handleOpenFile = async (specificFilePath?: string) => {
+    try {
+      let targetPath = specificFilePath;
 
-        if (roundedProgress < 15) {
-          setStatus("Preparing...");
-          setSpeed("125 MB/s");
-          setTimeRemaining("12 seconds");
-        } else if (roundedProgress < 85) {
-          setStatus("Sending...");
-          setSpeed("125 MB/s");
-          const remainingSecs = Math.max(1, Math.round(((100 - roundedProgress) / 85) * 12));
-          setTimeRemaining(`${remainingSecs} second${remainingSecs !== 1 ? "s" : ""}`);
-        } else {
-          setStatus("Finishing...");
-          setSpeed("125 MB/s");
-          setTimeRemaining("1 second");
+      if (!targetPath) {
+        const firstFile = session.completedFiles.find((f) => f.finalPath);
+        if (firstFile?.finalPath) {
+          targetPath = firstFile.finalPath;
         }
       }
-    }, intervalTime);
 
-    return () => clearInterval(timer);
-  }, [deviceName, fileName, addToast]);
+      if (!targetPath) {
+        throw new Error("No valid final file path available for received file");
+      }
 
-  const isCompleted = progress === 100;
+      try {
+        await openPath(targetPath);
+      } catch (openerErr) {
+        console.warn("[TransferProgress] openPath failed, trying open_received_file fallback:", openerErr);
+        await invoke("open_received_file", { path: targetPath });
+      }
+    } catch (err) {
+      console.error("[TransferProgress] Failed to open received file:", err);
+      addToast("Failed to open received file.", "error");
+    }
+  };
+
+  const isCompleted = session.progress === 100 || session.status === "Completed";
+  const isCancelled = session.status === "Cancelled";
+  const isFailed = session.status === "Failed";
+
+  // Auto-dismiss completed cards after 2.0s and cancelled cards after 1.5s
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    if (isCompleted) {
+      timer = setTimeout(() => {
+        setIsDismissing(true);
+        setTimeout(() => onDismiss(session.id), 150);
+      }, 2000);
+    } else if (isCancelled) {
+      timer = setTimeout(() => {
+        setIsDismissing(true);
+        setTimeout(() => onDismiss(session.id), 150);
+      }, 1500);
+    }
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [isCompleted, isCancelled, session.id, onDismiss]);
 
   return (
     <div
@@ -113,33 +130,64 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
         animate-slide-in-up
       `}
     >
-      {/* Header Info & Close Button */}
+      {/* Header Info & Actions */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className={`h-2 w-2 rounded-full ${accent.progressBgDot} animate-pulse`} />
-          <h3 className="text-sm font-semibold tracking-tight text-neutral-100">Sending file</h3>
-          <span className="text-xs text-neutral-400">
-            to <span className="font-medium text-neutral-200">{deviceName}</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`h-2 w-2 rounded-full ${accent.progressBgDot} animate-pulse flex-shrink-0`} />
+          <h3 className="text-sm font-semibold tracking-tight text-neutral-100 truncate">
+            {session.direction === "receive" ? "Receiving" : "Sending"}{" "}
+            {session.totalFiles > 1 ? `${session.totalFiles} files` : "file"}
+          </h3>
+          <span className="text-xs text-neutral-400 truncate">
+            {session.direction === "receive" ? "from" : "to"}{" "}
+            <span className="font-medium text-neutral-200">{session.deviceName}</span>
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {/* Status Label */}
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-neutral-800 border border-white/[0.06] select-none">
-            {!isCompleted ? (
+            {!isCompleted && !isCancelled && !isFailed ? (
               <>
                 <span className={`h-1.5 w-1.5 rounded-full ${accent.progressBgDot} animate-pulse`} />
-                <span className={accent.progressText}>{status}</span>
+                <span className={accent.progressText}>{session.status}</span>
+              </>
+            ) : isCompleted ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span className="text-emerald-400">Completed</span>
+              </>
+            ) : isCancelled ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                <span className="text-amber-400">Cancelled</span>
               </>
             ) : (
               <>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span className="text-emerald-400">{status}</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                <span className="text-red-400">Failed</span>
               </>
             )}
           </div>
 
-          {/* Close Button */}
+          {/* Cancel button during active transfer */}
+          {!isCompleted && !isCancelled && !isFailed && (
+            <button
+              type="button"
+              onClick={handleCancelTransfer}
+              title="Cancel transfer"
+              className="
+                flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium
+                text-red-400 bg-red-500/10 border border-red-500/20
+                hover:bg-red-500/20 transition-all duration-150 outline-none
+              "
+            >
+              <Ban size={11} />
+              <span>Cancel</span>
+            </button>
+          )}
+
+          {/* Dismiss Button */}
           <button
             type="button"
             onClick={handleDismiss}
@@ -179,35 +227,109 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
 
         {/* Text Details */}
         <div className="flex-1 min-w-0">
-          <p className="truncate text-sm font-medium text-neutral-200">{fileName}</p>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-neutral-500 select-none">
-            <span>{speed}</span>
+          <p className="truncate text-sm font-medium text-neutral-200">{session.currentFileLabel}</p>
+          <div className="mt-0.5 flex items-center gap-2 text-xs text-neutral-500 select-none truncate">
+            <span>{session.speed}</span>
             <span>•</span>
-            <span>{timeRemaining} remaining</span>
+            <span>{session.timeRemaining} remaining</span>
+            {session.bytesInfo && (
+              <>
+                <span>•</span>
+                <span className="font-mono">{session.bytesInfo}</span>
+              </>
+            )}
           </div>
         </div>
 
         {/* Progress Percent */}
-        <div className="text-right select-none">
+        <div className="text-right select-none flex-shrink-0">
           <span className="text-lg font-semibold tracking-tight text-neutral-100">
-            {progress}%
+            {session.progress}%
           </span>
         </div>
       </div>
 
-      {/* Progress Bar / Success State */}
+      {/* Progress Bar / Completion Summary */}
       <div className="relative w-full">
-        {!isCompleted ? (
+        {!isCompleted && !isCancelled && !isFailed ? (
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
             <div
               className={`h-full rounded-full ${accent.switchBg} transition-all duration-75 ease-out`}
-              style={{ width: `${progress}%` }}
+              style={{ width: `${session.progress}%` }}
             />
           </div>
+        ) : isCompleted ? (
+          <div className="flex flex-col gap-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 select-none">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs text-emerald-400 font-semibold">
+                <CheckCircle2 size={16} strokeWidth={2} />
+                <span>Transfer Complete ({session.totalFiles} {session.totalFiles === 1 ? "file" : "files"})</span>
+              </div>
+              <span className="text-[11px] font-mono text-neutral-400 truncate max-w-[200px]" title={receiveDir}>
+                {receiveDir || "~/Downloads/DropFlow/"}
+              </span>
+            </div>
+
+            {session.completedFiles.length > 1 && (
+              <ul className="flex flex-col gap-1 max-h-24 overflow-y-auto py-1 pr-1 text-xs">
+                {session.completedFiles.map((f, i) => (
+                  <li
+                    key={i}
+                    onClick={() => f.finalPath && handleOpenFile(f.finalPath)}
+                    className="flex items-center justify-between text-neutral-300 hover:text-white cursor-pointer hover:bg-emerald-500/10 px-1.5 py-0.5 rounded transition-colors"
+                    title={f.finalPath ? `Click to open ${f.relativePath}` : f.relativePath}
+                  >
+                    <span className="truncate flex-1">{f.relativePath}</span>
+                    <span className="font-mono text-[11px] text-neutral-400 ml-2">
+                      {(f.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {session.direction === "receive" && (
+              <div className="flex items-center gap-2 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => handleOpenFile()}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-md bg-emerald-500/20 border border-emerald-500/30 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/30 transition-colors"
+                >
+                  <FileText size={13} />
+                  <span>Open File</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenFolder}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-md bg-neutral-800 border border-white/[0.08] px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-700 transition-colors"
+                >
+                  <FolderOpen size={13} />
+                  <span>Open Folder</span>
+                </button>
+              </div>
+            )}
+          </div>
+        ) : isCancelled ? (
+          <div className="flex items-center justify-between rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-400 font-medium select-none">
+            <span>Transfer cancelled</span>
+            <button
+              type="button"
+              onClick={handleDismiss}
+              className="px-2 py-1 rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700 text-[11px]"
+            >
+              Dismiss
+            </button>
+          </div>
         ) : (
-          <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium py-0.5 select-none">
-            <CheckCircle2 size={14} strokeWidth={2} />
-            <span>Transfer completed successfully.</span>
+          <div className="flex items-center justify-between rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-400 font-medium select-none">
+            <span>Transfer failed: {session.error || "Unknown error"}</span>
+            <button
+              type="button"
+              onClick={handleDismiss}
+              className="px-2 py-1 rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700 text-[11px]"
+            >
+              Dismiss
+            </button>
           </div>
         )}
       </div>
