@@ -3,6 +3,21 @@ import { ShieldCheck, Trash2, Smartphone, Monitor } from "lucide-react";
 import { useSettings } from "../SettingsProvider";
 import { Switch } from "../SettingsModal";
 
+function normalizePlatform(platform?: string): "Desktop" | "Mobile" {
+  const p = (platform || "").toLowerCase();
+
+  // Desktop always wins if both substrings exist (legacy compatibility e.g. "Desktop/Mobile" -> Desktop)
+  if (p.includes("desktop") || p.includes("mac") || p.includes("windows") || p.includes("linux")) {
+    return "Desktop";
+  }
+
+  if (p.includes("mobile") || p.includes("android") || p.includes("phone")) {
+    return "Mobile";
+  }
+
+  return "Desktop";
+}
+
 export const SecurityTab: React.FC = () => {
   const { settings, updateSetting, removeTrustedDevice } = useSettings();
   const trustedDevices = settings.trustedDevices || [];
@@ -34,9 +49,8 @@ export const SecurityTab: React.FC = () => {
           ) : (
             <div className="flex flex-col gap-2 mt-2">
               {trustedDevices.map((device) => {
-                const rawPlatform = (device.platform || "Desktop").toLowerCase();
-                const isMobile = rawPlatform.includes("mobile") || rawPlatform.includes("android") || rawPlatform.includes("phone");
-                const platformLabel = isMobile ? "Mobile" : "Desktop";
+                const platformLabel = normalizePlatform(device.platform);
+                const isMobile = platformLabel === "Mobile";
 
                 return (
                   <div

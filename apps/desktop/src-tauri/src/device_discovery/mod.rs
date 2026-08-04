@@ -125,7 +125,7 @@ fn validate_peer_metadata(
     }
 
     let device_type = match device_type {
-        Some("laptop" | "desktop" | "phone") => device_type.unwrap().to_string(),
+        Some("laptop" | "desktop" | "phone" | "tablet") => device_type.unwrap().to_string(),
         Some(_) => return Err("invalid device_type".to_string()),
         None => return Err("missing device_type".to_string()),
     };
@@ -614,6 +614,52 @@ pub fn get_system_platform() -> String {
     #[cfg(not(target_os = "android"))]
     {
         "Desktop".to_string()
+    }
+}
+
+#[tauri::command]
+pub fn get_system_device_type() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("sysctl")
+            .args(["-n", "hw.model"])
+            .output()
+        {
+            let model = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            if model.contains("book") {
+                return "laptop".to_string();
+            }
+        }
+        "desktop".to_string()
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = std::process::Command::new("WMIC")
+            .args(["path", "Win32_Battery", "get", "EstimatedChargeRemaining"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.trim().is_empty() && !stdout.contains("No Instance") {
+                return "laptop".to_string();
+            }
+        }
+        "desktop".to_string()
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if std::path::Path::new("/sys/class/power_supply/BAT0").exists()
+            || std::path::Path::new("/sys/class/power_supply/BAT1").exists()
+        {
+            return "laptop".to_string();
+        }
+        "desktop".to_string()
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        "desktop".to_string()
     }
 }
 

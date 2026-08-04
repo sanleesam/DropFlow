@@ -175,6 +175,19 @@ pub fn load_or_create_state_at_path(path: &PathBuf) -> AppStateSchema {
                         if parsed.history.len() > MAX_PERSISTED_HISTORY_CAPACITY {
                             parsed.history.truncate(MAX_PERSISTED_HISTORY_CAPACITY);
                         }
+
+                        // Migrate legacy trusted device platform entries
+                        let mut state_modified = false;
+                        for device in &mut parsed.trusted_devices {
+                            if device.platform == "Desktop/Mobile" || device.platform.is_empty() {
+                                device.platform = "Desktop".to_string();
+                                state_modified = true;
+                            }
+                        }
+                        if state_modified {
+                            save_state_atomic_at_path(path, &parsed).ok();
+                        }
+
                         return parsed;
                     }
                     Err(e) => {
