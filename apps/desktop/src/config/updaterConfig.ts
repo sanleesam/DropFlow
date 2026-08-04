@@ -19,5 +19,5 @@ export interface UpdaterConfig {
 export const UPDATER_CONFIG: UpdaterConfig = {
   channel: "beta",
   providerName: "GitHub Releases (Beta)",
-  timeoutMs: 15000,
+  timeoutMs: 120000,
 };

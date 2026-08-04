@@ -82,9 +82,6 @@ class UpdateService {
 
     try {
       const update = await check({
-        headers: {
-          "X-DropFlow-Channel": UPDATER_CONFIG.channel,
-        },
         timeout: UPDATER_CONFIG.timeoutMs,
       });
 
@@ -117,22 +114,46 @@ class UpdateService {
         });
       }
     } catch (error) {
-      const errName = error instanceof Error ? error.name : "UnknownError";
-      const errMessage = error instanceof Error ? error.message : String(error);
-      const errStack = error instanceof Error ? error.stack : undefined;
+      console.dir(error, { depth: null });
 
-      console.error("[UpdateService] Check for updates failed with error object:", error);
-      console.error("[UpdateService] Error.name:", errName);
-      console.error("[UpdateService] Error.message:", errMessage);
-      console.error("[UpdateService] Error.stack:", errStack);
+      const extractFullErrorChain = (err: unknown): string => {
+        if (!err) return "Unknown error (null/undefined)";
 
-      const debugErrorMessage = error instanceof Error
-        ? `${errName}: ${errMessage}${errStack ? `\nStack:\n${errStack}` : ""}`
-        : String(error);
+        const parts: string[] = [];
+        let current: any = err;
+        let level = 0;
+        const visited = new Set();
+
+        while (current && level < 15 && !visited.has(current)) {
+          visited.add(current);
+          const prefix = level === 0 ? "" : `Caused by [${level}]: `;
+
+          if (current instanceof Error) {
+            parts.push(`${prefix}${current.name}: ${current.message}`);
+            if (current.stack && level === 0) {
+              parts.push(`Stack:\n${current.stack}`);
+            }
+            current = (current as any).cause;
+          } else if (typeof current === "object") {
+            const str = current.message || current.error || current.details || JSON.stringify(current, null, 2);
+            parts.push(`${prefix}${str}`);
+            current = current.cause || current.reason || current.source;
+          } else {
+            parts.push(`${prefix}${String(current)}`);
+            break;
+          }
+          level++;
+        }
+
+        return parts.join("\n\n");
+      };
+
+      const fullDiagnosticError = extractFullErrorChain(error);
+      console.error("[UpdateService] Full error chain:\n", fullDiagnosticError);
 
       this.setState({
         status: "error",
-        error: debugErrorMessage,
+        error: fullDiagnosticError,
         lastCheckedAt: Date.now(),
       });
     }
