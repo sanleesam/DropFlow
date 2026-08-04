@@ -73,7 +73,7 @@ fun HomeScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Local Device Status Card
+        // Local Device Status Card (Shows "Discoverable" with green status indicator)
         item {
             GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
@@ -127,10 +127,9 @@ fun HomeScreen(
                                 .size(8.dp)
                                 .clip(CircleShape)
                                 .background(StatusOnline)
-                                .alpha(if (uiState.isSearching) alphaAnim else 1.0f)
                         )
                         Text(
-                            text = if (uiState.isSearching) "Scanning..." else "Discoverable",
+                            text = "Discoverable",
                             color = StatusOnline,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
@@ -140,28 +139,42 @@ fun HomeScreen(
             }
         }
 
-        // Section Title: Nearby Devices
+        // Section Title: Nearby Devices (Shows scanning indicator ONLY for Nearby Devices)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Nearby Devices",
+                        color = TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (uiState.isSearching) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(BlueAccentPrimary)
+                                .alpha(alphaAnim)
+                        )
+                    }
+                }
                 Text(
-                    text = "Nearby Devices",
-                    color = TextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "${uiState.discoveredDevices.size} active",
+                    text = if (uiState.isSearching && uiState.discoveredDevices.isEmpty()) "Scanning network..." else "${uiState.discoveredDevices.size} active",
                     color = TextSecondary,
                     fontSize = 12.sp
                 )
             }
         }
 
-        // Real Network Discovery State with AnimatedVisibility
+        // Real Network Discovery State
         if (uiState.discoveredDevices.isEmpty()) {
             item {
                 AnimatedVisibility(

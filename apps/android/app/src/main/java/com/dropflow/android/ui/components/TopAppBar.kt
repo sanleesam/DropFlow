@@ -1,11 +1,8 @@
 package com.dropflow.android.ui.components
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -26,7 +23,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dropflow.android.R
 import com.dropflow.android.ui.theme.BackgroundDark
-import com.dropflow.android.ui.theme.StatusOnline
 import com.dropflow.android.ui.theme.TextPrimary
 import com.dropflow.android.ui.theme.TextSecondary
 
@@ -35,7 +31,6 @@ import com.dropflow.android.ui.theme.TextSecondary
 fun TopAppBar(
     title: String,
     modifier: Modifier = Modifier,
-    isDiscoverable: Boolean = true,
     onRefresh: (() -> Unit)? = null
 ) {
     CenterAlignedTopAppBar(
@@ -59,15 +54,6 @@ fun TopAppBar(
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
-
-                if (isDiscoverable) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(StatusOnline)
-                    )
-                }
             }
         },
         actions = {
