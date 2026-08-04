@@ -86,6 +86,7 @@ pub fn run() {
             app.manage(transfer_manager::TransferState {
                 receiver: Mutex::new(Some(receiver)),
                 active_cancellations: Mutex::new(std::collections::HashMap::new()),
+                pending_authorizations: Mutex::new(std::collections::HashMap::new()),
             });
 
             Ok(())
@@ -102,6 +103,7 @@ pub fn run() {
             transfer_manager::engine::get_receive_dir,
             transfer_manager::engine::get_receiver_port,
             transfer_manager::engine::open_received_file,
+            transfer_manager::engine::respond_transfer_request,
             state_manager::get_app_state,
             state_manager::save_settings,
             state_manager::save_history,

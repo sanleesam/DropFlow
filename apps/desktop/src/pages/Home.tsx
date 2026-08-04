@@ -8,6 +8,7 @@ import { useToast } from "../components/ToastProvider";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { IncomingTransferModal, IncomingTransferRequestData } from "../components/IncomingTransferModal";
 
 import {
   createInitialSessionStore,
@@ -170,14 +171,26 @@ export const Home: React.FC<HomeProps> = () => {
     }
   }, [sessionStore.recentTransfers]);
 
+  const [incomingRequest, setIncomingRequest] = useState<IncomingTransferRequestData | null>(null);
+
   // Long-lived central IPC event listeners registered once on mount
   useEffect(() => {
     let unlistenProgress: (() => void) | undefined;
     let unlistenCompleted: (() => void) | undefined;
     let unlistenFailed: (() => void) | undefined;
+    let unlistenRequest: (() => void) | undefined;
+    let unlistenDismiss: (() => void) | undefined;
 
     const setupCentralListeners = async () => {
       try {
+        unlistenRequest = await listen<IncomingTransferRequestData>("incoming-transfer-request", (event) => {
+          setIncomingRequest(event.payload);
+        });
+
+        unlistenDismiss = await listen<string>("incoming-transfer-dismiss", (event) => {
+          setIncomingRequest((prev) => (prev?.sessionId === event.payload ? null : prev));
+        });
+
         unlistenProgress = await listen<any>("transfer-progress", (event) => {
           setSessionStore((prev) => applyProgressEvent(prev, event.payload));
         });
@@ -225,11 +238,13 @@ export const Home: React.FC<HomeProps> = () => {
     setupCentralListeners();
 
     return () => {
+      if (unlistenRequest) unlistenRequest();
+      if (unlistenDismiss) unlistenDismiss();
       if (unlistenProgress) unlistenProgress();
       if (unlistenCompleted) unlistenCompleted();
       if (unlistenFailed) unlistenFailed();
     };
-  }, [addToast]);
+  }, [addToast, settings.autoOpenCompleted]);
 
   // Subscribe before browsing, then hydrate from the backend source of truth.
   useEffect(() => {
@@ -539,6 +554,14 @@ export const Home: React.FC<HomeProps> = () => {
 
       {/* ── Settings Modal ── */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+
+      {/* ── Incoming Transfer Authorization Dialog ── */}
+      {incomingRequest && (
+        <IncomingTransferModal
+          request={incomingRequest}
+          onClose={() => setIncomingRequest(null)}
+        />
+      )}
     </div>
   );
 };

@@ -129,7 +129,11 @@ pub fn send_files_over_tcp(
         .map_err(|e| format!("Failed to read peer acceptance response header: {e}"))?;
 
     if resp_tag != FrameTag::TransferAccept {
-        let err_msg = format!("Peer rejected transfer with frame tag {:?}", resp_tag);
+        let err_msg = if resp_tag == FrameTag::TransferReject {
+            "Transfer declined by recipient".to_string()
+        } else {
+            format!("Peer rejected transfer with frame tag {:?}", resp_tag)
+        };
         let _ = app.emit(
             "transfer-failed",
             TransferFailedPayload {

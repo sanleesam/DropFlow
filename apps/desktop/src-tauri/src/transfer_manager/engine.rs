@@ -7,9 +7,16 @@ use super::receiver::TransferReceiver;
 use super::security::get_default_receive_dir;
 use super::sender::send_files_over_tcp;
 
+pub struct AuthorizationResponse {
+    pub accept: bool,
+    pub trust_device: bool,
+}
+
 pub struct TransferState {
     pub receiver: Mutex<Option<TransferReceiver>>,
     pub active_cancellations: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    pub pending_authorizations:
+        Mutex<HashMap<String, tokio::sync::oneshot::Sender<AuthorizationResponse>>>,
 }
 
 impl Default for TransferState {
@@ -17,7 +24,30 @@ impl Default for TransferState {
         Self {
             receiver: Mutex::new(None),
             active_cancellations: Mutex::new(HashMap::new()),
+            pending_authorizations: Mutex::new(HashMap::new()),
         }
+    }
+}
+
+#[tauri::command]
+pub fn respond_transfer_request(
+    state: State<'_, TransferState>,
+    session_id: String,
+    accept: bool,
+    trust_device: bool,
+) -> Result<(), String> {
+    let mut pending = state
+        .pending_authorizations
+        .lock()
+        .map_err(|e| e.to_string())?;
+    if let Some(sender) = pending.remove(&session_id) {
+        let _ = sender.send(AuthorizationResponse {
+            accept,
+            trust_device,
+        });
+        Ok(())
+    } else {
+        Err(format!("No pending transfer authorization request for session {session_id}"))
     }
 }
 

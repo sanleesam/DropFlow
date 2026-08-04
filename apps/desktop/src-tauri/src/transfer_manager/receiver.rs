@@ -23,6 +23,17 @@ use super::security::{
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct IncomingTransferRequestPayload {
+    pub session_id: String,
+    pub sender_id: String,
+    pub sender_name: String,
+    pub total_files: u32,
+    pub total_size_bytes: u64,
+    pub files: Vec<FileMetadata>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TransferProgressPayload {
     pub session_id: String,
     pub current_file_index: u32,
@@ -171,7 +182,96 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
         session_id: metadata.session_id.clone(),
     };
 
-    // 2. Accept transfer
+    // 2. Check authorization settings & trusted devices
+    let (require_confirmation, auto_accept_trusted, is_trusted) = {
+        if let Some(container) = app.try_state::<crate::state_manager::AppStateContainer>() {
+            if let Ok(state) = container.state.lock() {
+                let req = state.settings.require_confirmation;
+                let auto_t = state.settings.auto_accept_trusted_devices;
+                let trusted = state.trusted_devices.iter().any(|d| {
+                    (!d.device_id.is_empty() && d.device_id == metadata.sender_id)
+                        || (!d.device_name.is_empty()
+                            && d.device_name.to_lowercase() == metadata.sender_name.to_lowercase())
+                });
+                (req, auto_t, trusted)
+            } else {
+                (true, true, false)
+            }
+        } else {
+            (true, true, false)
+        }
+    };
+
+    let should_auto_accept = !require_confirmation || (is_trusted && auto_accept_trusted);
+
+    if !should_auto_accept {
+        let (tx, rx) = tokio::sync::oneshot::channel::<super::engine::AuthorizationResponse>();
+
+        if let Some(state) = app.try_state::<crate::transfer_manager::TransferState>() {
+            if let Ok(mut pending) = state.pending_authorizations.lock() {
+                pending.insert(metadata.session_id.clone(), tx);
+            }
+        }
+
+        let _ = app.emit(
+            "incoming-transfer-request",
+            IncomingTransferRequestPayload {
+                session_id: metadata.session_id.clone(),
+                sender_id: metadata.sender_id.clone(),
+                sender_name: metadata.sender_name.clone(),
+                total_files: metadata.total_files,
+                total_size_bytes: metadata.total_size_bytes,
+                files: metadata.files.clone(),
+            },
+        );
+
+        let auth_response = tauri::async_runtime::block_on(async {
+            match tokio::time::timeout(Duration::from_secs(60), rx).await {
+                Ok(Ok(resp)) => resp,
+                _ => super::engine::AuthorizationResponse {
+                    accept: false,
+                    trust_device: false,
+                },
+            }
+        });
+
+        if let Some(state) = app.try_state::<crate::transfer_manager::TransferState>() {
+            if let Ok(mut pending) = state.pending_authorizations.lock() {
+                pending.remove(&metadata.session_id);
+            }
+        }
+
+        let _ = app.emit("incoming-transfer-dismiss", &metadata.session_id);
+
+        if !auth_response.accept {
+            println!(
+                "[Receiver] REJECTED transfer request for session {}",
+                metadata.session_id
+            );
+            write_response_frame(stream, FrameTag::TransferReject, "REJECTED")?;
+            return Err("Transfer declined by recipient".to_string());
+        }
+
+        if auth_response.trust_device {
+            if let Some(container) = app.try_state::<crate::state_manager::AppStateContainer>() {
+                let trusted_entry = crate::state_manager::TrustedDeviceSchema {
+                    device_id: metadata.sender_id.clone(),
+                    device_name: metadata.sender_name.clone(),
+                    first_seen: "Recently".to_string(),
+                    last_seen: "Just now".to_string(),
+                    public_key: None,
+                    platform: "Desktop/Mobile".to_string(),
+                };
+                let _ = crate::state_manager::add_trusted_device(
+                    app.clone(),
+                    container,
+                    trusted_entry,
+                );
+            }
+        }
+    }
+
+    // 3. Accept transfer
     write_response_frame(stream, FrameTag::TransferAccept, "ACCEPTED")?;
     println!("[Receiver] ACCEPT_SENT");
 
