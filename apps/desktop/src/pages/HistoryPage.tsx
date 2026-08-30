@@ -134,17 +134,32 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers }) => 
           )}
         </div>
 
-        {/* Filter Tabs */}
-        <div className="flex items-center gap-1 bg-neutral-950/60 p-1 rounded-xl border border-white/[0.07] select-none shrink-0">
+        {/* Filter Tabs with sliding pill animation */}
+        <div className="relative inline-flex items-center bg-neutral-950/60 p-1 rounded-xl border border-white/[0.07] select-none shrink-0">
+          {/* Sliding active pill indicator */}
+          <div
+            className="absolute top-1 bottom-1 left-1 w-[calc(25%-2px)] rounded-lg bg-neutral-800 border border-white/[0.08] shadow-sm transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]"
+            style={{
+              transform:
+                activeTab === "all"
+                  ? "translateX(0%)"
+                  : activeTab === "send"
+                  ? "translateX(100%)"
+                  : activeTab === "receive"
+                  ? "translateX(200%)"
+                  : "translateX(300%)",
+            }}
+          />
           {(["all", "send", "receive", "failed"] as FilterTab[]).map((tab) => (
             <button
               key={tab}
               type="button"
               onClick={() => setActiveTab(tab)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all duration-150 ${activeTab === tab
-                  ? "bg-neutral-800 text-white shadow-sm border border-white/[0.08]"
-                  : "text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.02]"
-                }`}
+              className={`relative z-10 w-20 py-1.5 text-center text-xs font-medium capitalize transition-colors duration-150 ${
+                activeTab === tab
+                  ? "text-white font-semibold"
+                  : "text-neutral-400 hover:text-neutral-200"
+              }`}
             >
               {tab === "all" ? "All" : tab === "send" ? "Sent" : tab === "receive" ? "Received" : "Failed"}
             </button>
