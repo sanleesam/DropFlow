@@ -18,31 +18,46 @@ No unnecessary setup.
 
 ## Current Status
 
-🚧 Active Development
+🚧 Beta
 
-The desktop application is currently approaching its first beta release.
+Desktop and Android are released **independently**, each with its own beta
+numbering (desktop continues its `0.1.0-beta.N` line; Android starts a fresh
+public beta cycle at `0.1.0-beta.1`). Both are part of DropFlow v0.1.0.
+Current releases:
+
+- **Desktop**: `0.1.0-beta.15` (Windows, macOS)
+- **Android**: `0.1.0-beta.1`
+
+See [CHANGELOG.md](CHANGELOG.md) and [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
 ### Completed
 
 - ✅ Device discovery (mDNS)
-- ✅ Custom TCP transfer engine
+- ✅ Custom TCP transfer engine (DFP/1)
 - ✅ Transfer history
 - ✅ Persistent application state
 - ✅ Native desktop interface
 - ✅ Smooth view transitions
 - ✅ Resumable file transfers
 - ✅ Sleep prevention during active transfers
+- ✅ Android app with discovery, send and receive
+- ✅ Built-in updater
 
-### Currently Working On
+### Troubleshooting discovery
 
-- 🔄 Built-in updater
-- 🔄 Beta release pipeline
+Discovery uses mDNS on UDP port 5353. If a device never appears:
+
+1. Make sure DropFlow is running on every device and all devices are on the
+   same Wi-Fi network (guest networks and AP isolation block multicast).
+2. Allow DropFlow through the OS firewall — macOS: System Settings → Network →
+   Firewall; Windows: allow the app on private networks when prompted.
+3. Desktop writes a detailed discovery log to `<app data>/logs/dropflow.log`.
 
 ### Planned
 
 - ⏳ Reliability & stress testing
-- ⏳ Desktop packaging
-- ⏳ Android application
+- ⏳ Desktop packaging polish
+- ⏳ Notifications on Android
 
 ---
 
@@ -55,7 +70,7 @@ The desktop application is currently approaching its first beta release.
 
 ### Mobile
 
-- 🚧 Android (In Development)
+- ✅ Android (Beta)
 
 ---
 

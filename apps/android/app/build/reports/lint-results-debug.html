@@ -177,15 +177,16 @@ document.getElementById(id).style.display = 'none';
 <div class="mdl-layout mdl-js-layout mdl-layout--fixed-header">
   <header class="mdl-layout__header">
     <div class="mdl-layout__header-row">
-      <span class="mdl-layout-title">Lint Report: 31 warnings</span>
+      <span class="mdl-layout-title">Lint Report: 35 warnings</span>
       <div class="mdl-layout-spacer"></div>
-      <nav class="mdl-navigation mdl-layout--large-screen-only">Check performed at Wed Aug 05 01:43:13 IST 2026 by AGP (8.5.2)</nav>
+      <nav class="mdl-navigation mdl-layout--large-screen-only">Check performed at Mon Aug 10 08:52:55 IST 2026 by AGP (8.5.2)</nav>
     </div>
   </header>
   <div class="mdl-layout__drawer">
     <span class="mdl-layout-title">Issue Types</span>
     <nav class="mdl-navigation">
       <a class="mdl-navigation__link" href="#overview"><i class="material-icons">dashboard</i>Overview</a>
+      <a class="mdl-navigation__link" href="#DefaultLocale"><i class="material-icons warning-icon">warning</i>Implied default locale in case conversion (4)</a>
       <a class="mdl-navigation__link" href="#RedundantLabel"><i class="material-icons warning-icon">warning</i>Redundant label on activity (1)</a>
       <a class="mdl-navigation__link" href="#AndroidGradlePluginVersion"><i class="material-icons warning-icon">warning</i>Obsolete Android Gradle Plugin Version (3)</a>
       <a class="mdl-navigation__link" href="#GradleDependency"><i class="material-icons warning-icon">warning</i>Obsolete Gradle Dependency (21)</a>
@@ -207,6 +208,9 @@ document.getElementById(id).style.display = 'none';
 <table class="overview">
 <tr><td class="countColumn"></td><td class="categoryColumn"><a href="#Correctness">Correctness</a>
 </td></tr>
+<tr>
+<td class="countColumn">4</td><td class="issueColumn"><i class="material-icons warning-icon">warning</i>
+<a href="#DefaultLocale">DefaultLocale</a>: Implied default locale in case conversion</td></tr>
 <tr>
 <td class="countColumn">1</td><td class="issueColumn"><i class="material-icons warning-icon">warning</i>
 <a href="#RedundantLabel">RedundantLabel</a>: Redundant label on activity</td></tr>
@@ -244,7 +248,82 @@ Dismiss</button>            </div>
             </div>
           </section>
 <a name="Correctness"></a>
-<a name="RedundantLabel"></a>
+<a name="DefaultLocale"></a>
+<section class="section--center mdl-grid mdl-grid--no-spacing mdl-shadow--2dp" id="DefaultLocaleCard" style="display: block;">
+            <div class="mdl-card mdl-cell mdl-cell--12-col">
+  <div class="mdl-card__title">
+    <h2 class="mdl-card__title-text">Implied default locale in case conversion</h2>
+  </div>
+              <div class="mdl-card__supporting-text">
+<div class="issue">
+<div class="warningslist">
+<span class="location"><a href="../../src/main/java/com/dropflow/android/ui/home/HomeScreen.kt">../../src/main/java/com/dropflow/android/ui/home/HomeScreen.kt</a>:172</span>: <span class="message">Implicitly using the default locale is a common source of bugs: Use <code>String.format(Locale, ...)</code> instead</span><br /><pre class="errorlines">
+<span class="lineno"> 169 </span>        verticalAlignment = Alignment.CenterVertically
+<span class="lineno"> 170 </span>    ) {
+<span class="lineno"> 171 </span>        Text(
+<span class="caretline"><span class="lineno"> 172 </span>            text = <span class="string">"${</span><span class="warning">String.format(<span class="string">"%.1f"</span>, activeProgress.percentage)</span><span class="string">}%"</span>,&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 173 </span>            color = TextPrimary,
+<span class="lineno"> 174 </span>            fontSize = <span class="number">13.</span>sp,
+<span class="lineno"> 175 </span>            fontWeight = FontWeight.Bold
+</pre>
+
+<span class="location"><a href="../../src/main/java/com/dropflow/android/ui/home/HomeScreen.kt">../../src/main/java/com/dropflow/android/ui/home/HomeScreen.kt</a>:372</span>: <span class="message">Implicitly using the default locale is a common source of bugs: Use <code>String.format(Locale, ...)</code> instead</span><br /><pre class="errorlines">
+<span class="lineno"> 369 </span>    <span class="keyword">val</span> k = <span class="number">1024.0</span>
+<span class="lineno"> 370 </span>    <span class="keyword">val</span> sizes = arrayOf(<span class="string">"B"</span>, <span class="string">"KB"</span>, <span class="string">"MB"</span>, <span class="string">"GB"</span>, <span class="string">"TB"</span>)
+<span class="lineno"> 371 </span>    <span class="keyword">val</span> i = (Math.log(bytes.toDouble()) / Math.log(k)).toInt()
+<span class="caretline"><span class="lineno"> 372 </span>    <span class="keyword">return</span> <span class="warning">String.format(<span class="string">"%.1f %s"</span>, bytes / Math.pow(k, i.toDouble()), sizes[i])</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 373 </span>}
+<span class="lineno"> 374 </span>
+<span class="lineno"> 375 </span>private <span class="keyword">fun</span> formatSpeed(bytesPerSec: Long): String {
+</pre>
+
+<span class="location"><a href="../../src/main/java/com/dropflow/android/ui/home/HomeScreen.kt">../../src/main/java/com/dropflow/android/ui/home/HomeScreen.kt</a>:380</span>: <span class="message">Implicitly using the default locale is a common source of bugs: Use <code>String.format(Locale, ...)</code> instead</span><br /><pre class="errorlines">
+<span class="lineno"> 377 </span>    <span class="keyword">val</span> k = <span class="number">1024.0</span>
+<span class="lineno"> 378 </span>    <span class="keyword">val</span> sizes = arrayOf(<span class="string">"B/s"</span>, <span class="string">"KB/s"</span>, <span class="string">"MB/s"</span>, <span class="string">"GB/s"</span>)
+<span class="lineno"> 379 </span>    <span class="keyword">val</span> i = (Math.log(bytesPerSec.toDouble()) / Math.log(k)).toInt()
+<span class="caretline"><span class="lineno"> 380 </span>    <span class="keyword">return</span> <span class="warning">String.format(<span class="string">"%.1f %s"</span>, bytesPerSec / Math.pow(k, i.toDouble()), sizes[i])</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 381 </span>}
+</pre>
+
+<span class="location"><a href="../../src/main/java/com/dropflow/android/ui/components/IncomingTransferBottomSheet.kt">../../src/main/java/com/dropflow/android/ui/components/IncomingTransferBottomSheet.kt</a>:242</span>: <span class="message">Implicitly using the default locale is a common source of bugs: Use <code>String.format(Locale, ...)</code> instead</span><br /><pre class="errorlines">
+<span class="lineno"> 239 </span>    <span class="keyword">val</span> k = <span class="number">1024.0</span>
+<span class="lineno"> 240 </span>    <span class="keyword">val</span> sizes = arrayOf(<span class="string">"B"</span>, <span class="string">"KB"</span>, <span class="string">"MB"</span>, <span class="string">"GB"</span>, <span class="string">"TB"</span>)
+<span class="lineno"> 241 </span>    <span class="keyword">val</span> i = (Math.log(bytes.toDouble()) / Math.log(k)).toInt()
+<span class="caretline"><span class="lineno"> 242 </span>    <span class="keyword">return</span> <span class="warning">String.format(<span class="string">"%.1f %s"</span>, bytes / Math.pow(k, i.toDouble()), sizes[i])</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+<span class="lineno"> 243 </span>}
+</pre>
+
+</div>
+<div class="metadata"><div class="explanation" id="explanationDefaultLocale" style="display: none;">
+Calling <code>String#toLowerCase()</code> or <code>#toUpperCase()</code> <b>without specifying an explicit locale</b> is a common source of bugs. The reason for that is that those methods will use the current locale on the user's device, and even though the code appears to work correctly when you are developing the app, it will fail in some locales. For example, in the Turkish locale, the uppercase replacement for <code>i</code> is <b>not</b> <code>I</code>.<br/>
+<br/>
+If you want the methods to just perform ASCII replacement, for example to convert an enum name, call <code>String#toUpperCase(Locale.ROOT)</code> instead. If you really want to use the current locale, call <code>String#toUpperCase(Locale.getDefault())</code> instead.<br/><div class="moreinfo">More info: <a href="https://developer.android.com/reference/java/util/Locale.html#default_locale">https://developer.android.com/reference/java/util/Locale.html#default_locale</a>
+</div>Note: This issue has an associated quickfix operation in Android Studio and IntelliJ IDEA.<br>
+To suppress this error, use the issue id "DefaultLocale" as explained in the <a href="#SuppressInfo">Suppressing Warnings and Errors</a> section.<br/>
+<br/></div>
+</div>
+</div>
+<div class="chips">
+<span class="mdl-chip">
+    <span class="mdl-chip__text">DefaultLocale</span>
+</span>
+<span class="mdl-chip">
+    <span class="mdl-chip__text">Correctness</span>
+</span>
+<span class="mdl-chip">
+    <span class="mdl-chip__text">Warning</span>
+</span>
+<span class="mdl-chip">
+    <span class="mdl-chip__text">Priority 6/10</span>
+</span>
+</div>
+              </div>
+              <div class="mdl-card__actions mdl-card--border">
+<button class="mdl-button mdl-js-button mdl-js-ripple-effect" id="explanationDefaultLocaleLink" onclick="reveal('explanationDefaultLocale');">
+Explain</button><button class="mdl-button mdl-js-button mdl-js-ripple-effect" id="DefaultLocaleCardLink" onclick="hideid('DefaultLocaleCard');">
+Dismiss</button>            </div>
+            </div>
+          </section><a name="RedundantLabel"></a>
 <section class="section--center mdl-grid mdl-grid--no-spacing mdl-shadow--2dp" id="RedundantLabelCard" style="display: block;">
             <div class="mdl-card mdl-cell mdl-cell--12-col">
   <div class="mdl-card__title">

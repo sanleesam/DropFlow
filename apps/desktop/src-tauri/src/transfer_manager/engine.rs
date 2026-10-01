@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use log::info;
 use tauri::{AppHandle, State};
 
 use super::receiver::TransferReceiver;
@@ -111,7 +112,7 @@ pub fn cancel_transfer(state: State<'_, TransferState>, session_id: String) -> R
         .map_err(|e| e.to_string())?;
     if let Some(flag) = cancellations.get(&session_id) {
         flag.store(true, Ordering::Relaxed);
-        println!("[Engine] Cancel requested for session {session_id}");
+        info!("[Engine] Cancel requested for session {session_id}");
         Ok(())
     } else {
         // If exact session_id is not mapped, set all active cancellations to true

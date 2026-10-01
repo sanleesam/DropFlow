@@ -1,3 +1,31 @@
+/Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/java/com/dropflow/android/ui/home/HomeScreen.kt:172: Warning: Implicitly using the default locale is a common source of bugs: Use String.format(Locale, ...) instead [DefaultLocale]
+                                text = "${String.format("%.1f", activeProgress.percentage)}%",
+                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/java/com/dropflow/android/ui/home/HomeScreen.kt:372: Warning: Implicitly using the default locale is a common source of bugs: Use String.format(Locale, ...) instead [DefaultLocale]
+    return String.format("%.1f %s", bytes / Math.pow(k, i.toDouble()), sizes[i])
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/java/com/dropflow/android/ui/home/HomeScreen.kt:380: Warning: Implicitly using the default locale is a common source of bugs: Use String.format(Locale, ...) instead [DefaultLocale]
+    return String.format("%.1f %s", bytesPerSec / Math.pow(k, i.toDouble()), sizes[i])
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/java/com/dropflow/android/ui/components/IncomingTransferBottomSheet.kt:242: Warning: Implicitly using the default locale is a common source of bugs: Use String.format(Locale, ...) instead [DefaultLocale]
+    return String.format("%.1f %s", bytes / Math.pow(k, i.toDouble()), sizes[i])
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "DefaultLocale":
+   Calling String#toLowerCase() or #toUpperCase() without specifying an
+   explicit locale is a common source of bugs. The reason for that is that
+   those methods will use the current locale on the user's device, and even
+   though the code appears to work correctly when you are developing the app,
+   it will fail in some locales. For example, in the Turkish locale, the
+   uppercase replacement for i is not I.
+
+   If you want the methods to just perform ASCII replacement, for example to
+   convert an enum name, call String#toUpperCase(Locale.ROOT) instead. If you
+   really want to use the current locale, call
+   String#toUpperCase(Locale.getDefault()) instead.
+
+   https://developer.android.com/reference/java/util/Locale.html#default_locale
+
 /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:23: Warning: Redundant label can be removed [RedundantLabel]
             android:label="@string/app_name"
             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -155,4 +183,4 @@ datastorePreferences = "1.1.1"
 
    https://developer.android.com/guide/practices/screens_support.html
 
-0 errors, 31 warnings
+0 errors, 35 warnings

@@ -3,6 +3,8 @@ use std::io::{Read, Write};
 
 pub const MAGIC_BYTES: &[u8; 4] = b"DFP1";
 pub const PROTOCOL_VERSION: u8 = 1;
+pub const HELLO_HANDSHAKE: &str = "HELLO DFP/1";
+pub const HELLO_ACK: &str = "HELLO_ACK DFP/1";
 
 pub const MAX_METADATA_SIZE: usize = 64 * 1024; // 64 KB
 pub const MAX_CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
@@ -20,12 +22,14 @@ pub enum FrameTag {
     Cancel = 0x07,
     TransferAck = 0x08,
     FileComplete = 0x09,
+    Heartbeat = 0x0A,
+    Error = 0x0B,
 }
 
 impl TryFrom<u8> for FrameTag {
     type Error = String;
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
+    fn try_from(value: u8) -> Result<Self, String> {
         match value {
             0x01 => Ok(FrameTag::TransferRequest),
             0x02 => Ok(FrameTag::TransferAccept),
@@ -36,6 +40,8 @@ impl TryFrom<u8> for FrameTag {
             0x07 => Ok(FrameTag::Cancel),
             0x08 => Ok(FrameTag::TransferAck),
             0x09 => Ok(FrameTag::FileComplete),
+            0x0A => Ok(FrameTag::Heartbeat),
+            0x0B => Ok(FrameTag::Error),
             _ => Err(format!("Unknown frame tag: 0x{value:02X}")),
         }
     }
@@ -138,7 +144,61 @@ pub fn read_frame_header<R: Read>(reader: &mut R) -> Result<(FrameTag, u32), Str
     let tag = FrameTag::try_from(header[5])?;
     let payload_len = u32::from_be_bytes([header[6], header[7], header[8], header[9]]);
 
+    let max_payload_len = if tag == FrameTag::DataChunk {
+        MAX_CHUNK_SIZE
+    } else {
+        MAX_METADATA_SIZE
+    };
+    if payload_len as usize > max_payload_len {
+        return Err(format!(
+            "{:?} payload size {payload_len} exceeds max {max_payload_len}",
+            tag
+        ));
+    }
+
     Ok((tag, payload_len))
+}
+
+pub fn perform_outgoing_handshake<S: Read + Write>(stream: &mut S) -> Result<(), String> {
+    write_heartbeat(stream, HELLO_HANDSHAKE)?;
+    let (tag, payload_len) = read_frame_header(stream)?;
+    if tag != FrameTag::Heartbeat {
+        return Err(format!("Expected handshake heartbeat, received {tag:?}"));
+    }
+    let mut payload = vec![0u8; payload_len as usize];
+    stream
+        .read_exact(&mut payload)
+        .map_err(|e| format!("Failed to read handshake acknowledgement: {e}"))?;
+    if payload.as_slice() != HELLO_ACK.as_bytes() {
+        return Err("Invalid handshake acknowledgement".to_string());
+    }
+    Ok(())
+}
+
+pub fn perform_incoming_handshake<S: Read + Write>(stream: &mut S) -> Result<(), String> {
+    let (tag, payload_len) = read_frame_header(stream)?;
+    if tag != FrameTag::Heartbeat {
+        return Err(format!("Expected handshake heartbeat, received {tag:?}"));
+    }
+    let mut payload = vec![0u8; payload_len as usize];
+    stream
+        .read_exact(&mut payload)
+        .map_err(|e| format!("Failed to read handshake: {e}"))?;
+    if payload.as_slice() != HELLO_HANDSHAKE.as_bytes() {
+        return Err("Invalid handshake message".to_string());
+    }
+    write_heartbeat(stream, HELLO_ACK)
+}
+
+fn write_heartbeat<W: Write>(writer: &mut W, message: &str) -> Result<(), String> {
+    let payload = message.as_bytes();
+    write_frame_header(writer, FrameTag::Heartbeat, payload.len() as u32)?;
+    writer
+        .write_all(payload)
+        .map_err(|e| format!("Failed to write heartbeat payload: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Failed to flush heartbeat: {e}"))
 }
 
 /// Sends a complete JSON `TransferRequest` frame.
@@ -460,6 +520,19 @@ mod tests {
         let mut cursor2 = std::io::Cursor::new(string_buf);
         let decoded_str = read_transfer_ack(&mut cursor2).unwrap();
         assert_eq!(decoded_str.resume_offset, 5242880);
+    }
+
+    #[test]
+    fn test_handshake_uses_heartbeat_frame() {
+        let mut buffer = Vec::new();
+        write_heartbeat(&mut buffer, HELLO_HANDSHAKE).unwrap();
+
+        let mut cursor = std::io::Cursor::new(buffer);
+        let (tag, payload_len) = read_frame_header(&mut cursor).unwrap();
+        assert_eq!(tag, FrameTag::Heartbeat);
+        let mut payload = vec![0u8; payload_len as usize];
+        cursor.read_exact(&mut payload).unwrap();
+        assert_eq!(payload, HELLO_HANDSHAKE.as_bytes());
     }
 
     #[test]

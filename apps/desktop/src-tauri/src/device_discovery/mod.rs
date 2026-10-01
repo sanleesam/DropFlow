@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
+use log::{debug, error, info, warn};
+use mdns_sd::{DaemonEvent, ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
@@ -11,6 +13,8 @@ use uuid::Uuid;
 const SERVICE_TYPE: &str = "_dropflow._tcp.local.";
 const PROTOCOL_VERSION: &str = "DFP/1";
 const MAX_DEVICE_NAME_BYTES: usize = 64;
+/// How long the browse loop waits between mDNS events before logging a heartbeat.
+const BROWSE_HEARTBEAT_SECS: u64 = 60;
 
 // ─── Data Types ──────────────────────────────────────────────────────────────
 
@@ -76,7 +80,7 @@ pub fn get_or_create_uuid(app: &AppHandle) -> String {
             return uuid.to_string();
         }
         if !trimmed.is_empty() {
-            println!("[Discovery] Ignoring invalid persisted device UUID");
+            debug!("[Discovery] Ignoring invalid persisted device UUID");
         }
     }
 
@@ -311,6 +315,8 @@ impl MdnsDiscoveryEngine {
     pub fn new(local_uuid: String) -> Result<Self, String> {
         let daemon =
             ServiceDaemon::new().map_err(|e| format!("Failed to create mDNS daemon: {e}"))?;
+        spawn_daemon_monitor(&daemon);
+        info!("[Discovery] mDNS daemon initialized (local UUID {local_uuid})");
         Ok(Self {
             daemon,
             active_registration: Mutex::new(None),
@@ -321,9 +327,153 @@ impl MdnsDiscoveryEngine {
     }
 }
 
+/// Logs daemon-level events (interface changes, socket errors, name conflicts).
+/// Without this, a dead multicast socket (e.g. OS firewall) is completely silent.
+fn spawn_daemon_monitor(daemon: &ServiceDaemon) {
+    let Ok(monitor) = daemon.monitor() else {
+        warn!("[Discovery] Could not attach daemon event monitor");
+        return;
+    };
+
+    std::thread::spawn(move || {
+        while let Ok(event) = monitor.recv() {
+            match event {
+                DaemonEvent::Error(err) => {
+                    error!("[Discovery] mDNS daemon error: {err}")
+                }
+                DaemonEvent::IpAdd(ip) => {
+                    info!("[Discovery] Network address available: {ip}")
+                }
+                DaemonEvent::IpDel(ip) => {
+                    info!("[Discovery] Network address removed: {ip}")
+                }
+                DaemonEvent::NameChange(change) => {
+                    warn!(
+                        "[Discovery] mDNS name conflict resolved: '{}' -> '{}'",
+                        change.original, change.new_name
+                    )
+                }
+                DaemonEvent::Announce(fullname, interface) => {
+                    debug!("[Discovery] Daemon announced {fullname} on {interface}")
+                }
+                DaemonEvent::Respond(fullname) => {
+                    debug!("[Discovery] Daemon answered query for {fullname}")
+                }
+                _ => {}
+            }
+        }
+        warn!("[Discovery] Daemon monitor channel closed");
+    });
+}
+
+/// Handles one mdns-sd browse event: validates peer metadata, updates the
+/// registry, and emits Tauri events for the frontend.
+fn handle_browse_event(
+    event: ServiceEvent,
+    local_uuid: &str,
+    peer_registry: &Arc<Mutex<PeerRegistry>>,
+    app: &AppHandle,
+) {
+    match event {
+        ServiceEvent::SearchStarted(service_type) => {
+            debug!("[Discovery] Search started: {service_type}");
+        }
+        ServiceEvent::ServiceFound(service_type, fullname) => {
+            debug!("[Discovery] Service found: {fullname} ({service_type})");
+        }
+        ServiceEvent::ServiceResolved(info) => {
+            let fullname = info.get_fullname().to_string();
+            let discovered_uuid = info.get_property_val_str("device_uuid");
+
+            if is_self_peer(discovered_uuid, local_uuid) {
+                debug!("[Discovery] Self device ignored: {fullname}");
+                return;
+            }
+
+            let device = match device_from_resolved_service(&info) {
+                Ok(device) => device,
+                Err(reason) => {
+                    debug!("[Discovery] Peer rejected: {fullname} ({reason})");
+                    return;
+                }
+            };
+
+            let update = match peer_registry.lock() {
+                Ok(mut registry) => registry.upsert(fullname.clone(), device),
+                Err(error) => {
+                    error!("[Discovery] Peer registry unavailable: {error}");
+                    return;
+                }
+            };
+
+            if let Some(replaced_peer_id) = update.replaced_peer_id {
+                info!(
+                    "[Discovery] Peer identity replaced for service {fullname}: {replaced_peer_id}"
+                );
+                emit_peer_lost(app, &replaced_peer_id);
+            }
+
+            match update.peer {
+                PeerUpsert::Added(device) => {
+                    info!(
+                        "[Discovery] Peer accepted: {} (UUID={}, addresses={})",
+                        device.name,
+                        device.id,
+                        device.addresses.len()
+                    );
+                    emit_peer_discovered(app, &device);
+                }
+                PeerUpsert::Updated(device) => {
+                    info!(
+                        "[Discovery] Peer re-resolved with changes: {} (UUID={})",
+                        device.name, device.id
+                    );
+                    emit_peer_discovered(app, &device);
+                }
+                PeerUpsert::Unchanged => {
+                    debug!("[Discovery] Peer re-resolved unchanged: {fullname}");
+                }
+            }
+        }
+        ServiceEvent::ServiceRemoved(_, fullname) => {
+            let removal = match peer_registry.lock() {
+                Ok(mut registry) => registry.remove_service(&fullname),
+                Err(error) => {
+                    error!("[Discovery] Peer registry unavailable: {error}");
+                    return;
+                }
+            };
+
+            match removal {
+                ServiceRemoval::Removed(peer_id) => {
+                    info!("[Discovery] Service removed: {fullname} -> peer {peer_id}");
+                    emit_peer_lost(app, &peer_id);
+                }
+                ServiceRemoval::StillMapped(peer_id) => {
+                    debug!(
+                        "[Discovery] Service removed but peer remains mapped: {fullname} -> {peer_id}"
+                    );
+                }
+                ServiceRemoval::MissingPeer(peer_id) => {
+                    debug!(
+                        "[Discovery] Removal mapping had no peer record: {fullname} -> {peer_id}"
+                    );
+                }
+                ServiceRemoval::UnknownService => {
+                    debug!("[Discovery] Unknown service removal ignored: {fullname}");
+                }
+            }
+        }
+        ServiceEvent::SearchStopped(service_type) => {
+            info!("[Discovery] Search stopped: {service_type}");
+        }
+        _ => {}
+    }
+}
+
 fn emit_peer_discovered(app: &AppHandle, device: &DiscoveredDevice) {
     if let Err(error) = app.emit("peer-discovered", device) {
-        println!(
+        error!(
             "[Discovery] Failed to emit peer-discovered for {}: {error}",
             device.id
         );
@@ -332,7 +482,7 @@ fn emit_peer_discovered(app: &AppHandle, device: &DiscoveredDevice) {
 
 fn emit_peer_lost(app: &AppHandle, peer_id: &str) {
     if let Err(error) = app.emit("peer-lost", peer_id) {
-        println!("[Discovery] Failed to emit peer-lost for {peer_id}: {error}");
+        error!("[Discovery] Failed to emit peer-lost for {peer_id}: {error}");
     }
 }
 
@@ -354,7 +504,7 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
                 self.daemon
                     .unregister(previous.get_fullname())
                     .map_err(|error| format!("Failed to unregister mDNS service: {error}"))?;
-                println!(
+                info!(
                     "[Advertiser] Unregister requested: {}",
                     previous.get_fullname()
                 );
@@ -377,6 +527,14 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
         properties.insert("device_uuid".to_string(), self.local_uuid.clone());
         properties.insert("device_type".to_string(), device_type.to_string());
         properties.insert("version".to_string(), PROTOCOL_VERSION.to_string());
+        // Parity with the Android advertisement so peers can render richer
+        // device info; unknown TXT keys are ignored by older peers.
+        properties.insert("platform".to_string(), "Desktop".to_string());
+        properties.insert("operating_system".to_string(), std::env::consts::OS.to_string());
+        properties.insert(
+            "application_version".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+        );
 
         let host_name = format!("{canonical_device_id}.local.");
         let service_info = ServiceInfo::new(
@@ -395,7 +553,7 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
                 self.daemon
                     .unregister(previous.get_fullname())
                     .map_err(|error| format!("Failed to unregister prior mDNS service: {error}"))?;
-                println!(
+                info!(
                     "[Advertiser] Unregister requested: {}",
                     previous.get_fullname()
                 );
@@ -406,8 +564,8 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
             .register(service_info.clone())
             .map_err(|error| format!("Failed to register mDNS service: {error}"))?;
 
-        println!(
-            "[Advertiser] Registered {} on port {} with automatic interface address management",
+        info!(
+            "[Advertiser] Registered {} on port {} (device_type={device_type}, name='{device_name}')",
             service_info.get_fullname(),
             port
         );
@@ -418,7 +576,7 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
     fn start_browsing(&self, app: AppHandle) -> Result<(), String> {
         let mut is_browsing = self.is_browsing.lock().map_err(|error| error.to_string())?;
         if *is_browsing {
-            println!("[Discovery] Browser already running");
+            debug!("[Discovery] Browser already running");
             return Ok(());
         }
         *is_browsing = true;
@@ -431,119 +589,55 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
         std::thread::spawn(move || loop {
             match daemon.browse(SERVICE_TYPE) {
                 Ok(receiver) => {
-                    println!("[Discovery] Browser started for {SERVICE_TYPE}");
+                    info!("[Discovery] Browse active for {SERVICE_TYPE}");
 
-                    while let Ok(event) = receiver.recv() {
-                        match event {
-                            ServiceEvent::SearchStarted(service_type) => {
-                                println!("[Discovery] Search started: {service_type}");
+                    // Timeout-based receive loop: mdns-sd keeps re-querying the
+                    // network, so a timeout only means "no peers answered yet".
+                    // The heartbeat proves the browse is alive and turns a silent
+                    // firewall block into a diagnosable, self-explanatory log.
+                    let mut idle_minutes: u32 = 0;
+                    loop {
+                        match receiver.recv_timeout(Duration::from_secs(BROWSE_HEARTBEAT_SECS)) {
+                            Ok(event) => {
+                                idle_minutes = 0;
+                                handle_browse_event(
+                                    event,
+                                    &local_uuid,
+                                    &peer_registry,
+                                    &app,
+                                );
                             }
-                            ServiceEvent::ServiceFound(service_type, fullname) => {
-                                println!("[Discovery] Service found: {fullname} ({service_type})");
-                            }
-                            ServiceEvent::ServiceResolved(info) => {
-                                let fullname = info.get_fullname().to_string();
-                                let discovered_uuid = info.get_property_val_str("device_uuid");
-
-                                if is_self_peer(discovered_uuid, &local_uuid) {
-                                    println!("[Discovery] Self device ignored: {fullname}");
-                                    continue;
-                                }
-
-                                let device = match device_from_resolved_service(&info) {
-                                    Ok(device) => device,
-                                    Err(reason) => {
-                                        println!(
-                                            "[Discovery] Peer rejected: {fullname} ({reason})"
-                                        );
-                                        continue;
-                                    }
-                                };
-
-                                let update = match peer_registry.lock() {
-                                    Ok(mut registry) => registry.upsert(fullname.clone(), device),
-                                    Err(error) => {
-                                        println!("[Discovery] Peer registry unavailable: {error}");
-                                        continue;
-                                    }
-                                };
-
-                                if let Some(replaced_peer_id) = update.replaced_peer_id {
-                                    println!(
-                                        "[Discovery] Peer identity replaced for service {fullname}: {replaced_peer_id}"
+                            Err(timeout_error) => match timeout_error {
+                                flume::RecvTimeoutError::Disconnected => {
+                                    warn!(
+                                        "[Discovery] Browse channel disconnected (daemon stopped or shut down); restarting browse"
                                     );
-                                    emit_peer_lost(&app, &replaced_peer_id);
+                                    break;
                                 }
-
-                                match update.peer {
-                                    PeerUpsert::Added(device) => {
-                                        println!(
-                                            "[Discovery] Peer accepted: {} (UUID={}, addresses={})",
-                                            device.name,
-                                            device.id,
-                                            device.addresses.len()
+                                flume::RecvTimeoutError::Timeout => {
+                                    idle_minutes += 1;
+                                    if idle_minutes == 1 || idle_minutes % 5 == 0 {
+                                        warn!(
+                                            "[Discovery] No mDNS responses for {} min. If other devices run DropFlow, check this machine's firewall allows DropFlow on UDP port 5353 (macOS: System Settings → Network → Firewall; also verify no VPN is routing multicast) and that all devices are on the same network",
+                                            idle_minutes
                                         );
-                                        emit_peer_discovered(&app, &device);
-                                    }
-                                    PeerUpsert::Updated(device) => {
-                                        println!(
-                                            "[Discovery] Peer re-resolved with changes: {} (UUID={})",
-                                            device.name, device.id
-                                        );
-                                        emit_peer_discovered(&app, &device);
-                                    }
-                                    PeerUpsert::Unchanged => {
-                                        println!(
-                                            "[Discovery] Peer re-resolved unchanged: {fullname}"
+                                    } else {
+                                        debug!(
+                                            "[Discovery] Browse idle for {} min",
+                                            idle_minutes
                                         );
                                     }
                                 }
-                            }
-                            ServiceEvent::ServiceRemoved(_, fullname) => {
-                                let removal = match peer_registry.lock() {
-                                    Ok(mut registry) => registry.remove_service(&fullname),
-                                    Err(error) => {
-                                        println!("[Discovery] Peer registry unavailable: {error}");
-                                        continue;
-                                    }
-                                };
-
-                                match removal {
-                                    ServiceRemoval::Removed(peer_id) => {
-                                        println!(
-                                            "[Discovery] Service removed: {fullname} -> peer {peer_id}"
-                                        );
-                                        emit_peer_lost(&app, &peer_id);
-                                    }
-                                    ServiceRemoval::StillMapped(peer_id) => {
-                                        println!(
-                                            "[Discovery] Service removed but peer remains mapped: {fullname} -> {peer_id}"
-                                        );
-                                    }
-                                    ServiceRemoval::MissingPeer(peer_id) => {
-                                        println!(
-                                            "[Discovery] Removal mapping had no peer record: {fullname} -> {peer_id}"
-                                        );
-                                    }
-                                    ServiceRemoval::UnknownService => {
-                                        println!("[Discovery] Unknown service removal ignored: {fullname}");
-                                    }
-                                }
-                            }
-                            ServiceEvent::SearchStopped(service_type) => {
-                                println!("[Discovery] Search stopped: {service_type}");
-                                break;
-                            }
-                            _ => {}
+                            },
                         }
                     }
                 }
                 Err(error) => {
-                    println!("[Discovery] Browse request failed: {error}");
+                    error!("[Discovery] Browse request failed: {error}");
                 }
             }
 
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(Duration::from_millis(500));
         });
 
         Ok(())

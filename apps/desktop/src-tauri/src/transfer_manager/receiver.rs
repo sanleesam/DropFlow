@@ -7,14 +7,15 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::protocol::{
-    read_file_complete, read_file_header, read_frame_header, read_transfer_request,
-    write_response_frame, write_transfer_ack, FileMetadata, FrameTag, TransferAckPayload,
-    DEFAULT_CHUNK_SIZE,
+    perform_incoming_handshake, read_file_complete, read_file_header, read_frame_header,
+    read_transfer_request, write_response_frame, write_transfer_ack, FileMetadata, FrameTag,
+    TransferAckPayload, DEFAULT_CHUNK_SIZE,
 };
 use super::security::{
     get_default_receive_dir, get_session_part_file_path, resolve_collision_path,
@@ -93,7 +94,7 @@ impl TransferReceiver {
         let running_flag = Arc::clone(&is_running);
 
         thread::spawn(move || {
-            println!("[Receiver] TCP receiver listening on port {bound_port}");
+            info!("[Receiver] TCP receiver listening on port {bound_port}");
             for stream_result in listener.incoming() {
                 if !running_flag.load(Ordering::Relaxed) {
                     break;
@@ -104,12 +105,12 @@ impl TransferReceiver {
                         let app = app_handle.clone();
                         thread::spawn(move || {
                             if let Err(err) = handle_incoming_connection(&app, &mut stream) {
-                                println!("[Receiver] Connection error: {err}");
+                                error!("[Receiver] Connection error: {err}");
                             }
                         });
                     }
                     Err(e) => {
-                        println!("[Receiver] Accept error: {e}");
+                        error!("[Receiver] Accept error: {e}");
                     }
                 }
             }
@@ -162,13 +163,15 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
         .map(|s| s.sleep_manager.acquire());
 
     stream
-        .set_read_timeout(Some(Duration::from_secs(30)))
+        .set_read_timeout(Some(Duration::from_secs(15)))
         .map_err(|e| format!("Failed to set socket read timeout: {e}"))?;
+
+    perform_incoming_handshake(stream)?;
+    info!("[Receiver] HANDSHAKE_COMPLETE");
 
     // 1. Read TransferRequest metadata frame
     let metadata = read_transfer_request(stream)?;
-    println!(
-        "[Receiver] REQUEST_RECEIVED from '{}' ({} files, {} bytes)",
+    info!("[Receiver] REQUEST_RECEIVED from '{}' ({} files, {} bytes)",
         metadata.sender_name, metadata.total_files, metadata.total_size_bytes
     );
 
@@ -246,8 +249,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
         let _ = app.emit("incoming-transfer-dismiss", &metadata.session_id);
 
         if !auth_response.accept {
-            println!(
-                "[Receiver] REJECTED transfer request for session {}",
+            info!("[Receiver] REJECTED transfer request for session {}",
                 metadata.session_id
             );
             write_response_frame(stream, FrameTag::TransferReject, "REJECTED")?;
@@ -269,18 +271,15 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
                     public_key: None,
                     platform: platform_name,
                 };
-                let _ = crate::state_manager::add_trusted_device(
-                    app.clone(),
-                    container,
-                    trusted_entry,
-                );
+                let _ =
+                    crate::state_manager::add_trusted_device(app.clone(), container, trusted_entry);
             }
         }
     }
 
     // 3. Accept transfer
     write_response_frame(stream, FrameTag::TransferAccept, "ACCEPTED")?;
-    println!("[Receiver] ACCEPT_SENT");
+    info!("[Receiver] ACCEPT_SENT");
 
     let receive_dir = get_default_receive_dir()?;
 
@@ -318,7 +317,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
 
     let mut received_files_meta: Vec<FileMetadata> = Vec::new();
 
-    println!("[Receiver] STREAMING {} files", metadata.total_files);
+    info!("[Receiver] STREAMING {} files", metadata.total_files);
     for _file_idx in 0..metadata.total_files {
         // Read FileHeader frame
         let file_header = match read_file_header(stream) {
@@ -364,8 +363,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
                 let len = meta.len();
                 if len > 0 && len < file_header.size_bytes {
                     resume_offset = len;
-                    println!(
-                        "[Receiver] RESUMING file '{}' from offset {}",
+                    info!("[Receiver] RESUMING file '{}' from offset {}",
                         file_header.relative_path, resume_offset
                     );
                 }
@@ -457,6 +455,15 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
                 return Err(format!("Expected DataChunk frame tag, received {:?}", tag));
             }
 
+            let remaining_bytes = file_header.size_bytes - file_bytes_received;
+            if payload_len == 0 || payload_len as u64 > remaining_bytes {
+                cleanup_files(&created_part_files);
+                return Err(format!(
+                    "Invalid DataChunk length {payload_len} for '{}'",
+                    file_header.relative_path
+                ));
+            }
+
             // Read payload length bytes
             let mut chunk_buf = vec![0u8; payload_len as usize];
             if let Err(e) = stream.read_exact(&mut chunk_buf) {
@@ -530,6 +537,16 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
             }
         };
 
+        if file_complete.file_index != file_header.file_index
+            || file_complete.bytes_written != file_bytes_received
+        {
+            cleanup_files(&created_part_files);
+            return Err(format!(
+                "Invalid FileComplete payload for '{}'",
+                file_header.relative_path
+            ));
+        }
+
         // Verify streaming SHA-256 checksum if provided by sender
         let rx_checksum = format!("{:x}", file_hasher.finalize());
         if !file_complete.sha256_checksum.is_empty() && rx_checksum != file_complete.sha256_checksum
@@ -558,17 +575,6 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
         });
     }
 
-    // All files received & checksums verified cleanly!
-    // Rename all .dropflow-part files to their final collision-resolved destination paths
-    for (part_path, final_path) in &final_dest_paths {
-        if let Err(e) = fs::rename(part_path, final_path) {
-            println!(
-                "[Receiver] Error renaming {:?} to {:?}: {e}",
-                part_path, final_path
-            );
-        }
-    }
-
     // 3. Receive TransferComplete frame
     let (comp_tag, comp_len) = match read_frame_header(stream) {
         Ok(res) => res,
@@ -593,7 +599,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
             return Err(format!("Failed reading TransferComplete payload: {e}"));
         }
     }
-    println!("[Receiver] FILE_COMPLETE");
+    info!("[Receiver] FILE_COMPLETE");
 
     // 4. Verify total session byte count match
     if total_received_bytes != metadata.total_size_bytes {
@@ -617,8 +623,20 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
         cleanup_files(&created_part_files);
         return Err(format!("Failed to send TransferAck: {e}"));
     }
-    println!("[Receiver] ACK_SENT");
-    println!("[Receiver] CONNECTION_CLOSED");
+    info!("[Receiver] ACK_SENT");
+    info!("[Receiver] CONNECTION_CLOSED");
+
+    // The whole session (all files, checksums, byte counts, completion ack) has
+    // verified cleanly — only now promote every .dropflow-part file to its final
+    // destination so a failed session never leaves partial files in Downloads.
+    for (part_path, final_path) in &final_dest_paths {
+        if let Err(e) = fs::rename(part_path, final_path) {
+            warn!(
+                "[Receiver] Error renaming {:?} to {:?}: {e}",
+                part_path, final_path
+            );
+        }
+    }
 
     crate::state_manager::remove_incomplete_session(app, &metadata.session_id);
 
@@ -651,6 +669,6 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
         },
     );
 
-    println!("[Receiver] Transfer completed successfully ({total_received_bytes} bytes written)");
+    info!("[Receiver] Transfer completed successfully ({total_received_bytes} bytes written)");
     Ok(())
 }

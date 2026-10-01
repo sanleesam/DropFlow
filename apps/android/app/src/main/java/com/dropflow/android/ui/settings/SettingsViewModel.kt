@@ -1,6 +1,9 @@
 package com.dropflow.android.ui.settings
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
 import com.dropflow.android.storage.UserPreferencesRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,5 +68,15 @@ class SettingsViewModel(
         viewModelScope.launch {
             userPreferencesRepository.updateAccentColor(color)
         }
+    }
+
+    companion object {
+        /** Factory so the instance survives configuration changes via ViewModelProvider. */
+        fun factory(userPreferencesRepository: UserPreferencesRepository): ViewModelProvider.Factory =
+            viewModelFactory {
+                initializer {
+                    SettingsViewModel(userPreferencesRepository)
+                }
+            }
     }
 }

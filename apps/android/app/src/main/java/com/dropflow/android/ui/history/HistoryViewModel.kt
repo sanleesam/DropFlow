@@ -1,16 +1,26 @@
 package com.dropflow.android.ui.history
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.dropflow.android.core.model.TransferItem
+import com.dropflow.android.core.network.transfer.TransferEngine
 import com.dropflow.android.core.network.transfer.TransferEngineListener
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class HistoryViewModel : ViewModel(), TransferEngineListener {
+class HistoryViewModel(
+    private val transferEngine: TransferEngine
+) : ViewModel(), TransferEngineListener {
 
     private val _uiState = MutableStateFlow(HistoryUiState())
     val uiState: StateFlow<HistoryUiState> = _uiState.asStateFlow()
+
+    init {
+        transferEngine.addListener(this)
+    }
 
     fun setFilterTab(tab: HistoryFilterTab) {
         val current = _uiState.value
@@ -40,27 +50,34 @@ class HistoryViewModel : ViewModel(), TransferEngineListener {
         }
     }
 
-    // --- TransferEngineListener Extension Hooks (Phase 3 Integration) ---
-
-    override fun onIncomingTransferRequested(transfer: TransferItem) {
-        // Will trigger transfer authorization dialog in Phase 3
-    }
-
-    override fun onTransferProgress(transferId: String, bytesTransferred: Long, totalBytes: Long) {
-        // Will update active transfer progress
-    }
-
     override fun onTransferCompleted(transfer: TransferItem) {
-        val currentList = _uiState.value.allHistoryItems.toMutableList()
-        currentList.add(0, transfer)
+        addHistoryItem(transfer)
+    }
+
+    override fun onTransferFailed(transfer: TransferItem) {
+        addHistoryItem(transfer)
+    }
+
+    override fun onCleared() {
+        transferEngine.removeListener(this)
+        super.onCleared()
+    }
+
+    private fun addHistoryItem(transfer: TransferItem) {
         val current = _uiState.value
+        val currentList = listOf(transfer) + current.allHistoryItems.filterNot { it.id == transfer.id }
         _uiState.value = current.copy(
             allHistoryItems = currentList,
             filteredItems = applyFilter(currentList, current.selectedFilterTab, current.searchQuery)
         )
     }
 
-    override fun onTransferFailed(transferId: String, error: String) {
-        // Handle failed transfer logging
+    companion object {
+        /** Factory so the instance survives configuration changes via ViewModelProvider. */
+        fun factory(transferEngine: TransferEngine): ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                HistoryViewModel(transferEngine)
+            }
+        }
     }
 }

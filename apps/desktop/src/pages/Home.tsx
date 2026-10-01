@@ -121,6 +121,7 @@ export const Home: React.FC<HomeProps> = () => {
   const wasSettingsOpenRef = useRef(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [localUuid, setLocalUuid] = useState<string>("");
+  const [deviceType, setDeviceType] = useState<string>("desktop");
   const discoveryEventRevision = useRef(0);
 
   // Restore focus to Settings button after modal is closed
@@ -136,6 +137,9 @@ export const Home: React.FC<HomeProps> = () => {
   // Retrieve persistent local UUID on mount
   useEffect(() => {
     invoke<string>("get_local_uuid").then(setLocalUuid).catch(console.error);
+    invoke<string>("get_system_device_type")
+      .then(setDeviceType)
+      .catch(() => setDeviceType("desktop"));
   }, []);
 
   const reconcileDevices = useCallback((nextDevices: Device[]) => {
@@ -343,7 +347,7 @@ export const Home: React.FC<HomeProps> = () => {
       invoke("update_advertisement", {
         deviceId: localUuid,
         deviceName: settings.deviceName,
-        deviceType: "laptop",
+        deviceType,
         port: 1, // Non-zero value instructing Rust to advertise bound receiver port
       }).catch(console.error);
     } else {
@@ -354,7 +358,7 @@ export const Home: React.FC<HomeProps> = () => {
         port: 0,
       }).catch(console.error);
     }
-  }, [settings.deviceName, settings.deviceVisibility, localUuid]);
+  }, [settings.deviceName, settings.deviceVisibility, localUuid, deviceType]);
 
   const handleSend = useCallback(
     async (selectedFiles: SelectedFilePayload[]) => {
@@ -450,7 +454,9 @@ export const Home: React.FC<HomeProps> = () => {
             <div className="py-2.5 text-left select-none">
               <p className="text-xs font-medium text-neutral-400">Looking for devices…</p>
               <p className="mt-0.5 text-[11px] text-neutral-500">
-                Make sure DropFlow is open on your other device.
+                Make sure DropFlow is open on your other device and both devices are
+                on the same network. If no device appears, allow DropFlow through
+                your firewall (it needs UDP port 5353 for discovery).
               </p>
             </div>
           )}

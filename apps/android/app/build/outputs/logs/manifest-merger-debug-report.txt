@@ -1,9 +1,9 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:2:1-34:12
-INJECTED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:2:1-34:12
-INJECTED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:2:1-34:12
-INJECTED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:2:1-34:12
+ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:2:1-39:12
+INJECTED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:2:1-39:12
+INJECTED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:2:1-39:12
+INJECTED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:2:1-39:12
 MERGED from [androidx.navigation:navigation-common:2.7.7] /Users/sanleesam/.gradle/caches/transforms-4/c92edafe2ffb5017fefa69200dc587f8/transformed/navigation-common-2.7.7/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.navigation:navigation-runtime:2.7.7] /Users/sanleesam/.gradle/caches/transforms-4/501b1eb176fb6224f96b93f16a09e6f9/transformed/navigation-runtime-2.7.7/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.navigation:navigation-common-ktx:2.7.7] /Users/sanleesam/.gradle/caches/transforms-4/0096a5c513ef245365c54e31af9f8ff7/transformed/navigation-common-ktx-2.7.7/AndroidManifest.xml:2:1-7:12
@@ -85,9 +85,15 @@ uses-permission#android.permission.POST_NOTIFICATIONS
 ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:9:5-77
 	android:name
 		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:9:22-74
+uses-permission#android.permission.WRITE_EXTERNAL_STORAGE
+ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:12:5-14:38
+	android:maxSdkVersion
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:14:9-35
+	android:name
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:13:9-65
 application
-ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:11:5-32:19
-INJECTED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:11:5-32:19
+ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:16:5-37:19
+INJECTED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:16:5-37:19
 MERGED from [androidx.emoji2:emoji2:1.3.0] /Users/sanleesam/.gradle/caches/transforms-4/74262a5be68b7602fd72eda193d8236e/transformed/emoji2-1.3.0/AndroidManifest.xml:23:5-33:19
 MERGED from [androidx.emoji2:emoji2:1.3.0] /Users/sanleesam/.gradle/caches/transforms-4/74262a5be68b7602fd72eda193d8236e/transformed/emoji2-1.3.0/AndroidManifest.xml:23:5-33:19
 MERGED from [androidx.lifecycle:lifecycle-process:2.8.4] /Users/sanleesam/.gradle/caches/transforms-4/200d6cf6eaf291afa328c697a38368aa/transformed/lifecycle-process-2.8.4/AndroidManifest.xml:23:5-33:19
@@ -107,41 +113,41 @@ MERGED from [androidx.startup:startup-runtime:1.1.1] /Users/sanleesam/.gradle/ca
 	android:appComponentFactory
 		ADDED from [androidx.core:core:1.13.1] /Users/sanleesam/.gradle/caches/transforms-4/39e6dd89cbf58ab8d2cb08bf24579181/transformed/core-1.13.1/AndroidManifest.xml:28:18-86
 	android:supportsRtl
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:17:9-35
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:22:9-35
 	android:label
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:15:9-41
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:20:9-41
 	android:roundIcon
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:16:9-54
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:21:9-54
 	android:icon
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:14:9-43
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:19:9-43
 	android:allowBackup
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:13:9-35
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:18:9-35
 	android:theme
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:18:9-46
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:23:9-46
 	android:name
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:12:9-44
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:17:9-44
 activity#com.dropflow.android.MainActivity
-ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:20:9-30:20
+ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:25:9-35:20
 	android:label
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:23:13-45
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:28:13-45
 	android:windowSoftInputMode
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:25:13-55
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:30:13-55
 	android:exported
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:22:13-36
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:27:13-36
 	android:theme
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:24:13-50
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:29:13-50
 	android:name
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:21:13-41
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:26:13-41
 intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
-ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:26:13-29:29
+ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:31:13-34:29
 action#android.intent.action.MAIN
-ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:27:17-69
+ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:32:17-69
 	android:name
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:27:25-66
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:32:25-66
 category#android.intent.category.LAUNCHER
-ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:28:17-77
+ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:33:17-77
 	android:name
-		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:28:27-74
+		ADDED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml:33:27-74
 uses-sdk
 INJECTED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /Users/sanleesam/Desktop/DropFlow/apps/android/app/src/main/AndroidManifest.xml

@@ -4,19 +4,19 @@
         "source": "com.dropflow.android.app-main-51:/drawable/ic_dropflow_logo.png"
     },
     {
-        "merged": "/Users/sanleesam/.gradle/daemon/8.7/com.dropflow.android.app-release-50:/drawable_ic_launcher_foreground.xml.flat",
-        "source": "/Users/sanleesam/.gradle/daemon/8.7/com.dropflow.android.app-main-51:/drawable/ic_launcher_foreground.xml"
+        "merged": "com.dropflow.android.app-release-50:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "com.dropflow.android.app-main-51:/drawable/ic_launcher_foreground.xml"
     },
     {
-        "merged": "/Users/sanleesam/.gradle/daemon/8.7/com.dropflow.android.app-release-50:/drawable_ic_launcher_background.xml.flat",
-        "source": "/Users/sanleesam/.gradle/daemon/8.7/com.dropflow.android.app-main-51:/drawable/ic_launcher_background.xml"
+        "merged": "com.dropflow.android.app-release-50:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "com.dropflow.android.app-main-51:/mipmap-anydpi-v26/ic_launcher_round.xml"
     },
     {
-        "merged": "/Users/sanleesam/.gradle/daemon/8.7/com.dropflow.android.app-release-50:/mipmap-anydpi-v26_ic_launcher.xml.flat",
-        "source": "/Users/sanleesam/.gradle/daemon/8.7/com.dropflow.android.app-main-51:/mipmap-anydpi-v26/ic_launcher.xml"
+        "merged": "com.dropflow.android.app-release-50:/drawable_ic_launcher_background.xml.flat",
+        "source": "com.dropflow.android.app-main-51:/drawable/ic_launcher_background.xml"
     },
     {
-        "merged": "/Users/sanleesam/.gradle/daemon/8.7/com.dropflow.android.app-release-50:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
-        "source": "/Users/sanleesam/.gradle/daemon/8.7/com.dropflow.android.app-main-51:/mipmap-anydpi-v26/ic_launcher_round.xml"
+        "merged": "com.dropflow.android.app-release-50:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "com.dropflow.android.app-main-51:/mipmap-anydpi-v26/ic_launcher.xml"
     }
 ]

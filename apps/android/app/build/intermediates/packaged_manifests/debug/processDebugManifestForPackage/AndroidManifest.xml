@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.dropflow.android"
-    android:versionCode="14"
-    android:versionName="0.1.0-beta.14" >
+    android:versionCode="17"
+    android:versionName="0.1.0-beta.1" >
 
     <uses-sdk
         android:minSdkVersion="26"
@@ -14,6 +14,11 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Legacy external storage write: only enforced on Android 9 and below -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <permission
         android:name="com.dropflow.android.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"

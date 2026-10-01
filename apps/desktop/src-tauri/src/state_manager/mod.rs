@@ -1,3 +1,4 @@
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -155,8 +156,7 @@ pub fn load_or_create_state_at_path(path: &PathBuf) -> AppStateSchema {
             Ok(contents) => {
                 match serde_json::from_str::<AppStateSchema>(&contents) {
                     Ok(mut parsed) => {
-                        println!(
-                            "[StateManager] Loaded valid state version {}",
+                        info!("[StateManager] Loaded valid state version {}",
                             parsed.version
                         );
                         // Clean up device_uuid if invalid
@@ -191,14 +191,14 @@ pub fn load_or_create_state_at_path(path: &PathBuf) -> AppStateSchema {
                         return parsed;
                     }
                     Err(e) => {
-                        eprintln!("[StateManager] Corrupted state file {:?}: {e}. Creating backup state.json.bak", path);
+                        error!("[StateManager] Corrupted state file {:?}: {e}. Creating backup state.json.bak", path);
                         let bak_path = path.with_extension("json.bak");
                         let _ = fs::copy(path, &bak_path);
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[StateManager] Failed to read state file {:?}: {e}", path);
+                error!("[StateManager] Failed to read state file {:?}: {e}", path);
             }
         }
     }
@@ -281,8 +281,7 @@ pub fn save_settings(
                 .engine
                 .update_advertisement(&state.device_uuid, &settings.device_name, "Desktop", port)
                 .ok();
-            println!(
-                "[StateManager] Updated device advertisement name to '{}'",
+            info!("[StateManager] Updated device advertisement name to '{}'",
                 settings.device_name
             );
         }
@@ -317,7 +316,7 @@ pub fn clear_history(
     state.history.clear();
     save_state_atomic(&app, &state)?;
     let _ = app.emit("history-updated", &state.history);
-    println!("[StateManager] Cleared transfer history successfully");
+    info!("[StateManager] Cleared transfer history successfully");
     Ok(())
 }
 
@@ -341,7 +340,7 @@ pub fn add_trusted_device(
     }
     save_state_atomic(&app, &state)?;
     let _ = app.emit("trusted-devices-updated", &state.trusted_devices);
-    println!("[StateManager] Added/updated trusted device successfully");
+    info!("[StateManager] Added/updated trusted device successfully");
     Ok(())
 }
 
@@ -355,7 +354,7 @@ pub fn remove_trusted_device(
     state.trusted_devices.retain(|d| d.device_id != device_id);
     save_state_atomic(&app, &state)?;
     let _ = app.emit("trusted-devices-updated", &state.trusted_devices);
-    println!("[StateManager] Removed trusted device {device_id} successfully");
+    info!("[StateManager] Removed trusted device {device_id} successfully");
     Ok(())
 }
 
