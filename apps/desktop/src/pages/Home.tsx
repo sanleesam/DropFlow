@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import DeviceCard, { Device } from "../components/DeviceCard";
 import FileDropZone, { SelectedFilePayload } from "../components/FileDropZone";
 import { TransferProgress } from "../components/TransferProgress";
-import { SettingsModal } from "../components/SettingsModal";
 import { useSettings } from "../components/SettingsProvider";
 import { useToast } from "../components/ToastProvider";
 import { invoke } from "@tauri-apps/api/core";
@@ -18,6 +17,7 @@ import {
   applyFailureEvent,
   dismissActiveSession,
   SessionStateStore,
+  RecentTransfer,
   formatRelativeTimestamp,
 } from "../utils/transferSessionManager";
 
@@ -117,25 +117,35 @@ export const Home: React.FC<HomeProps> = () => {
   // Central Session Store managing active and recent transfers
   const [sessionStore, setSessionStore] = useState<SessionStateStore>(createInitialSessionStore);
 
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const wasSettingsOpenRef = useRef(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [localUuid, setLocalUuid] = useState<string>("");
+  const [deviceType, setDeviceType] = useState<string>("desktop");
   const discoveryEventRevision = useRef(0);
 
-  // Restore focus to Settings button after modal is closed
+  // Friendly troubleshooting hint appears only after the search has genuinely
+  // come up empty for a while — never a permanent wall of technical text.
+  const [showDiscoveryTroubleshooting, setShowDiscoveryTroubleshooting] = useState(false);
+  const DISCOVERY_TROUBLESHOOT_DELAY_MS = 15000;
+
   useEffect(() => {
-    if (isSettingsOpen) {
-      wasSettingsOpenRef.current = true;
-    } else if (wasSettingsOpenRef.current) {
-      document.getElementById("settings-btn")?.focus();
-      wasSettingsOpenRef.current = false;
+    if (devices.length > 0) {
+      setShowDiscoveryTroubleshooting(false);
+      return;
     }
-  }, [isSettingsOpen]);
+
+    const timer = setTimeout(() => {
+      setShowDiscoveryTroubleshooting(true);
+    }, DISCOVERY_TROUBLESHOOT_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [devices.length, DISCOVERY_TROUBLESHOOT_DELAY_MS]);
 
   // Retrieve persistent local UUID on mount
   useEffect(() => {
     invoke<string>("get_local_uuid").then(setLocalUuid).catch(console.error);
+    invoke<string>("get_system_device_type")
+      .then(setDeviceType)
+      .catch(() => setDeviceType("desktop"));
   }, []);
 
   const reconcileDevices = useCallback((nextDevices: Device[]) => {
@@ -180,6 +190,7 @@ export const Home: React.FC<HomeProps> = () => {
     let unlistenFailed: (() => void) | undefined;
     let unlistenRequest: (() => void) | undefined;
     let unlistenDismiss: (() => void) | undefined;
+    let unlistenHistory: (() => void) | undefined;
 
     const setupCentralListeners = async () => {
       try {
@@ -230,6 +241,21 @@ export const Home: React.FC<HomeProps> = () => {
           setSessionStore((prev) => applyFailureEvent(prev, payload));
           addToast(`Transfer failed: ${payload.error || "Unknown error"}`, "error");
         });
+
+        // The backend is the source of truth for persisted history (e.g. after a
+        // "Clear history" in Settings). Reconcile so cleared or trimmed entries
+        // disappear here too instead of being resurrected by the next save.
+        unlistenHistory = await listen<RecentTransfer[]>("history-updated", (event) => {
+          if (!Array.isArray(event.payload)) return;
+          setSessionStore((prev) => {
+            const incoming = event.payload;
+            const unchanged =
+              incoming.length === prev.recentTransfers.length &&
+              incoming.every((item, index) => item?.id === prev.recentTransfers[index]?.id);
+            if (unchanged) return prev;
+            return { ...prev, recentTransfers: incoming };
+          });
+        });
       } catch (err) {
         console.error("[Home] Failed to setup central event listeners:", err);
       }
@@ -243,6 +269,7 @@ export const Home: React.FC<HomeProps> = () => {
       if (unlistenProgress) unlistenProgress();
       if (unlistenCompleted) unlistenCompleted();
       if (unlistenFailed) unlistenFailed();
+      if (unlistenHistory) unlistenHistory();
     };
   }, [addToast, settings.autoOpenCompleted]);
 
@@ -343,7 +370,7 @@ export const Home: React.FC<HomeProps> = () => {
       invoke("update_advertisement", {
         deviceId: localUuid,
         deviceName: settings.deviceName,
-        deviceType: "laptop",
+        deviceType,
         port: 1, // Non-zero value instructing Rust to advertise bound receiver port
       }).catch(console.error);
     } else {
@@ -354,7 +381,7 @@ export const Home: React.FC<HomeProps> = () => {
         port: 0,
       }).catch(console.error);
     }
-  }, [settings.deviceName, settings.deviceVisibility, localUuid]);
+  }, [settings.deviceName, settings.deviceVisibility, localUuid, deviceType]);
 
   const handleSend = useCallback(
     async (selectedFiles: SelectedFilePayload[]) => {
@@ -423,7 +450,7 @@ export const Home: React.FC<HomeProps> = () => {
   const activeTransferList = Object.values(sessionStore.activeTransfers);
 
   return (
-    <div className="flex flex-col gap-5 w-full transition-opacity duration-120 ease-[cubic-bezier(0.22,1,0.36,1)]">
+    <div className="flex flex-col gap-5 w-full transition-opacity duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]">
       {/* ── Nearby Devices ── */}
       <Section
         id="nearby-devices"
@@ -447,12 +474,40 @@ export const Home: React.FC<HomeProps> = () => {
               ))}
             </div>
           ) : (
-            <div className="py-2.5 text-left select-none">
-              <p className="text-xs font-medium text-neutral-400">Looking for devices…</p>
-              <p className="mt-0.5 text-[11px] text-neutral-500">
-                Make sure DropFlow is open on your other device.
-              </p>
-            </div>
+            <>
+              <div
+                className="flex items-center gap-2.5 py-3 select-none"
+                aria-live="polite"
+              >
+                <span
+                  className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-neutral-400 animate-pulse"
+                  aria-hidden="true"
+                />
+                <p className="text-xs font-medium text-neutral-400">
+                  {showDiscoveryTroubleshooting
+                    ? "Still looking for devices…"
+                    : "Looking for devices…"}
+                </p>
+              </div>
+
+              {showDiscoveryTroubleshooting && (
+                <div className="flex items-start gap-3 rounded-xl border border-white/[0.06] bg-neutral-900/40 px-4 py-3.5 select-none">
+                  <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-neutral-400">
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="11" cy="11" r="7" />
+                      <line x1="21" y1="21" x2="16.5" y2="16.5" />
+                    </svg>
+                  </span>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-xs font-semibold text-neutral-300">No devices found yet</span>
+                    <span className="text-[11px] leading-relaxed text-neutral-500">
+                      Make sure DropFlow is open on your other device and that both
+                      devices are connected to the same Wi-Fi network.
+                    </span>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </Section>
@@ -543,17 +598,20 @@ export const Home: React.FC<HomeProps> = () => {
             );
           })()
         ) : (
-          <div className="flex items-center justify-between p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/30 select-none">
+          <div className="flex items-center gap-3 p-3.5 rounded-xl border border-white/[0.07] bg-neutral-900/30 select-none">
+            <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-white/[0.06] bg-neutral-800/60 text-neutral-500">
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+            </span>
             <div className="flex flex-col">
               <span className="text-xs font-medium text-neutral-300">No recent transfers</span>
-              <span className="text-[11px] text-neutral-500 mt-0.5">Transferred files will appear here</span>
+              <span className="text-[11px] text-neutral-500 mt-0.5">Files you send or receive will appear here</span>
             </div>
           </div>
         )}
       </Section>
-
-      {/* ── Settings Modal ── */}
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
 
       {/* ── Incoming Transfer Authorization Dialog ── */}
       {incomingRequest && (

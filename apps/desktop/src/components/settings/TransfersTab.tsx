@@ -45,10 +45,6 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ historyCount = 0, on
   return (
     <div className="flex flex-col gap-5 animate-[backdrop-fade-in_0.15s_ease-out]">
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-4 select-none">
-          Transfers Settings
-        </h3>
-
         {/* File Download Folder Option */}
         <div className="flex flex-col gap-2 pb-4 border-b border-white/[0.07]">
           <div className="flex flex-col">
@@ -166,8 +162,37 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ historyCount = 0, on
 
       {/* Confirmation Modal */}
       {showConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-backdrop-fade-in">
-          <div className="flex flex-col w-full max-w-md rounded-xl border border-white/[0.1] bg-[#16181d] p-5 shadow-2xl animate-modal-scale-in select-none">
+        <ConfirmClearHistoryModal onCancel={() => setShowConfirmModal(false)} onConfirm={handleClearHistory} />
+      )}
+    </div>
+  );
+};
+
+/** Escape closes only this confirmation, leaving the Settings modal open. */
+const ConfirmClearHistoryModal: React.FC<{
+  onCancel: () => void;
+  onConfirm: () => void;
+}> = ({ onCancel, onConfirm }) => {
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        // Capture phase + stopPropagation keeps the Settings modal open.
+        e.stopPropagation();
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [onCancel]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-backdrop-fade-in">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Clear transfer history confirmation"
+            className="flex flex-col w-full max-w-md rounded-xl border border-white/[0.1] bg-[#16181d] p-5 shadow-2xl animate-modal-scale-in select-none"
+          >
             <h3 className="text-sm font-semibold text-neutral-100">Clear transfer history?</h3>
             <p className="text-xs text-neutral-400 mt-2 leading-relaxed">
               This will permanently remove all saved transfer history from this device. Your transferred files, settings, receive directory, and device identity will not be affected.
@@ -175,22 +200,20 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ historyCount = 0, on
             <div className="flex items-center justify-end gap-2.5 mt-5">
               <button
                 type="button"
-                onClick={() => setShowConfirmModal(false)}
+                onClick={onCancel}
                 className="px-3.5 py-1.5 rounded-lg border border-white/[0.08] bg-neutral-800 text-xs font-medium text-neutral-300 hover:bg-neutral-700 transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={handleClearHistory}
+                onClick={onConfirm}
                 className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-xs font-medium text-white shadow-sm transition-colors"
               >
                 Clear history
               </button>
             </div>
           </div>
-        </div>
-      )}
     </div>
   );
 };

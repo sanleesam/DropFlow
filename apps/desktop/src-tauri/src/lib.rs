@@ -1,15 +1,13 @@
 pub mod device_discovery;
+pub mod logging;
 pub mod power_manager;
 pub mod state_manager;
 pub mod transfer_manager;
+pub mod update_manager;
 
 use std::sync::{Arc, Mutex};
+use log::info;
 use tauri::Manager;
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
 
 #[derive(serde::Serialize)]
 pub struct ReleaseInfo {
@@ -28,6 +26,8 @@ fn get_release_info() -> ReleaseInfo {
         let tag_clean = raw_tag.strip_prefix('v').unwrap_or(raw_tag);
         let ch = if tag_clean.contains("-beta") {
             "beta"
+        } else if tag_clean.contains("-dev") {
+            "development"
         } else {
             "stable"
         };
@@ -53,6 +53,15 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            // Structured logging first so every later stage is captured.
+            let log_dir = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            if let Some(path) = logging::init(&log_dir) {
+                info!("[Lib] Logging to {}", path.display());
+            }
+
             let app_state = state_manager::load_or_create_state(app.handle());
             let local_uuid = app_state.device_uuid.clone();
 
@@ -68,7 +77,7 @@ pub fn run() {
             let receiver = transfer_manager::TransferReceiver::start(app.handle().clone())
                 .expect("Failed to start TCP transfer receiver");
             let bound_port = receiver.port();
-            println!("[Lib] TCP Receiver successfully bound on port {bound_port}");
+            info!("[Lib] TCP Receiver successfully bound on port {bound_port}");
 
             app.manage(state_manager::AppStateContainer {
                 state: Mutex::new(app_state),
@@ -77,6 +86,7 @@ pub fn run() {
                     .app_data_dir()
                     .unwrap_or_else(|_| std::path::PathBuf::from(".")),
             });
+            app.manage(update_manager::PendingUpdate::new());
 
             app.manage(device_discovery::DiscoveryState {
                 engine: Box::new(discovery_engine),
@@ -92,7 +102,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
+            update_manager::check_for_updates,
+            update_manager::download_and_install_update,
+            update_manager::clear_pending_update,
             device_discovery::start_discovery,
             device_discovery::update_advertisement,
             device_discovery::get_local_uuid,
@@ -121,7 +133,7 @@ pub fn run() {
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.try_state::<device_discovery::DiscoveryState>() {
                     state.engine.update_advertisement("", "", "", 0).ok();
-                    println!("[Advertiser] App window destroyed, cleanly unregistered service");
+                    info!("[Advertiser] App window destroyed, cleanly unregistered service");
                 }
             }
         })

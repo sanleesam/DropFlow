@@ -25,10 +25,6 @@ export const SecurityTab: React.FC = () => {
   return (
     <div className="flex flex-col gap-5 animate-[backdrop-fade-in_0.15s_ease-out]">
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-4 select-none">
-          Security & Trust
-        </h3>
-
         {/* Trusted Devices list */}
         <div className="flex flex-col gap-2 pb-4 border-b border-white/[0.07]">
           <div className="flex flex-col">
@@ -72,9 +68,10 @@ export const SecurityTab: React.FC = () => {
                       type="button"
                       onClick={() => removeTrustedDevice(device.deviceId)}
                       className="p-2 rounded-lg text-neutral-400 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
-                      title="Untrust device"
+                      title={`Remove ${device.deviceName} from trusted devices`}
+                      aria-label={`Remove ${device.deviceName} from trusted devices`}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-4 h-4" aria-hidden="true" />
                     </button>
                   </div>
                 );

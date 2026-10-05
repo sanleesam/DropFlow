@@ -16,10 +16,6 @@ export const NetworkTab: React.FC = () => {
   return (
     <div className="flex flex-col gap-5 animate-[backdrop-fade-in_0.15s_ease-out]">
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-4 select-none">
-          Network Settings
-        </h3>
-
         {/* Device Name input */}
         <div className="flex flex-col gap-2 pb-4 border-b border-white/[0.07]">
           <div className="flex flex-col">
@@ -49,9 +45,9 @@ export const NetworkTab: React.FC = () => {
         {/* Port number */}
         <div className="flex items-center justify-between py-3.5 border-b border-white/[0.07] select-none">
           <div className="flex flex-col pr-4">
-            <span className="text-xs font-semibold text-neutral-200">TCP Transfer Port</span>
+            <span className="text-xs font-semibold text-neutral-200">Transfer port</span>
             <span className="text-xs text-neutral-500 mt-0.5">
-              Dynamic local network port assigned for receiving transfers.
+              Local port used to receive incoming transfers.
             </span>
           </div>
           <div className="font-mono text-xs text-neutral-400 bg-neutral-950/60 border border-white/[0.08] rounded-md px-2.5 py-1">

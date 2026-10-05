@@ -11,9 +11,9 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   XCircle,
-  Filter,
 } from "lucide-react";
 import { RecentTransfer, formatRelativeTimestamp } from "../utils/transferSessionManager";
+import { formatBytes } from "../utils/formatters";
 import { useToast } from "../components/ToastProvider";
 
 interface HistoryPageProps {
@@ -95,7 +95,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers }) => 
   };
 
   return (
-    <div className="flex flex-col gap-5 w-full max-w-[980px] mx-auto p-4 sm:p-6 transition-opacity duration-120 ease-[cubic-bezier(0.22,1,0.36,1)]">
+    <div className="flex flex-col gap-5 w-full max-w-[980px] mx-auto p-4 sm:p-6 transition-opacity duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]">
       {/* ── Page Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-white/[0.07]">
         <div>
@@ -287,7 +287,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers }) => 
 
                               <div className="flex items-center gap-2 flex-shrink-0">
                                 <span className="text-xs text-neutral-400 font-mono mr-1">
-                                  {(file.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+                                  {formatBytes(file.sizeBytes)}
                                 </span>
 
                                 {file.finalPath && (
@@ -337,7 +337,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({ recentTransfers }) => 
       ) : (
         /* Empty State */
         <div className="py-12 flex flex-col items-center justify-center text-center rounded-xl border border-white/[0.07] bg-neutral-900/30">
-          <Filter size={24} className="text-neutral-600 mb-2" />
+          <Search size={22} className="text-neutral-600 mb-2" />
           <h3 className="text-xs font-semibold text-neutral-300">No transfers found</h3>
           <p className="text-xs text-neutral-500 mt-1 max-w-xs select-none">
             {searchQuery

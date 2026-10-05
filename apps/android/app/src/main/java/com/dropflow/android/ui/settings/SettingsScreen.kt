@@ -72,13 +72,13 @@ fun SettingsScreen(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Configure device identity, transfer rules, network protocol, and appearance.",
+                text = "Manage how DropFlow works on this device.",
                 color = TextSecondary,
                 fontSize = 12.sp
             )
         }
 
-        // Section 1: General (Identity & Hostname)
+        // Section 1: Device identity
         item {
             GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -92,7 +92,7 @@ fun SettingsScreen(
                             tint = activeAccentColor
                         )
                         Text(
-                            text = "General Identity",
+                            text = "This Device",
                             color = TextPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
@@ -100,7 +100,7 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Device name advertised during mDNS local discovery",
+                        text = "The name other devices will see when they look for you.",
                         color = TextSecondary,
                         fontSize = 11.sp
                     )
@@ -222,12 +222,12 @@ fun SettingsScreen(
             }
         }
 
-        // Section 3: Network Protocol Specs (Desktop-aligned)
+        // Section 3: Network (friendly overview)
         item {
             GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -239,30 +239,23 @@ fun SettingsScreen(
                             tint = activeAccentColor
                         )
                         Text(
-                            text = "Network Protocol Specs",
+                            text = "Network",
                             color = TextPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(text = "TCP Transfer Port", color = TextSecondary, fontSize = 11.sp)
-                            Text(text = uiState.port.toString(), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        Column {
-                            Text(text = "mDNS Service Type", color = TextSecondary, fontSize = 11.sp)
-                            Text(text = uiState.mdnsServiceType, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        Column {
-                            Text(text = "Multicast Group", color = TextSecondary, fontSize = 11.sp)
-                            Text(text = uiState.multicastGroup, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Transfers happen directly between your devices over Wi-Fi.",
+                        color = TextSecondary,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        text = "Files never touch a server.",
+                        color = TextSecondary,
+                        fontSize = 11.sp
+                    )
                 }
             }
         }
@@ -304,7 +297,7 @@ fun SettingsScreen(
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
-                                text = "Prompt before accepting incoming TCP connections",
+                                text = "Ask before accepting files from other devices",
                                 color = TextSecondary,
                                 fontSize = 11.sp
                             )
@@ -329,7 +322,7 @@ fun SettingsScreen(
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
-                                text = "Bypass confirmation prompt for devices in trusted list",
+                                text = "Skip the confirmation for devices you have trusted",
                                 color = TextSecondary,
                                 fontSize = 11.sp
                             )
@@ -344,7 +337,7 @@ fun SettingsScreen(
             }
         }
 
-        // Section 5: Appearance & Accent Selection (Desktop-aligned)
+        // Section 5: Appearance
         item {
             GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
@@ -361,7 +354,7 @@ fun SettingsScreen(
                             tint = activeAccentColor
                         )
                         Text(
-                            text = "Appearance Theme",
+                            text = "Appearance",
                             color = TextPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold

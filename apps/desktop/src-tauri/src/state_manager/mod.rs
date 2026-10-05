@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use log::{error, info};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -47,6 +48,51 @@ fn default_true() -> bool {
     true
 }
 
+/// Which release channel the user wants application updates from.
+///
+/// Serialized in lowercase ("beta" / "development") inside the persisted
+/// settings. Deserialization deliberately falls back to [`UpdateChannel::Beta`]
+/// on unknown values so a malformed entry can never make the whole state file
+/// unreadable, and `#[serde(default)]` on the settings field means existing
+/// installations keep receiving curated **Beta** updates after upgrading.
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    #[default]
+    Beta,
+    Development,
+}
+
+impl<'de> Deserialize<'de> for UpdateChannel {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "beta" => Ok(UpdateChannel::Beta),
+            "development" => Ok(UpdateChannel::Development),
+            other => {
+                log::warn!("[StateManager] Unknown update channel '{other}', falling back to beta");
+                Ok(UpdateChannel::default())
+            }
+        }
+    }
+}
+
+impl UpdateChannel {
+    /// URL of the channel's floating updater manifest published by the
+    /// matching GitHub Actions workflow (`release-beta.yml` publishes the
+    /// `beta` release, `release-development.yml` the `development` release).
+    pub fn manifest_url(&self) -> &'static str {
+        match self {
+            UpdateChannel::Beta => {
+                "https://github.com/sanleesam/DropFlow/releases/download/beta/latest.json"
+            }
+            UpdateChannel::Development => {
+                "https://github.com/sanleesam/DropFlow/releases/download/development/latest.json"
+            }
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UserSettings {
@@ -65,6 +111,10 @@ pub struct UserSettings {
     pub require_confirmation: bool,
     #[serde(default = "default_true")]
     pub auto_accept_trusted_devices: bool,
+    /// Update channel selected in Settings → About. Defaults to Beta so
+    /// existing installations are never silently moved to Development.
+    #[serde(default)]
+    pub update_channel: UpdateChannel,
 }
 
 impl Default for UserSettings {
@@ -86,6 +136,7 @@ impl Default for UserSettings {
             auto_open_completed: false,
             require_confirmation: true,
             auto_accept_trusted_devices: true,
+            update_channel: UpdateChannel::Beta,
         }
     }
 }
@@ -155,8 +206,7 @@ pub fn load_or_create_state_at_path(path: &PathBuf) -> AppStateSchema {
             Ok(contents) => {
                 match serde_json::from_str::<AppStateSchema>(&contents) {
                     Ok(mut parsed) => {
-                        println!(
-                            "[StateManager] Loaded valid state version {}",
+                        info!("[StateManager] Loaded valid state version {}",
                             parsed.version
                         );
                         // Clean up device_uuid if invalid
@@ -191,14 +241,14 @@ pub fn load_or_create_state_at_path(path: &PathBuf) -> AppStateSchema {
                         return parsed;
                     }
                     Err(e) => {
-                        eprintln!("[StateManager] Corrupted state file {:?}: {e}. Creating backup state.json.bak", path);
+                        error!("[StateManager] Corrupted state file {:?}: {e}. Creating backup state.json.bak", path);
                         let bak_path = path.with_extension("json.bak");
                         let _ = fs::copy(path, &bak_path);
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[StateManager] Failed to read state file {:?}: {e}", path);
+                error!("[StateManager] Failed to read state file {:?}: {e}", path);
             }
         }
     }
@@ -265,9 +315,23 @@ pub fn save_settings(
 ) -> Result<(), String> {
     let mut state = container.state.lock().map_err(|e| e.to_string())?;
     let old_name = state.settings.device_name.clone();
+    let old_channel = state.settings.update_channel;
     state.settings = settings.clone();
 
     save_state_atomic(&app, &state)?;
+
+    // A channel switch invalidates every update fetched for the old channel:
+    // bump the update generation so in-flight checks and downloads for the
+    // previous selection are discarded before they can surface or install.
+    if old_channel != settings.update_channel {
+        if let Some(pending) = app.try_state::<crate::update_manager::PendingUpdate>() {
+            let generation = pending.invalidate();
+            info!(
+                "[StateManager] Update channel switched to {:?}; pending updates invalidated (generation {generation})",
+                settings.update_channel
+            );
+        }
+    }
 
     // If device name changed, notify discovery engine
     if old_name != settings.device_name {
@@ -281,8 +345,7 @@ pub fn save_settings(
                 .engine
                 .update_advertisement(&state.device_uuid, &settings.device_name, "Desktop", port)
                 .ok();
-            println!(
-                "[StateManager] Updated device advertisement name to '{}'",
+            info!("[StateManager] Updated device advertisement name to '{}'",
                 settings.device_name
             );
         }
@@ -317,7 +380,7 @@ pub fn clear_history(
     state.history.clear();
     save_state_atomic(&app, &state)?;
     let _ = app.emit("history-updated", &state.history);
-    println!("[StateManager] Cleared transfer history successfully");
+    info!("[StateManager] Cleared transfer history successfully");
     Ok(())
 }
 
@@ -341,7 +404,7 @@ pub fn add_trusted_device(
     }
     save_state_atomic(&app, &state)?;
     let _ = app.emit("trusted-devices-updated", &state.trusted_devices);
-    println!("[StateManager] Added/updated trusted device successfully");
+    info!("[StateManager] Added/updated trusted device successfully");
     Ok(())
 }
 
@@ -355,7 +418,7 @@ pub fn remove_trusted_device(
     state.trusted_devices.retain(|d| d.device_id != device_id);
     save_state_atomic(&app, &state)?;
     let _ = app.emit("trusted-devices-updated", &state.trusted_devices);
-    println!("[StateManager] Removed trusted device {device_id} successfully");
+    info!("[StateManager] Removed trusted device {device_id} successfully");
     Ok(())
 }
 
@@ -590,5 +653,89 @@ mod tests {
         assert_eq!(reloaded.incomplete_transfers.len(), 1);
         assert_eq!(reloaded.incomplete_transfers[0].session_id, "tx-resume-101");
         assert_eq!(reloaded.incomplete_transfers[0].bytes_completed, 52428800);
+    }
+
+    #[test]
+    fn test_update_channel_defaults_to_beta_for_existing_installations() {
+        // Legacy state files written before the channel selector existed must
+        // deserialize with the Beta channel, never Development.
+        let dir = create_test_temp_dir();
+        let state_path = dir.join("state.json");
+
+        let mut state = load_or_create_state_at_path(&state_path);
+        assert_eq!(state.settings.update_channel, UpdateChannel::Beta);
+        state.history.push(RecentTransferSchema {
+            id: "tx-channel-1".to_string(),
+            file_name: "legacy.bin".to_string(),
+            device_name: "Old Install".to_string(),
+            size: "1 KB".to_string(),
+            timestamp: "Earlier".to_string(),
+            timestamp_ms: Some(1),
+            status: "completed".to_string(),
+            direction: "send".to_string(),
+            total_files: 1,
+            total_size_bytes: Some(1000),
+            files: None,
+            receive_dir: None,
+            error: None,
+        });
+        save_state_atomic_at_path(&state_path, &state).unwrap();
+
+        // Simulate a pre-channel state file by stripping the new field.
+        let mut legacy: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+        legacy["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("updateChannel");
+        fs::write(&state_path, serde_json::to_string(&legacy).unwrap()).unwrap();
+
+        let reloaded = load_or_create_state_at_path(&state_path);
+        assert_eq!(reloaded.settings.update_channel, UpdateChannel::Beta);
+        assert_eq!(reloaded.history.len(), 1);
+    }
+
+    #[test]
+    fn test_update_channel_selection_persists() {
+        let dir = create_test_temp_dir();
+        let state_path = dir.join("state.json");
+
+        let mut state = load_or_create_state_at_path(&state_path);
+        state.settings.update_channel = UpdateChannel::Development;
+        save_state_atomic_at_path(&state_path, &state).unwrap();
+
+        let reloaded = load_or_create_state_at_path(&state_path);
+        assert_eq!(reloaded.settings.update_channel, UpdateChannel::Development);
+    }
+
+    #[test]
+    fn test_update_channel_unknown_value_falls_back_to_beta() {
+        // A corrupt channel value must never make the whole state file unreadable.
+        let settings: UserSettings = serde_json::from_str(
+            r#"{
+                "deviceName": "PC",
+                "receiveDirectory": "/tmp",
+                "autoAccept": false,
+                "soundNotifications": true,
+                "theme": "dark",
+                "accentColor": "blue",
+                "maxConcurrentTransfers": 3,
+                "updateChannel": "nightly"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(settings.update_channel, UpdateChannel::Beta);
+    }
+
+    #[test]
+    fn test_update_channel_manifest_urls_are_distinct() {
+        assert_ne!(
+            UpdateChannel::Beta.manifest_url(),
+            UpdateChannel::Development.manifest_url()
+        );
+        assert!(UpdateChannel::Beta.manifest_url().contains("/beta/latest.json"));
+        assert!(UpdateChannel::Development
+            .manifest_url()
+            .contains("/development/latest.json"));
     }
 }

@@ -1,14 +1,21 @@
 /**
  * DropFlow — UpdateService
  *
- * Dedicated service layer encapsulating Tauri v2 updater APIs (`@tauri-apps/plugin-updater`
- * and `@tauri-apps/plugin-process`). Visual UI components never invoke Tauri updater APIs directly.
+ * Dedicated service layer for application updates. Update checking, download
+ * and installation run in Rust (`src-tauri/src/update_manager.rs`) so the
+ * updater endpoint can be selected at runtime from the user's persisted update
+ * channel — the JavaScript updater plugin cannot override endpoints per check.
+ * Visual UI components never invoke update commands directly; they go through
+ * this service and the `useUpdater` hook.
  */
 
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { UPDATER_CONFIG } from "../config/updaterConfig";
 import type {
+  ProgressData,
+  UpdateInfo,
   UpdaterState,
   UpdaterListener,
   UpdateVersionInfo,
@@ -16,7 +23,6 @@ import type {
 
 class UpdateService {
   private static instance: UpdateService;
-  private pendingUpdate: Update | null = null;
   private listeners: Set<UpdaterListener> = new Set();
 
   private state: UpdaterState = {
@@ -68,7 +74,9 @@ class UpdateService {
   }
 
   /**
-   * Checks for available application updates using Tauri v2 updater plugin.
+   * Checks the user's selected update channel for a newer release. The Rust
+   * command reads the persisted channel setting at check time, so a channel
+   * switch takes effect immediately.
    */
   public async checkForUpdates(): Promise<void> {
     if (this.state.status === "checking" || this.state.status === "downloading") {
@@ -81,19 +89,19 @@ class UpdateService {
     });
 
     try {
-      const update = await check({
-        timeout: UPDATER_CONFIG.timeoutMs,
+      const info = await invoke<UpdateInfo>("check_for_updates", {
+        timeoutMs: UPDATER_CONFIG.timeoutMs,
       });
 
       const now = Date.now();
+      const currentVersion = info.currentVersion || this.state.versionInfo.currentVersion;
 
-      if (update && update.available) {
-        this.pendingUpdate = update;
+      if (info.available && info.availableVersion) {
         const versionInfo: UpdateVersionInfo = {
-          currentVersion: update.currentVersion || this.state.versionInfo.currentVersion,
-          availableVersion: update.version,
-          releaseNotes: update.body || undefined,
-          pubDate: update.date || undefined,
+          currentVersion,
+          availableVersion: info.availableVersion,
+          releaseNotes: info.releaseNotes || undefined,
+          pubDate: info.pubDate || undefined,
         };
 
         this.setState({
@@ -103,12 +111,9 @@ class UpdateService {
           error: undefined,
         });
       } else {
-        this.pendingUpdate = null;
         this.setState({
           status: "no-update",
-          versionInfo: {
-            currentVersion: update?.currentVersion || this.state.versionInfo.currentVersion,
-          },
+          versionInfo: { currentVersion },
           lastCheckedAt: now,
           error: undefined,
         });
@@ -160,10 +165,11 @@ class UpdateService {
   }
 
   /**
-   * Downloads and installs the pending update with real-time progress callbacks.
+   * Downloads and installs the update announced by the last check. Download
+   * progress arrives as `update-download-progress` events from the Rust side.
    */
   public async downloadUpdate(): Promise<void> {
-    if (!this.pendingUpdate || this.state.status === "downloading") {
+    if (this.state.status === "downloading" || this.state.status === "installing") {
       return;
     }
 
@@ -177,53 +183,24 @@ class UpdateService {
       error: undefined,
     });
 
+    let unlisten: UnlistenFn | undefined;
     try {
-      let downloadedBytes = 0;
-      let totalBytes = 0;
+      unlisten = await listen<ProgressData>("update-download-progress", (event) => {
+        const { downloadedBytes, totalBytes } = event.payload;
+        const percentage =
+          totalBytes > 0
+            ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
+            : 0;
 
-      await this.pendingUpdate.downloadAndInstall((event) => {
-        switch (event.event) {
-          case "Started":
-            totalBytes = event.data.contentLength || 0;
-            this.setState({
-              status: "downloading",
-              progress: {
-                downloadedBytes: 0,
-                totalBytes,
-                percentage: 0,
-              },
-            });
-            break;
-
-          case "Progress":
-            downloadedBytes += event.data.chunkLength;
-            const percentage =
-              totalBytes > 0
-                ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
-                : 0;
-
-            this.setState({
-              status: "downloading",
-              progress: {
-                downloadedBytes,
-                totalBytes,
-                percentage,
-              },
-            });
-            break;
-
-          case "Finished":
-            this.setState({
-              status: "installing",
-              progress: {
-                downloadedBytes,
-                totalBytes,
-                percentage: 100,
-              },
-            });
-            break;
-        }
+        this.setState({
+          status: "downloading",
+          progress: { downloadedBytes, totalBytes, percentage },
+        });
       });
+
+      // Resolves once the update has been downloaded and installed. On Windows
+      // the installer may exit the app instead of returning.
+      await invoke("download_and_install_update");
 
       // Once download & install finish, prompt for restart
       this.setState({
@@ -241,6 +218,8 @@ class UpdateService {
         error: `Download failed: ${errorMessage}`,
         progress: undefined,
       });
+    } finally {
+      unlisten?.();
     }
   }
 
@@ -257,6 +236,20 @@ class UpdateService {
         error: `Failed to restart application: ${error}`,
       });
     }
+  }
+
+  /**
+   * Drops any pending update and returns to the idle state. Called when the
+   * user switches update channels so a stale cross-channel update can never be
+   * downloaded (the Rust-side pending update is cleared as well).
+   */
+  public async reset(): Promise<void> {
+    try {
+      await invoke("clear_pending_update");
+    } catch (error) {
+      console.warn("[UpdateService] Failed to clear pending update:", error);
+    }
+    this.setState({ status: "idle", error: undefined, progress: undefined });
   }
 }
 

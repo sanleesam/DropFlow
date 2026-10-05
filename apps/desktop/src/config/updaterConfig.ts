@@ -1,15 +1,17 @@
 /**
  * DropFlow — Updater Configuration Layer
  *
- * This module isolates all update provider metadata and release channel labels.
- * The native Tauri updater engine resolves endpoints directly through `tauri.conf.json`.
+ * This module isolates update provider metadata and the check timeout. The
+ * update channel itself is user-selectable (Settings → About) and persisted in
+ * the Rust settings; the channel-to-endpoint mapping lives in
+ * `state_manager::UpdateChannel::manifest_url`.
  */
 
-export type ReleaseChannel = "beta" | "stable" | "nightly";
+import type { UpdateChannel } from "../types/updater";
 
 export interface UpdaterConfig {
-  /** Target release channel */
-  channel: ReleaseChannel;
+  /** Channel the UI advertises as the default recommendation */
+  recommendedChannel: UpdateChannel;
   /** Provider display name */
   providerName: string;
   /** Default check timeout in milliseconds */
@@ -17,7 +19,7 @@ export interface UpdaterConfig {
 }
 
 export const UPDATER_CONFIG: UpdaterConfig = {
-  channel: "beta",
-  providerName: "GitHub Releases (Beta)",
+  recommendedChannel: "beta",
+  providerName: "GitHub Releases",
   timeoutMs: 120000,
 };

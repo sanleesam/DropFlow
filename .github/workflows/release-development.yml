@@ -1,0 +1,255 @@
+name: Release Development
+
+# DEVELOPMENT channel. Frequent experimental builds, fully independent of Beta:
+#   Beta:        tags `v*-beta.*` + floating `beta` release   -> release-beta.yml
+#   Development: pushes to `main` (or manual) + floating `development` release -> this workflow
+#
+# Dev builds never create Git tags, never touch the `beta` release, and use
+# their own version line (`0.1.0-dev.<run number>`) so the Beta counter stays
+# reserved for curated milestone releases. The desktop updater picks the
+# manifest of whichever channel the user selected in Settings → About.
+
+# Serialize Development publication: only one run at a time may mutate the
+# floating `development` release. Cancelling in-progress runs (and dropping
+# superseded queued runs) guarantees an older run can never publish after a
+# newer one. Cancellations almost always land during the build phase, before
+# any release mutation; the merge job below additionally uploads the merged
+# latest.json BEFORE pruning stale assets, so an interrupted run always leaves
+# the manifest pointing at assets that still exist. Beta is a separate
+# workflow with its own tag-triggered releases and stays fully independent.
+concurrency:
+  group: release-development
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  publish-development:
+    permissions:
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target aarch64-apple-darwin'
+            updater_key: 'darwin-aarch64'
+
+          - platform: 'windows-latest'
+            args: '--target x86_64-pc-windows-msvc'
+            updater_key: 'windows-x86_64'
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Frontend Dependencies
+        run: pnpm install
+        working-directory: ./apps/desktop
+
+      - name: Sync Application Version with Development Build Number
+        shell: bash
+        run: |
+          DEV_VERSION="0.1.0-dev.${{ github.run_number }}"
+          echo "Updating project versions to $DEV_VERSION..."
+          node -e "
+            const fs = require('fs');
+            const ver = '$DEV_VERSION';
+
+            const pkgPath = 'apps/desktop/package.json';
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            pkg.version = ver;
+            fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+
+            const confPath = 'apps/desktop/src-tauri/tauri.conf.json';
+            const conf = JSON.parse(fs.readFileSync(confPath, 'utf8'));
+            conf.version = ver;
+            fs.writeFileSync(confPath, JSON.stringify(conf, null, 2) + '\n');
+
+            const cargoPath = 'apps/desktop/src-tauri/Cargo.toml';
+            let cargo = fs.readFileSync(cargoPath, 'utf8');
+            cargo = cargo.replace(/^version = \".*?\"/m, 'version = \"' + ver + '\"');
+            fs.writeFileSync(cargoPath, cargo);
+          "
+
+      - name: Build and Publish Development Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          DROPFLOW_RELEASE_TAG: v0.1.0-dev.${{ github.run_number }}
+        with:
+          projectPath: ./apps/desktop
+          args: ${{ matrix.args }}
+          tagName: 'development'
+          releaseName: 'DropFlow Development Channel'
+          releaseBody: |
+            Frequent development builds, published automatically on every push to `main`.
+
+            Latest build: `0.1.0-dev.${{ github.run_number }}` (commit ${{ github.sha }}).
+
+            These builds may contain unfinished or unstable changes. For curated
+            milestone releases, switch to the **Beta** channel in Settings → About.
+          prerelease: true
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+
+      # Same per-platform manifest protection as the Beta workflow: each matrix
+      # job publishes its own latest.json as a uniquely named artifact so
+      # concurrent jobs can never overwrite each other's manifests.
+      - name: Verify Platform Updater Manifest
+        env:
+          EXPECTED_PLATFORM: ${{ matrix.updater_key }}
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const key = process.env.EXPECTED_PLATFORM;
+            const data = JSON.parse(fs.readFileSync('latest.json', 'utf8'));
+            const entry = (data.platforms || {})[key];
+            if (!entry) {
+              console.error('ERROR: updater manifest is missing platform ' + key);
+              process.exit(1);
+            }
+            if (!entry.signature || !entry.url) {
+              console.error('ERROR: platform ' + key + ' has an empty signature or url');
+              process.exit(1);
+            }
+            console.log('Updater manifest OK for ' + key + ' (advertised version: ' + data.version + ')');
+          "
+
+      - name: Upload Platform Updater Manifest Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-manifest-${{ matrix.updater_key }}
+          path: latest.json
+          if-no-files-found: error
+
+  sync-development-channel:
+    needs: publish-development
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Platform Updater Manifest Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: updater-manifest-*
+          path: manifests
+
+      # Merge every platform manifest into ONE latest.json. Each platform's own
+      # artifact is authoritative for its key; extra keys inherited from a
+      # previous upload (e.g. on a workflow re-run) are only fallbacks.
+      - name: Merge Platform Manifests into One latest.json
+        env:
+          TAG_REF: v0.1.0-dev.${{ github.run_number }}
+          REQUIRED_PLATFORMS: 'darwin-aarch64 windows-x86_64'
+        run: |
+          python3 - <<'EOF'
+          import glob, json, os, sys
+
+          tag = os.environ["TAG_REF"]
+          version = tag[1:] if tag.startswith("v") else tag
+          required_platforms = os.environ["REQUIRED_PLATFORMS"].split()
+
+          paths = sorted(glob.glob("manifests/*/latest.json"))
+          if not paths:
+              sys.exit("ERROR: no updater manifest artifacts were downloaded")
+
+          merged = None
+          platforms = {}
+          for path in paths:
+              owner = os.path.basename(os.path.dirname(path)).removeprefix("updater-manifest-")
+              with open(path) as f:
+                  data = json.load(f)
+              if data.get("version") != version:
+                  sys.exit(f"ERROR: {path} advertises version {data.get('version')!r}, expected {version!r}")
+              if merged is None:
+                  merged = {k: v for k, v in data.items() if k != "platforms"}
+              for key, entry in data.get("platforms", {}).items():
+                  if not isinstance(entry, dict) or not entry.get("signature") or not entry.get("url"):
+                      sys.exit(f"ERROR: platform '{key}' in {path} has an incomplete updater entry: {entry}")
+                  if key not in platforms or owner == key:
+                      platforms[key] = entry
+
+          missing = [p for p in required_platforms if p not in platforms]
+          if missing:
+              sys.exit(f"ERROR: merged latest.json is missing platform(s): {missing}")
+
+          merged["version"] = version
+          merged["platforms"] = platforms
+          with open("latest.json", "w") as f:
+              json.dump(merged, f, indent=2)
+
+          print(f"Merged {len(paths)} platform manifest(s) into latest.json (version {version}):")
+          print(json.dumps(merged, indent=2))
+          EOF
+
+      # Upload the merged manifest BEFORE pruning stale assets: at that point
+      # both the previous and the new installers still exist, so even if this
+      # run is cancelled right afterwards the manifest on the release points
+      # at assets that are present. Cleanup only ever removes assets that the
+      # just-published manifest does not reference.
+      - name: Publish Merged Manifest to Development Channel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create development \
+            --title "DropFlow Development Channel" \
+            --notes "Frequent development builds. Latest: 0.1.0-dev.${{ github.run_number }}." \
+            --prerelease 2>/dev/null || true
+          gh release upload development latest.json --clobber
+
+      # The floating `development` release is overwritten every run; delete
+      # installer assets from older runs so it does not grow without bound.
+      # Runs are serialized by the workflow-level concurrency group, so this
+      # can never race a newer publication.
+      - name: Remove Stale Development Assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_VERSION: 0.1.0-dev.${{ github.run_number }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, subprocess
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          current_version = os.environ["CURRENT_VERSION"]
+          release = json.loads(
+              subprocess.check_output(
+                  ["gh", "api", f"repos/{repo}/releases/tags/development"], text=True
+              )
+          )
+          for asset in release.get("assets", []):
+              name = asset.get("name", "")
+              if name == "latest.json" or f"_{current_version}_" in name:
+                  continue
+              print(f"Deleting stale development asset: {name}")
+              subprocess.check_call(
+                  ["gh", "api", "-X", "DELETE", f"repos/{repo}/releases/assets/{asset['id']}"]
+              )
+          EOF

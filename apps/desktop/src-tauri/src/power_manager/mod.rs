@@ -1,9 +1,13 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[allow(unused_imports)]
+use log::{debug, error, info};
+
 #[cfg(target_os = "macos")]
 #[allow(non_upper_case_globals)]
 mod platform_macos {
+    use log::{debug, error};
     use std::ffi::{c_char, c_void, CString};
 
     pub type IOPMAssertionID = u32;
@@ -74,13 +78,11 @@ mod platform_macos {
             CFRelease(cf_name);
 
             if ret == 0 {
-                println!(
-                    "[PowerManager] Successfully acquired macOS IOPMAssertion ({assertion_id})"
+                debug!("[PowerManager] Successfully acquired macOS IOPMAssertion ({assertion_id})"
                 );
                 Some(assertion_id)
             } else {
-                eprintln!(
-                    "[PowerManager] Failed to create macOS IOPMAssertion, return code: {ret}"
+                error!("[PowerManager] Failed to create macOS IOPMAssertion, return code: {ret}"
                 );
                 None
             }
@@ -91,11 +93,10 @@ mod platform_macos {
         unsafe {
             let ret = IOPMAssertionRelease(assertion_id);
             if ret == 0 {
-                println!(
-                    "[PowerManager] Successfully released macOS IOPMAssertion ({assertion_id})"
+                debug!("[PowerManager] Successfully released macOS IOPMAssertion ({assertion_id})"
                 );
             } else {
-                eprintln!("[PowerManager] Failed to release macOS IOPMAssertion ({assertion_id}), return code: {ret}");
+                error!("[PowerManager] Failed to release macOS IOPMAssertion ({assertion_id}), return code: {ret}");
             }
         }
     }
@@ -103,6 +104,8 @@ mod platform_macos {
 
 #[cfg(target_os = "windows")]
 mod platform_windows {
+    use log::{debug, error};
+
     pub type DWORD = u32;
     pub const ES_CONTINUOUS: DWORD = 0x80000000;
     pub const ES_SYSTEM_REQUIRED: DWORD = 0x00000001;
@@ -116,10 +119,10 @@ mod platform_windows {
         unsafe {
             let ret = SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
             if ret != 0 {
-                println!("[PowerManager] Successfully acquired Windows SetThreadExecutionState assertion");
+                debug!("[PowerManager] Successfully acquired Windows SetThreadExecutionState assertion");
                 true
             } else {
-                eprintln!("[PowerManager] Failed to set Windows SetThreadExecutionState assertion");
+                error!("[PowerManager] Failed to set Windows SetThreadExecutionState assertion");
                 false
             }
         }
@@ -128,8 +131,7 @@ mod platform_windows {
     pub fn release_sleep_assertion() {
         unsafe {
             SetThreadExecutionState(ES_CONTINUOUS);
-            println!(
-                "[PowerManager] Successfully released Windows SetThreadExecutionState assertion"
+            debug!("[PowerManager] Successfully released Windows SetThreadExecutionState assertion"
             );
         }
     }
@@ -182,7 +184,7 @@ impl SleepManager {
     }
 
     fn platform_acquire(&self) {
-        println!("[PowerManager] Sleep prevention acquired (active_transfers: 1)");
+        debug!("[PowerManager] Sleep prevention acquired (active_transfers: 1)");
         #[cfg(target_os = "macos")]
         {
             if let Some(id) = platform_macos::create_sleep_assertion() {
@@ -197,12 +199,12 @@ impl SleepManager {
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
-            println!("[PowerManager] Linux platform: System sleep prevention requested (no-op fallback).");
+            debug!("[PowerManager] Linux platform: System sleep prevention requested (no-op fallback).");
         }
     }
 
     fn platform_release(&self) {
-        println!("[PowerManager] Sleep prevention released (active_transfers: 0)");
+        debug!("[PowerManager] Sleep prevention released (active_transfers: 0)");
         #[cfg(target_os = "macos")]
         {
             if let Ok(mut guard) = self.macos_assertion_id.lock() {
@@ -217,8 +219,7 @@ impl SleepManager {
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
-            println!(
-                "[PowerManager] Linux platform: System sleep prevention released (no-op fallback)."
+            debug!("[PowerManager] Linux platform: System sleep prevention released (no-op fallback)."
             );
         }
     }

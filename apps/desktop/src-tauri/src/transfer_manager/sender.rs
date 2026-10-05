@@ -6,14 +6,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use log::info;
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 use super::protocol::{
-    read_frame_header, read_transfer_ack, write_file_complete, write_file_header,
-    write_frame_header, write_transfer_request, FileCompletePayload, FileHeaderPayload,
-    FileMetadata, FrameTag, TransferAckPayload, TransferMetadata, DEFAULT_CHUNK_SIZE,
+    perform_outgoing_handshake, read_frame_header, read_transfer_ack, write_file_complete,
+    write_file_header, write_frame_header, write_transfer_request, FileCompletePayload,
+    FileHeaderPayload, FileMetadata, FrameTag, TransferMetadata, DEFAULT_CHUNK_SIZE,
 };
 use super::receiver::{TransferCompletedPayload, TransferFailedPayload, TransferProgressPayload};
 
@@ -89,15 +90,18 @@ pub fn send_files_over_tcp(
     )
     .map_err(|e| format!("Failed to connect to peer at {target_socket_addr}: {e}"))?;
 
-    println!("[Sender] CONNECTED to {target_socket_addr}");
+    info!("[Sender] CONNECTED to {target_socket_addr}");
 
     stream
-        .set_read_timeout(Some(Duration::from_secs(30)))
+        .set_read_timeout(Some(Duration::from_secs(15)))
         .map_err(|e| format!("Failed to set stream timeout: {e}"))?;
+
+    perform_outgoing_handshake(&mut stream)?;
+    info!("[Sender] HANDSHAKE_COMPLETE");
 
     // 1. Send TransferRequest metadata frame
     write_transfer_request(&mut stream, &transfer_meta)?;
-    println!("[Sender] REQUEST_SENT");
+    info!("[Sender] REQUEST_SENT");
 
     crate::state_manager::update_incomplete_session(
         app,
@@ -151,7 +155,7 @@ pub fn send_files_over_tcp(
             .read_exact(&mut resp_payload)
             .map_err(|e| format!("Failed to read peer response payload: {e}"))?;
     }
-    println!("[Sender] ACCEPT_RECEIVED");
+    info!("[Sender] ACCEPT_RECEIVED");
 
     let start_time = Instant::now();
     let mut total_sent_bytes: u64 = 0;
@@ -159,7 +163,7 @@ pub fn send_files_over_tcp(
     let emit_interval = Duration::from_millis(50); // Max 20 FPS progress emissions
 
     // 3. Stream data for each file
-    println!("[Sender] STREAMING {} files", total_files_count);
+    info!("[Sender] STREAMING {} files", total_files_count);
     for (idx, path_str) in file_paths.iter().enumerate() {
         if cancel_flag.load(Ordering::Relaxed) {
             let _ = write_frame_header(&mut stream, FrameTag::Cancel, 0);
@@ -190,26 +194,40 @@ pub fn send_files_over_tcp(
         write_file_header(&mut stream, &file_header_payload)?;
 
         // Read TransferAck from receiver to negotiate resume_offset
-        let ack = read_transfer_ack(&mut stream).unwrap_or_else(|_| TransferAckPayload {
-            status: "ACCEPTED".to_string(),
-            resume_offset: 0,
-        });
+        let ack = read_transfer_ack(&mut stream)?;
+        if !ack.status.eq_ignore_ascii_case("ACCEPTED") {
+            return Err(format!(
+                "Receiver rejected file '{}': {}",
+                file_meta.relative_path, ack.status
+            ));
+        }
 
         let mut file_bytes_sent: u64 = 0;
-        if ack.resume_offset > 0
-            && ack.resume_offset < file_meta.size_bytes
-            && file.seek(SeekFrom::Start(ack.resume_offset)).is_ok()
-        {
+        let mut hasher = Sha256::new();
+        let mut file_buffer = vec![0u8; DEFAULT_CHUNK_SIZE];
+        if ack.resume_offset > 0 && ack.resume_offset < file_meta.size_bytes {
+            file.seek(SeekFrom::Start(0))
+                .map_err(|e| format!("Failed to seek file for checksum: {e}"))?;
+            let mut remaining = ack.resume_offset;
+            while remaining > 0 {
+                let to_read = (remaining as usize).min(file_buffer.len());
+                let read = file
+                    .read(&mut file_buffer[..to_read])
+                    .map_err(|e| format!("Failed to read resume prefix: {e}"))?;
+                if read == 0 {
+                    return Err("Unexpected EOF while hashing resume prefix".to_string());
+                }
+                hasher.update(&file_buffer[..read]);
+                remaining -= read as u64;
+            }
+            file.seek(SeekFrom::Start(ack.resume_offset))
+                .map_err(|e| format!("Failed to seek to resume offset: {e}"))?;
             file_bytes_sent = ack.resume_offset;
             total_sent_bytes += ack.resume_offset;
-            println!(
-                "[Sender] RESUMING file '{}' from offset {}",
+            info!("[Sender] RESUMING file '{}' from offset {}",
                 file_meta.relative_path, ack.resume_offset
             );
         }
-
-        let mut hasher = Sha256::new();
-        let mut file_buffer = vec![0u8; DEFAULT_CHUNK_SIZE];
 
         loop {
             if cancel_flag.load(Ordering::Relaxed) {
@@ -306,7 +324,7 @@ pub fn send_files_over_tcp(
     stream
         .flush()
         .map_err(|e| format!("Failed flushing TransferComplete frame: {e}"))?;
-    println!("[Sender] TRANSFER_COMPLETE_SENT");
+    info!("[Sender] TRANSFER_COMPLETE_SENT");
 
     // 5. Wait for TransferAck frame from receiver
     let (ack_tag, ack_len) = read_frame_header(&mut stream)
@@ -328,13 +346,13 @@ pub fn send_files_over_tcp(
         let mut ack_buf = vec![0u8; ack_len as usize];
         let _ = stream.read_exact(&mut ack_buf);
     }
-    println!("[Sender] ACK_RECEIVED");
+    info!("[Sender] ACK_RECEIVED");
 
     // 6. Graceful shutdown
     stream
         .shutdown(Shutdown::Write)
         .map_err(|e| format!("Failed to shutdown TCP write stream: {e}"))?;
-    println!("[Sender] SHUTDOWN");
+    info!("[Sender] SHUTDOWN");
 
     crate::state_manager::remove_incomplete_session(app, &session_id);
 
@@ -366,6 +384,6 @@ pub fn send_files_over_tcp(
         },
     );
 
-    println!("[Sender] Successfully completed streaming {total_sent_bytes} bytes over TCP");
+    info!("[Sender] Successfully completed streaming {total_sent_bytes} bytes over TCP");
     Ok(session_id)
 }

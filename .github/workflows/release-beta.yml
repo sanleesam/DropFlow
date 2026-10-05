@@ -1,5 +1,11 @@
 name: Release Beta
 
+# DESKTOP release workflow. Releases are independent per platform:
+#   Desktop: tags `v*`      (e.g. v0.1.0-beta.15)  -> this workflow
+#   Android: tags `android-v*` (e.g. android-v0.1.0-beta.1) -> release-android.yml
+# The `startsWith(github.ref_name, 'v')` guard below additionally guarantees
+# Android tags can never trigger a desktop release.
+
 on:
   push:
     tags:
@@ -7,6 +13,7 @@ on:
 
 jobs:
   publish-beta:
+    if: startsWith(github.ref_name, 'v')
     permissions:
       contents: write
 
@@ -16,9 +23,11 @@ jobs:
         include:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
+            updater_key: 'darwin-aarch64'
 
           - platform: 'windows-latest'
             args: '--target x86_64-pc-windows-msvc'
+            updater_key: 'windows-x86_64'
 
     runs-on: ${{ matrix.platform }}
 
@@ -88,7 +97,40 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
+      # tauri-action writes its latest.json for THIS platform to the workspace
+      # root. Sanity-check our own platform entry, then publish it as a uniquely
+      # named artifact so matrix jobs never overwrite each other's manifests.
+      - name: Verify Platform Updater Manifest
+        env:
+          EXPECTED_PLATFORM: ${{ matrix.updater_key }}
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const key = process.env.EXPECTED_PLATFORM;
+            const data = JSON.parse(fs.readFileSync('latest.json', 'utf8'));
+            const entry = (data.platforms || {})[key];
+            if (!entry) {
+              console.error('ERROR: updater manifest is missing platform ' + key);
+              process.exit(1);
+            }
+            if (!entry.signature || !entry.url) {
+              console.error('ERROR: platform ' + key + ' has an empty signature or url');
+              process.exit(1);
+            }
+            console.log('Updater manifest OK for ' + key + ' (advertised version: ' + data.version + ')');
+            console.log(JSON.stringify(entry, null, 2));
+          "
+
+      - name: Upload Platform Updater Manifest Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-manifest-${{ matrix.updater_key }}
+          path: latest.json
+          if-no-files-found: error
+
   sync-beta-channel:
+    if: startsWith(github.ref_name, 'v')
     needs: publish-beta
     runs-on: ubuntu-latest
     permissions:
@@ -97,38 +139,152 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          # Full history + tags so release notes can diff against the previous
+          # beta tag.
+          fetch-depth: 0
 
-      - name: Download and Verify Merged Manifest from Release Tag
+      - name: Download Platform Updater Manifest Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: updater-manifest-*
+          path: manifests
+
+      # Merge every platform manifest into ONE latest.json. Each platform's own
+      # artifact is authoritative for its key; extra keys inherited from a
+      # previous upload (e.g. on a workflow re-run) are only fallbacks.
+      - name: Merge Platform Manifests into One latest.json
+        env:
+          TAG_REF: ${{ github.ref_name }}
+          REQUIRED_PLATFORMS: 'darwin-aarch64 windows-x86_64'
+        run: |
+          python3 - <<'EOF'
+          import glob, json, os, sys
+
+          tag = os.environ["TAG_REF"]
+          version = tag[1:] if tag.startswith("v") else tag
+          required_platforms = os.environ["REQUIRED_PLATFORMS"].split()
+
+          paths = sorted(glob.glob("manifests/*/latest.json"))
+          if not paths:
+              sys.exit("ERROR: no updater manifest artifacts were downloaded")
+
+          merged = None
+          platforms = {}
+          for path in paths:
+              owner = os.path.basename(os.path.dirname(path)).removeprefix("updater-manifest-")
+              with open(path) as f:
+                  data = json.load(f)
+              if data.get("version") != version:
+                  sys.exit(f"ERROR: {path} advertises version {data.get('version')!r}, expected {version!r}")
+              if merged is None:
+                  merged = {k: v for k, v in data.items() if k != "platforms"}
+              for key, entry in data.get("platforms", {}).items():
+                  if not isinstance(entry, dict) or not entry.get("signature") or not entry.get("url"):
+                      sys.exit(f"ERROR: platform '{key}' in {path} has an incomplete updater entry: {entry}")
+                  if key not in platforms or owner == key:
+                      platforms[key] = entry
+
+          missing = [p for p in required_platforms if p not in platforms]
+          if missing:
+              sys.exit(f"ERROR: merged latest.json is missing platform(s): {missing}")
+
+          merged["version"] = version
+          merged["platforms"] = platforms
+          with open("latest.json", "w") as f:
+              json.dump(merged, f, indent=2)
+
+          print(f"Merged {len(paths)} platform manifest(s) into latest.json (version {version}):")
+          print(json.dumps(merged, indent=2))
+          EOF
+
+      # Generate user-facing release notes from the conventional-commit history
+      # since the previous Beta tag. Only actual commits are used; sections
+      # without content are omitted. Maintainers can refine the notes on the
+      # GitHub release afterwards; CHANGELOG.md remains the cumulative history.
+      - name: Generate Beta Release Notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_REF: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'EOF'
+          import os, re, subprocess, sys
+
+          tag = os.environ["TAG_REF"]
+          repo = os.environ["REPO"]
+
+          beta_number = tag.rsplit("-beta.", 1)[-1]
+
+          tags = subprocess.check_output(
+              ["git", "tag", "--list", "v*-beta.*", "--sort=-v:refname"], text=True
+          ).splitlines()
+          previous = next((t for t in tags if t and t != tag), None)
+
+          range_args = [f"{previous}..{tag}"] if previous else [tag, "--max-count=50"]
+          subjects = subprocess.check_output(
+              ["git", "log", *range_args, "--format=%s"], text=True
+          ).splitlines()
+
+          conventional = re.compile(r"^([a-zA-Z]+)(\([^)]*\))?!?:\s*(.+)$")
+          sections = [
+              ("Highlights", ("feat",)),
+              ("Improvements", ("perf", "refactor", "rework", "improve")),
+              ("Bug Fixes", ("fix",)),
+          ]
+          buckets = {title: [] for title, _ in sections}
+          seen = set()
+
+          for subject in subjects:
+              if subject.lower().startswith("merge "):
+                  continue  # merge commits are not user-facing
+              match = conventional.match(subject)
+              if not match:
+                  continue  # unprefixed commits stay out of user notes
+              prefix, _, text = match.groups()
+              for title, prefixes in sections:
+                  if prefix.lower() in prefixes:
+                      entry = text.strip()
+                      entry = entry[0].upper() + entry[1:] if entry else entry
+                      if entry and entry not in seen:
+                          seen.add(entry)
+                          buckets[title].append(entry)
+                      break
+
+          lines = [f"# DropFlow Beta {beta_number}", ""]
+          for title, _ in sections:
+              items = buckets[title]
+              if not items:
+                  continue  # only include sections that have real content
+              lines.extend([f"## {title}", ""])
+              lines.extend(f"- {item}" for item in items)
+              lines.append("")
+
+          if previous:
+              lines.append(f"**Full Changelog**: https://github.com/{repo}/compare/{previous}...{tag}")
+
+          if len(lines) <= 2:
+              print("No user-facing conventional commits found; leaving release notes untouched.")
+              sys.exit(0)
+
+          with open("/tmp/beta-notes.md", "w") as f:
+              f.write("\n".join(lines).rstrip() + "\n")
+          print("\n".join(lines))
+          EOF
+
+          if [ -f /tmp/beta-notes.md ]; then
+            gh release edit "${{ github.ref_name }}" --notes-file /tmp/beta-notes.md
+          fi
+
+      - name: Publish Merged Manifest to the Versioned Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p /tmp/beta-manifest
-          gh release download "${{ github.ref_name }}" --pattern "latest.json" --dir /tmp/beta-manifest --clobber
+          gh release upload "${{ github.ref_name }}" latest.json --clobber
 
-          python3 -c '
-          import json, sys
-
-          path = "/tmp/beta-manifest/latest.json"
-          with open(path) as f:
-              data = json.load(f)
-
-          print("Downloaded manifest from GitHub Release:")
-          print(json.dumps(data, indent=2))
-
-          platforms = data.get("platforms", {})
-          required = ["darwin-aarch64", "windows-x86_64"]
-          missing = [p for p in required if p not in platforms]
-
-          if missing:
-              print(f"ERROR: Published latest.json is missing platform(s): {missing}", file=sys.stderr)
-              sys.exit(1)
-
-          print("Validation successful: All target platforms present in manifest.")
-          '
-
-      - name: Publish Manifest to Beta Channel Floating Tag
+      - name: Publish Merged Manifest to Beta Channel Floating Tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create beta --title "DropFlow Beta Channel" --notes "DropFlow beta release channel updater manifest" --prerelease 2>/dev/null || true
-          gh release upload beta /tmp/beta-manifest/latest.json --clobber
+          gh release upload beta latest.json --clobber

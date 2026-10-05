@@ -7,5 +7,6 @@ interface DeviceDiscoveryListener {
     fun onDiscoveryStopped()
     fun onDeviceFound(device: Device)
     fun onDeviceLost(deviceId: String)
+    fun onAllDevicesCleared() {}
     fun onError(message: String)
 }
