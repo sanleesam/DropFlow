@@ -128,6 +128,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     >
       {/* Modal Dialog Container */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
         className="
           relative flex h-[min(640px,88vh)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-white/[0.08]
           bg-[#121418] shadow-2xl
@@ -136,10 +139,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       >
         {/* Modal Header */}
         <div className="z-10 flex items-center justify-between border-b border-white/[0.07] px-5 py-3.5 select-none bg-[#101216]/60 sm:px-6">
-          <div>
-            <h2 className="text-sm font-semibold tracking-tight text-neutral-100">Settings</h2>
-            <p className="mt-0.5 text-xs text-neutral-500">Configure application preferences.</p>
-          </div>
+          <h2 className="text-sm font-semibold tracking-tight text-neutral-100">Settings</h2>
           <button
             type="button"
             onClick={onClose}

@@ -9,19 +9,17 @@ export const AppearanceTab: React.FC = () => {
   return (
     <div className="flex flex-col gap-5 animate-[backdrop-fade-in_0.15s_ease-out]">
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-4 select-none">
-          Appearance
-        </h3>
-
-        {/* Dark Theme Switch */}
-        <div className="flex items-center justify-between py-3.5 border-b border-white/[0.07]">
+        {/* Theme (dark is the only fully-supported appearance today) */}
+        <div className="flex items-center justify-between py-3.5 border-b border-white/[0.07] select-none">
           <div className="flex flex-col pr-4">
-            <span className="text-xs font-semibold text-neutral-200">Dark theme</span>
+            <span className="text-xs font-semibold text-neutral-200">Theme</span>
             <span className="text-xs text-neutral-500 mt-0.5">
-              Switch between dark and light appearance modes.
+              DropFlow currently uses a dark interface.
             </span>
           </div>
-          <Switch checked={settings.darkTheme} onChange={(val) => updateSetting("darkTheme", val)} label="Dark theme" />
+          <span className="text-xs font-medium text-neutral-400 bg-neutral-800/80 border border-white/[0.06] rounded-md px-2.5 py-1">
+            Dark
+          </span>
         </div>
 
         {/* Accent Color selection */}
@@ -70,7 +68,7 @@ export const AppearanceTab: React.FC = () => {
           <div className="flex flex-col pr-4">
             <span className="text-xs font-semibold text-neutral-200">Reduce animations</span>
             <span className="text-xs text-neutral-500 mt-0.5">
-              Minimize interface motion and scale transitions.
+              Minimize interface motion and transitions.
             </span>
           </div>
           <Switch checked={settings.reduceAnimations} onChange={(val) => updateSetting("reduceAnimations", val)} label="Reduce animations" />

@@ -1,19 +1,34 @@
-name: Release Beta
+name: Release Development
 
-# DESKTOP release workflow. Releases are independent per platform:
-#   Desktop: tags `v*`      (e.g. v0.1.0-beta.15)  -> this workflow
-#   Android: tags `android-v*` (e.g. android-v0.1.0-beta.1) -> release-android.yml
-# The `startsWith(github.ref_name, 'v')` guard below additionally guarantees
-# Android tags can never trigger a desktop release.
+# DEVELOPMENT channel. Frequent experimental builds, fully independent of Beta:
+#   Beta:        tags `v*-beta.*` + floating `beta` release   -> release-beta.yml
+#   Development: pushes to `main` (or manual) + floating `development` release -> this workflow
+#
+# Dev builds never create Git tags, never touch the `beta` release, and use
+# their own version line (`0.1.0-dev.<run number>`) so the Beta counter stays
+# reserved for curated milestone releases. The desktop updater picks the
+# manifest of whichever channel the user selected in Settings → About.
+
+# Serialize Development publication: only one run at a time may mutate the
+# floating `development` release. Cancelling in-progress runs (and dropping
+# superseded queued runs) guarantees an older run can never publish after a
+# newer one. Cancellations almost always land during the build phase, before
+# any release mutation; the merge job below additionally uploads the merged
+# latest.json BEFORE pruning stale assets, so an interrupted run always leaves
+# the manifest pointing at assets that still exist. Beta is a separate
+# workflow with its own tag-triggered releases and stays fully independent.
+concurrency:
+  group: release-development
+  cancel-in-progress: true
 
 on:
   push:
-    tags:
-      - 'v*-beta.*'
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
-  publish-beta:
-    if: startsWith(github.ref_name, 'v')
+  publish-development:
     permissions:
       contents: write
 
@@ -52,14 +67,14 @@ jobs:
         run: pnpm install
         working-directory: ./apps/desktop
 
-      - name: Sync Application Version with Git Tag
+      - name: Sync Application Version with Development Build Number
         shell: bash
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          echo "Updating project versions to $TAG_VERSION..."
+          DEV_VERSION="0.1.0-dev.${{ github.run_number }}"
+          echo "Updating project versions to $DEV_VERSION..."
           node -e "
             const fs = require('fs');
-            const ver = '$TAG_VERSION';
+            const ver = '$DEV_VERSION';
 
             const pkgPath = 'apps/desktop/package.json';
             const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
@@ -77,29 +92,32 @@ jobs:
             fs.writeFileSync(cargoPath, cargo);
           "
 
-      - name: Build and Publish Beta Release
+      - name: Build and Publish Development Release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          DROPFLOW_RELEASE_TAG: ${{ github.ref_name }}
+          DROPFLOW_RELEASE_TAG: v0.1.0-dev.${{ github.run_number }}
         with:
           projectPath: ./apps/desktop
           args: ${{ matrix.args }}
-          tagName: ${{ github.ref_name }}
-          releaseName: 'DropFlow ${{ github.ref_name }}'
+          tagName: 'development'
+          releaseName: 'DropFlow Development Channel'
           releaseBody: |
-            DropFlow beta release ${{ github.ref_name }}
+            Frequent development builds, published automatically on every push to `main`.
 
-            This build is for testing and feedback.
+            Latest build: `0.1.0-dev.${{ github.run_number }}` (commit ${{ github.sha }}).
+
+            These builds may contain unfinished or unstable changes. For curated
+            milestone releases, switch to the **Beta** channel in Settings → About.
           prerelease: true
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
-      # tauri-action writes its latest.json for THIS platform to the workspace
-      # root. Sanity-check our own platform entry, then publish it as a uniquely
-      # named artifact so matrix jobs never overwrite each other's manifests.
+      # Same per-platform manifest protection as the Beta workflow: each matrix
+      # job publishes its own latest.json as a uniquely named artifact so
+      # concurrent jobs can never overwrite each other's manifests.
       - name: Verify Platform Updater Manifest
         env:
           EXPECTED_PLATFORM: ${{ matrix.updater_key }}
@@ -119,7 +137,6 @@ jobs:
               process.exit(1);
             }
             console.log('Updater manifest OK for ' + key + ' (advertised version: ' + data.version + ')');
-            console.log(JSON.stringify(entry, null, 2));
           "
 
       - name: Upload Platform Updater Manifest Artifact
@@ -129,9 +146,8 @@ jobs:
           path: latest.json
           if-no-files-found: error
 
-  sync-beta-channel:
-    if: startsWith(github.ref_name, 'v')
-    needs: publish-beta
+  sync-development-channel:
+    needs: publish-development
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -139,10 +155,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          # Full history + tags so release notes can diff against the previous
-          # beta tag.
-          fetch-depth: 0
 
       - name: Download Platform Updater Manifest Artifacts
         uses: actions/download-artifact@v4
@@ -155,7 +167,7 @@ jobs:
       # previous upload (e.g. on a workflow re-run) are only fallbacks.
       - name: Merge Platform Manifests into One latest.json
         env:
-          TAG_REF: ${{ github.ref_name }}
+          TAG_REF: v0.1.0-dev.${{ github.run_number }}
           REQUIRED_PLATFORMS: 'darwin-aarch64 windows-x86_64'
         run: |
           python3 - <<'EOF'
@@ -198,93 +210,46 @@ jobs:
           print(json.dumps(merged, indent=2))
           EOF
 
-      # Generate user-facing release notes from the conventional-commit history
-      # since the previous Beta tag. Only actual commits are used; sections
-      # without content are omitted. Maintainers can refine the notes on the
-      # GitHub release afterwards; CHANGELOG.md remains the cumulative history.
-      - name: Generate Beta Release Notes
+      # Upload the merged manifest BEFORE pruning stale assets: at that point
+      # both the previous and the new installers still exist, so even if this
+      # run is cancelled right afterwards the manifest on the release points
+      # at assets that are present. Cleanup only ever removes assets that the
+      # just-published manifest does not reference.
+      - name: Publish Merged Manifest to Development Channel
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_REF: ${{ github.ref_name }}
-          REPO: ${{ github.repository }}
+        run: |
+          gh release create development \
+            --title "DropFlow Development Channel" \
+            --notes "Frequent development builds. Latest: 0.1.0-dev.${{ github.run_number }}." \
+            --prerelease 2>/dev/null || true
+          gh release upload development latest.json --clobber
+
+      # The floating `development` release is overwritten every run; delete
+      # installer assets from older runs so it does not grow without bound.
+      # Runs are serialized by the workflow-level concurrency group, so this
+      # can never race a newer publication.
+      - name: Remove Stale Development Assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_VERSION: 0.1.0-dev.${{ github.run_number }}
         run: |
           python3 - <<'EOF'
-          import os, re, subprocess, sys
+          import json, os, subprocess
 
-          tag = os.environ["TAG_REF"]
-          repo = os.environ["REPO"]
-
-          beta_number = tag.rsplit("-beta.", 1)[-1]
-
-          tags = subprocess.check_output(
-              ["git", "tag", "--list", "v*-beta.*", "--sort=-v:refname"], text=True
-          ).splitlines()
-          previous = next((t for t in tags if t and t != tag), None)
-
-          range_args = [f"{previous}..{tag}"] if previous else [tag, "--max-count=50"]
-          subjects = subprocess.check_output(
-              ["git", "log", *range_args, "--format=%s"], text=True
-          ).splitlines()
-
-          conventional = re.compile(r"^([a-zA-Z]+)(\([^)]*\))?!?:\s*(.+)$")
-          sections = [
-              ("Highlights", ("feat",)),
-              ("Improvements", ("perf", "refactor", "rework", "improve")),
-              ("Bug Fixes", ("fix",)),
-          ]
-          buckets = {title: [] for title, _ in sections}
-          seen = set()
-
-          for subject in subjects:
-              if subject.lower().startswith("merge "):
-                  continue  # merge commits are not user-facing
-              match = conventional.match(subject)
-              if not match:
-                  continue  # unprefixed commits stay out of user notes
-              prefix, _, text = match.groups()
-              for title, prefixes in sections:
-                  if prefix.lower() in prefixes:
-                      entry = text.strip()
-                      entry = entry[0].upper() + entry[1:] if entry else entry
-                      if entry and entry not in seen:
-                          seen.add(entry)
-                          buckets[title].append(entry)
-                      break
-
-          lines = [f"# DropFlow Beta {beta_number}", ""]
-          for title, _ in sections:
-              items = buckets[title]
-              if not items:
-                  continue  # only include sections that have real content
-              lines.extend([f"## {title}", ""])
-              lines.extend(f"- {item}" for item in items)
-              lines.append("")
-
-          if previous:
-              lines.append(f"**Full Changelog**: https://github.com/{repo}/compare/{previous}...{tag}")
-
-          if len(lines) <= 2:
-              print("No user-facing conventional commits found; leaving release notes untouched.")
-              sys.exit(0)
-
-          with open("/tmp/beta-notes.md", "w") as f:
-              f.write("\n".join(lines).rstrip() + "\n")
-          print("\n".join(lines))
+          repo = os.environ["GITHUB_REPOSITORY"]
+          current_version = os.environ["CURRENT_VERSION"]
+          release = json.loads(
+              subprocess.check_output(
+                  ["gh", "api", f"repos/{repo}/releases/tags/development"], text=True
+              )
+          )
+          for asset in release.get("assets", []):
+              name = asset.get("name", "")
+              if name == "latest.json" or f"_{current_version}_" in name:
+                  continue
+              print(f"Deleting stale development asset: {name}")
+              subprocess.check_call(
+                  ["gh", "api", "-X", "DELETE", f"repos/{repo}/releases/assets/{asset['id']}"]
+              )
           EOF
-
-          if [ -f /tmp/beta-notes.md ]; then
-            gh release edit "${{ github.ref_name }}" --notes-file /tmp/beta-notes.md
-          fi
-
-      - name: Publish Merged Manifest to the Versioned Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "${{ github.ref_name }}" latest.json --clobber
-
-      - name: Publish Merged Manifest to Beta Channel Floating Tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create beta --title "DropFlow Beta Channel" --notes "DropFlow beta release channel updater manifest" --prerelease 2>/dev/null || true
-          gh release upload beta latest.json --clobber

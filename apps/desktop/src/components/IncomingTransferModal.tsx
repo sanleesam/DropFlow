@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ShieldCheck, FileText, Check, X, Smartphone, Monitor } from "lucide-react";
 import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
+import { formatBytes } from "../utils/formatters";
 
 export interface IncomingTransferRequestData {
   sessionId: string;
@@ -20,14 +21,6 @@ export interface IncomingTransferRequestData {
 interface IncomingTransferModalProps {
   request: IncomingTransferRequestData;
   onClose: () => void;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 }
 
 export const IncomingTransferModal: React.FC<IncomingTransferModalProps> = ({ request, onClose }) => {
@@ -57,7 +50,12 @@ export const IncomingTransferModal: React.FC<IncomingTransferModalProps> = ({ re
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md animate-[backdrop-fade-in_0.15s_ease-out]">
-      <div className="flex flex-col w-full max-w-md rounded-2xl border border-white/[0.12] bg-[#14161a] p-6 shadow-2xl animate-[modal-scale-in_0.2s_ease-out] select-none">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Incoming file transfer request"
+        className="flex flex-col w-full max-w-md rounded-2xl border border-white/[0.12] bg-[#14161a] p-6 shadow-2xl animate-[modal-scale-in_0.2s_ease-out] select-none"
+      >
         {/* Header */}
         <div className="flex items-center gap-3 pb-4 border-b border-white/[0.08]">
           <div className="p-2.5 rounded-xl bg-neutral-800/80 border border-white/[0.08] text-neutral-200">
@@ -73,7 +71,7 @@ export const IncomingTransferModal: React.FC<IncomingTransferModalProps> = ({ re
         <div className="flex flex-col gap-3 py-4">
           <div className="flex items-center justify-between p-3 rounded-xl bg-neutral-950/60 border border-white/[0.06]">
             <div className="flex flex-col">
-              <span className="text-xs text-neutral-400">Payload</span>
+              <span className="text-xs text-neutral-400">Files</span>
               <span className="text-sm font-semibold text-neutral-100 mt-0.5">
                 {request.totalFiles} {request.totalFiles === 1 ? "file" : "files"} ({formatBytes(request.totalSizeBytes)})
               </span>

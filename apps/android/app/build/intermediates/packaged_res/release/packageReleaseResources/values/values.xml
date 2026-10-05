@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">DropFlow</string>
-    <style name="Theme.DropFlow" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#0B0C0E</item>
-        <item name="android:windowBackground">#0B0C0E</item>
-        <item name="android:navigationBarColor">#0B0C0E</item>
-    </style>
-</resources>

@@ -1,0 +1,122 @@
+name: Release Android
+
+# Android Beta releases are tagged independently from desktop releases:
+#   Desktop: `v0.1.0-beta.15`        -> handled by release-beta.yml (desktop)
+#   Android: `android-v0.1.0-beta.1` -> handled by this workflow
+# The `android-` prefix guarantees this workflow never fires for desktop tags
+# and that release-beta.yml (`v*-beta.*`) never fires for Android tags.
+
+on:
+  push:
+    tags:
+      - 'android-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Verify Tag Matches Android versionName
+        id: verify-tag
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          EXPECTED_VERSION="${TAG_NAME#android-v}"
+          DECLARED_VERSION=$(grep -o 'versionName = "[^"]*"' apps/android/app/build.gradle.kts | cut -d '"' -f2)
+
+          echo "Tag version:     $EXPECTED_VERSION"
+          echo "versionName:     $DECLARED_VERSION"
+
+          if [ "$EXPECTED_VERSION" != "$DECLARED_VERSION" ]; then
+            echo "::error::Tag ${TAG_NAME} does not match versionName ${DECLARED_VERSION} in apps/android/app/build.gradle.kts"
+            exit 1
+          fi
+
+          echo "VERSION=$EXPECTED_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Configure Release Signing
+        id: configure-signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd apps/android
+
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            echo "Using release keystore provided via repository secrets."
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
+            {
+              printf 'storeFile=release.keystore\n'
+              printf 'storePassword=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
+              printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
+              printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
+            } > keystore.properties
+            echo "SIGNED_WITH_EPHEMERAL_KEY=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No signing secrets configured; generating an ephemeral keystore."
+            keytool -genkeypair -v \
+              -keystore release.keystore \
+              -alias dropflow-beta \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass dropflow-beta -keypass dropflow-beta \
+              -dname "CN=DropFlow Beta, O=DropFlow, C=US"
+            {
+              printf 'storeFile=release.keystore\n'
+              printf 'storePassword=dropflow-beta\n'
+              printf 'keyAlias=dropflow-beta\n'
+              printf 'keyPassword=dropflow-beta\n'
+            } > keystore.properties
+            echo "SIGNED_WITH_EPHEMERAL_KEY=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Release APK
+        run: ./gradlew :app:assembleRelease --no-daemon
+        working-directory: ./apps/android
+
+      - name: Rename Release APK
+        run: |
+          APK_DIR=apps/android/app/build/outputs/apk/release
+          ls -la "$APK_DIR"
+          cp "$APK_DIR/app-release.apk" "DropFlow-android-${{ steps.verify-tag.outputs.VERSION }}.apk"
+
+      - name: Create GitHub Release and Upload APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          VERSION: ${{ steps.verify-tag.outputs.VERSION }}
+        run: |
+          NOTES_FILE=$(mktemp)
+          {
+            echo "DropFlow for Android ${VERSION}"
+            echo ""
+            echo "First public Android beta build."
+            echo ""
+            echo "### Install"
+            echo "- Download the APK below and open it on your device (Android 8.0+)."
+            echo "- You may need to allow installing apps from this source."
+            if [ "${{ steps.configure-signing.outputs.SIGNED_WITH_EPHEMERAL_KEY }}" = "true" ]; then
+              echo ""
+              echo "> **Note:** This build is signed with an ephemeral CI key. If a previous"
+              echo "> DropFlow build is installed, uninstall it before installing this one."
+            fi
+          } > "$NOTES_FILE"
+
+          gh release create "$TAG_NAME" \
+            --title "DropFlow Android ${VERSION}" \
+            --notes-file "$NOTES_FILE" \
+            --prerelease \
+            "DropFlow-android-${VERSION}.apk"

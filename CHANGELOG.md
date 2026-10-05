@@ -37,6 +37,9 @@ First desktop milestone intended for real users on Windows and macOS.
 
 ### Fixed
 
+- Clearing transfer history in Settings no longer leaves ghost entries on the
+  dashboard or resurrect them on the next transfer; the dashboard now follows
+  the backend `history-updated` event as the source of truth.
 - macOS discovery: instrumented the complete pipeline (advertisement, browsing,
   resolution, TXT validation, interface selection). The remaining cause of
   "macOS discovers nothing" on real hardware is inbound mDNS (UDP 5353) being
@@ -50,8 +53,20 @@ First desktop milestone intended for real users on Windows and macOS.
 
 ### Changed
 
+- Dashboard discovery empty state is calm and jargon-free: "Looking for
+  devices…" first, with a friendly troubleshooting hint only after ~15 seconds
+  (no ports, protocols or firewall talk in the interface).
+- Settings polish: honest Appearance controls (dark theme shown as the current
+  theme, "Reduce animations" now actually takes effect), redundant per-tab
+  headings removed, dialogs annotated for screen readers, Escape closes the
+  clear-history confirmation without dismissing the whole Settings modal.
+- Byte counts and speeds are formatted consistently (shared `formatters` util)
+  — small files no longer display as "0.0 MB".
 - Duplicated byte/speed formatters consolidated; the unused `greet` Tauri
   command and scratch `tauri-icon-test/` assets were removed.
+- Release engineering: desktop and Android release pipelines are independent;
+  desktop tags (`v*`) can no longer be confused with Android tags
+  (`android-v*`), which drive the new `release-android.yml` workflow.
 
 ### Compatibility
 
@@ -67,6 +82,13 @@ released independently — see the versioning policy above.
 - Discovery, send (Android → Desktop) and receive (Desktop → Android) with the
   shared DFP/1 protocol, plus Home, History, Settings and About screens.
 - Structured NSD logging for every discovery stage.
+- Android release pipeline: `.github/workflows/release-android.yml` builds and
+  signs the release APK and attaches it to a GitHub prerelease when an
+  `android-v*` tag is pushed. Signing credentials are injected via repository
+  secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+  `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`); local builds can be signed by
+  dropping a gitignored `keystore.properties` at the repo root. The workflow
+  verifies the tag matches `versionName` before building.
 
 ### Fixed
 
@@ -87,6 +109,9 @@ released independently — see the versioning policy above.
 
 ### Changed
 
+- Settings and About screens use plain, user-facing wording: protocol
+  internals (ports, mDNS service type, multicast group) are gone, and the
+  About screen now describes the app instead of listing build specs.
 - Home screen copy is user-facing ("Files are sent straight to the selected
   device — nothing leaves your network") instead of exposing TCP port and
   SHA-256 implementation details.

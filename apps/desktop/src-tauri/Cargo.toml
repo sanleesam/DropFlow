@@ -30,6 +30,8 @@ mdns-sd = "0.20.0"
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 tokio = { version = "1", features = ["sync", "time"] }
+url = "2"
+semver = "1"
 log = { version = "0.4", features = ["std"] }
 flume = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

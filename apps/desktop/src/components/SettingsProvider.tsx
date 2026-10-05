@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { UpdateChannel } from "../types/updater";
 
 // ─── Types & Interfaces ──────────────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ export interface Settings {
   maxConcurrentTransfers: number;
   darkTheme: boolean;
   reduceAnimations: boolean;
+  updateChannel: UpdateChannel;
   trustedDevices: TrustedDevice[];
 }
 
@@ -207,8 +209,15 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     maxConcurrentTransfers: 3,
     darkTheme: true,
     reduceAnimations: false,
+    updateChannel: "beta",
     trustedDevices: [],
   });
+
+  // Honor the "Reduce animations" preference by toggling a root-level class that
+  // suppresses decorative animations and transitions app-wide.
+  useEffect(() => {
+    document.documentElement.classList.toggle("reduce-animations", settings.reduceAnimations);
+  }, [settings.reduceAnimations]);
 
   // Dynamically inject CSS variables onto document root based on active accent color
   useEffect(() => {
@@ -243,6 +252,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           autoOpenCompleted: typeof rustSet.autoOpenCompleted === "boolean" ? rustSet.autoOpenCompleted : prev.autoOpenCompleted,
           autoAcceptTrustedDevices: typeof rustSet.autoAcceptTrustedDevices === "boolean" ? rustSet.autoAcceptTrustedDevices : prev.autoAcceptTrustedDevices,
           maxConcurrentTransfers: rustSet.maxConcurrentTransfers || prev.maxConcurrentTransfers,
+          updateChannel:
+            rustSet.updateChannel === "development" || rustSet.updateChannel === "beta"
+              ? rustSet.updateChannel
+              : prev.updateChannel,
           trustedDevices: appState.trustedDevices || [],
         }));
       }
@@ -307,6 +320,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           autoOpenCompleted: next.autoOpenCompleted,
           requireConfirmation: next.requireConfirmation,
           autoAcceptTrustedDevices: next.autoAcceptTrustedDevices,
+          updateChannel: next.updateChannel,
         },
       }).catch(console.error);
       return next;

@@ -3,6 +3,7 @@ pub mod logging;
 pub mod power_manager;
 pub mod state_manager;
 pub mod transfer_manager;
+pub mod update_manager;
 
 use std::sync::{Arc, Mutex};
 use log::info;
@@ -25,6 +26,8 @@ fn get_release_info() -> ReleaseInfo {
         let tag_clean = raw_tag.strip_prefix('v').unwrap_or(raw_tag);
         let ch = if tag_clean.contains("-beta") {
             "beta"
+        } else if tag_clean.contains("-dev") {
+            "development"
         } else {
             "stable"
         };
@@ -83,6 +86,7 @@ pub fn run() {
                     .app_data_dir()
                     .unwrap_or_else(|_| std::path::PathBuf::from(".")),
             });
+            app.manage(update_manager::PendingUpdate::new());
 
             app.manage(device_discovery::DiscoveryState {
                 engine: Box::new(discovery_engine),
@@ -98,6 +102,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            update_manager::check_for_updates,
+            update_manager::download_and_install_update,
+            update_manager::clear_pending_update,
             device_discovery::start_discovery,
             device_discovery::update_advertisement,
             device_discovery::get_local_uuid,

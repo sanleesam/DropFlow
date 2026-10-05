@@ -1,3 +1,5 @@
+import { formatBytes, formatSpeed } from "./formatters";
+
 export const MAX_HISTORY_CAPACITY = 500;
 
 export interface FileMetadataPayload {
@@ -182,17 +184,14 @@ export function applyProgressEvent(
   const roundedProgress = Math.min(100, Math.max(0, Math.round(pct)));
 
   const speedBytes = payload.speedBytesPerSec ?? 0;
-  const speedMb = (speedBytes / (1024 * 1024)).toFixed(1);
-  const speedStr = `${speedMb} MB/s`;
+  const speedStr = formatSpeed(speedBytes);
 
   const sessionSent = payload.sessionBytesSent ?? 0;
   const sessionTotal = payload.sessionTotalBytes ?? 0;
 
   let bytesStr = "";
   if (sessionTotal > 0) {
-    const sentMb = (sessionSent / (1024 * 1024)).toFixed(1);
-    const totalMb = (sessionTotal / (1024 * 1024)).toFixed(1);
-    bytesStr = `${sentMb} / ${totalMb} MB`;
+    bytesStr = `${formatBytes(sessionSent)} / ${formatBytes(sessionTotal)}`;
   }
 
   let label = existing?.fileName ?? payload.currentFileName ?? "File";
@@ -315,8 +314,7 @@ export function applyCompletionEvent(
   let formattedSize = payload.size;
   if (!formattedSize || formattedSize === "Complete") {
     if (computedTotalBytes && computedTotalBytes > 0) {
-      const mb = computedTotalBytes / (1024 * 1024);
-      formattedSize = mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
+      formattedSize = formatBytes(computedTotalBytes);
     } else {
       formattedSize = "Complete";
     }

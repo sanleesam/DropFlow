@@ -28,7 +28,17 @@ Current releases:
 - **Desktop**: `0.1.0-beta.15` (Windows, macOS)
 - **Android**: `0.1.0-beta.1`
 
-See [CHANGELOG.md](CHANGELOG.md) and [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
+See [CHANGELOG.md](CHANGELOG.md), [docs/RELEASE.md](docs/RELEASE.md) and [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
+
+### Releases & tags
+
+Desktop and Android release pipelines are fully independent and are triggered
+by different tag prefixes — never tag both platforms with the same ref:
+
+| Platform | Tag example | Workflow | Artifact |
+| --- | --- | --- | --- |
+| Desktop | `v0.1.0-beta.15` | `.github/workflows/release-beta.yml` | Signed installers + `latest.json` updater manifest |
+| Android | `android-v0.1.0-beta.1` | `.github/workflows/release-android.yml` | Signed release APK |
 
 ### Completed
 

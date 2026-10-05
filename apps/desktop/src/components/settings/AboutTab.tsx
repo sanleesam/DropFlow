@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSettings, ACCENT_COLOR_MAPS } from "../SettingsProvider";
 import { useUpdater } from "../../hooks/useUpdater";
-import { UPDATER_CONFIG } from "../../config/updaterConfig";
+import { updateService } from "../../services/updateService";
+import { formatBytes } from "../../utils/formatters";
+import type { UpdateChannel } from "../../types/updater";
 
 interface ReleaseInfo {
   version: string;
@@ -11,8 +13,23 @@ interface ReleaseInfo {
   channel: string;
 }
 
+/** Options for the in-app update channel selector. */
+const UPDATE_CHANNELS: { id: UpdateChannel; label: string; description: string }[] = [
+  {
+    id: "beta",
+    label: "Beta",
+    description: "Recommended for most testers.",
+  },
+  {
+    id: "development",
+    label: "Development",
+    description:
+      "Get the newest builds first. Development builds may contain unfinished or unstable changes.",
+  },
+];
+
 export const AboutTab: React.FC = () => {
-  const { settings } = useSettings();
+  const { settings, updateSetting } = useSettings();
   const accent = ACCENT_COLOR_MAPS[settings.accentColor];
   const { state, checkForUpdates, downloadUpdate, restartApplication } = useUpdater();
   const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
@@ -27,19 +44,11 @@ export const AboutTab: React.FC = () => {
     if (typeof window !== "undefined" && window.navigator) {
       const userAgent = navigator.userAgent || "";
       const platform = navigator.platform || "";
-      if (/mac/i.test(userAgent) || /mac/i.test(platform)) return "macOS (Tauri)";
-      if (/win/i.test(userAgent) || /win/i.test(platform)) return "Windows (Tauri)";
-      if (/linux/i.test(userAgent) || /linux/i.test(platform)) return "Linux (Tauri)";
+      if (/mac/i.test(userAgent) || /mac/i.test(platform)) return "macOS";
+      if (/win/i.test(userAgent) || /win/i.test(platform)) return "Windows";
+      if (/linux/i.test(userAgent) || /linux/i.test(platform)) return "Linux";
     }
-    return "Desktop (Tauri)";
-  };
-
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+    return "Desktop";
   };
 
   const formatLastChecked = (timestamp?: number): string => {
@@ -57,7 +66,16 @@ export const AboutTab: React.FC = () => {
 
   const isBusy = state.status === "checking" || state.status === "downloading" || state.status === "installing";
   const displayVersion = releaseInfo?.display_version || state.versionInfo.currentVersion;
-  const channelDisplay = releaseInfo?.channel || UPDATER_CONFIG.channel;
+  const channelDisplay = releaseInfo?.channel || "beta";
+
+  // Switching channels invalidates any pending update from the old channel.
+  const selectedChannelRef = useRef(settings.updateChannel);
+  useEffect(() => {
+    if (selectedChannelRef.current !== settings.updateChannel) {
+      selectedChannelRef.current = settings.updateChannel;
+      void updateService.reset();
+    }
+  }, [settings.updateChannel]);
 
   return (
     <div className="flex flex-col gap-5 animate-[backdrop-fade-in_0.15s_ease-out]">
@@ -74,12 +92,12 @@ export const AboutTab: React.FC = () => {
               <span className="text-neutral-200 font-medium">v{displayVersion}</span>
             </div>
             <div className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">Channel</span>
+              <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">Build</span>
               <span className="text-neutral-200 font-medium capitalize">{channelDisplay}</span>
             </div>
             <div className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">Tauri</span>
-              <span className="text-neutral-200 font-medium">v2.0.0</span>
+              <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">Transfer protocol</span>
+              <span className="text-neutral-200 font-medium">DFP/1</span>
             </div>
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider">Platform</span>
@@ -93,6 +111,49 @@ export const AboutTab: React.FC = () => {
           <h4 className="text-xs font-semibold uppercase tracking-wider text-neutral-400 select-none">
             Software Updates
           </h4>
+
+          {/* Update Channel selector */}
+          <div
+            role="radiogroup"
+            aria-label="Update channel"
+            className="bg-neutral-950/30 border border-white/[0.08] rounded-xl p-4 flex flex-col gap-2.5"
+          >
+            <span className="text-xs font-semibold text-neutral-200 select-none">Update Channel</span>
+            {UPDATE_CHANNELS.map((channel) => {
+              const selected = settings.updateChannel === channel.id;
+              return (
+                <label
+                  key={channel.id}
+                  className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors duration-150 ${
+                    selected
+                      ? "border-white/[0.14] bg-white/[0.04]"
+                      : "border-white/[0.06] hover:border-white/[0.12] hover:bg-white/[0.02]"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="update-channel"
+                    value={channel.id}
+                    checked={selected}
+                    onChange={() => updateSetting("updateChannel", channel.id)}
+                    className="peer sr-only"
+                  />
+                  <span
+                    aria-hidden="true"
+                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500/60 ${
+                      selected ? "border-neutral-100" : "border-neutral-600"
+                    }`}
+                  >
+                    {selected && <span className={`h-2 w-2 rounded-full ${accent.progressBgDot}`} />}
+                  </span>
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-xs font-semibold text-neutral-200 select-none">{channel.label}</span>
+                    <span className="text-[11px] leading-snug text-neutral-500 select-none">{channel.description}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
 
           <div className="bg-neutral-950/30 border border-white/[0.08] rounded-xl p-4 flex flex-col gap-3">
             <div className="flex items-center justify-between">
@@ -108,7 +169,7 @@ export const AboutTab: React.FC = () => {
                   {state.status === "error" && "Update Check Failed"}
                 </span>
                 <span className="text-[11px] text-neutral-500">
-                  Last checked: {formatLastChecked(state.lastCheckedAt)} · Provider: {UPDATER_CONFIG.providerName}
+                  Last checked: {formatLastChecked(state.lastCheckedAt)}
                 </span>
               </div>
 

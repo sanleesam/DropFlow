@@ -5,6 +5,7 @@ import { useSettings, ACCENT_COLOR_MAPS } from "./SettingsProvider";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import { ActiveTransferSession } from "../utils/transferSessionManager";
+import { formatBytes } from "../utils/formatters";
 
 interface TransferProgressProps {
   session: ActiveTransferSession;
@@ -281,7 +282,7 @@ export const TransferProgress: React.FC<TransferProgressProps> = ({
                   >
                     <span className="truncate flex-1">{f.relativePath}</span>
                     <span className="font-mono text-[11px] text-neutral-400 ml-2">
-                      {(f.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+                      {formatBytes(f.sizeBytes)}
                     </span>
                   </li>
                 ))}
