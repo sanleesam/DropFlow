@@ -227,8 +227,13 @@ jobs:
 
       # The floating `development` release is overwritten every run; delete
       # installer assets from older runs so it does not grow without bound.
-      # Runs are serialized by the workflow-level concurrency group, so this
-      # can never race a newer publication.
+      # NEVER delete anything the freshly published manifest references:
+      # Tauri's macOS updater artifacts are versionless
+      # (e.g. DropFlow_aarch64.app.tar.gz), so the version-substring rule alone
+      # would orphan the darwin manifest URLs. The referenced-name keep-set is
+      # read from the local latest.json written by the merge step above — the
+      # exact manifest just published. Runs are serialized by the
+      # workflow-level concurrency group, so this can never race a newer run.
       - name: Remove Stale Development Assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -236,9 +241,23 @@ jobs:
         run: |
           python3 - <<'EOF'
           import json, os, subprocess
+          from urllib.parse import urlparse
 
           repo = os.environ["GITHUB_REPOSITORY"]
           current_version = os.environ["CURRENT_VERSION"]
+
+          # Manifest-driven keep-set: every asset the published manifest
+          # references, plus each one's .sig companion.
+          with open("latest.json") as f:
+              manifest = json.load(f)
+          referenced = set()
+          for entry in manifest.get("platforms", {}).values():
+              url = entry.get("url", "") if isinstance(entry, dict) else ""
+              name = os.path.basename(urlparse(url).path)
+              if name:
+                  referenced.add(name)
+                  referenced.add(name + ".sig")
+
           release = json.loads(
               subprocess.check_output(
                   ["gh", "api", f"repos/{repo}/releases/tags/development"], text=True
@@ -246,7 +265,11 @@ jobs:
           )
           for asset in release.get("assets", []):
               name = asset.get("name", "")
-              if name == "latest.json" or f"_{current_version}_" in name:
+              if (
+                  name == "latest.json"
+                  or f"_{current_version}_" in name
+                  or name in referenced
+              ):
                   continue
               print(f"Deleting stale development asset: {name}")
               subprocess.check_call(
