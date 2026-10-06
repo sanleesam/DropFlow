@@ -162,9 +162,13 @@ jobs:
           pattern: updater-manifest-*
           path: manifests
 
-      # Merge every platform manifest into ONE latest.json. Each platform's own
-      # artifact is authoritative for its key; extra keys inherited from a
-      # previous upload (e.g. on a workflow re-run) are only fallbacks.
+      # Merge every platform manifest into ONE latest.json. Each platform's
+      # artifact is authoritative for its own key AND its variants
+      # (windows-x86_64-nsis, darwin-aarch64-app, ...): tauri-action hydrates
+      # each artifact with the PREVIOUS release manifest, so variant keys must
+      # be refreshed from their owning platform or a stale previous-run
+      # installer would survive the merge. Keys owned by no current platform
+      # are untouched fallbacks.
       - name: Merge Platform Manifests into One latest.json
         env:
           TAG_REF: v0.1.0-dev.${{ github.run_number }}
@@ -194,7 +198,8 @@ jobs:
               for key, entry in data.get("platforms", {}).items():
                   if not isinstance(entry, dict) or not entry.get("signature") or not entry.get("url"):
                       sys.exit(f"ERROR: platform '{key}' in {path} has an incomplete updater entry: {entry}")
-                  if key not in platforms or owner == key:
+                  owned = key == owner or key.startswith(owner + "-")
+                  if key not in platforms or owned:
                       platforms[key] = entry
 
           missing = [p for p in required_platforms if p not in platforms]
