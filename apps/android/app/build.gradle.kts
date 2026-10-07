@@ -38,7 +38,11 @@ android {
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
-                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                // storeFile is resolved against the root project (apps/android/),
+                // matching where CI and local setup place release.keystore next
+                // to keystore.properties. file() here would resolve against the
+                // :app module directory and miss the keystore.
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
