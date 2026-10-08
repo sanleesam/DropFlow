@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use log::{debug, error, info, warn};
 use mdns_sd::{DaemonEvent, ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
@@ -15,6 +15,9 @@ const PROTOCOL_VERSION: &str = "DFP/1";
 const MAX_DEVICE_NAME_BYTES: usize = 64;
 /// How long the browse loop waits between mDNS events before logging a heartbeat.
 const BROWSE_HEARTBEAT_SECS: u64 = 60;
+/// After a network address change, wait for this quiet period (address events
+/// usually arrive in IpDel/IpAdd pairs) before restarting the mDNS daemon.
+const DAEMON_RESTART_QUIET_PERIOD: Duration = Duration::from_secs(3);
 
 // ─── Data Types ──────────────────────────────────────────────────────────────
 
@@ -304,8 +307,8 @@ impl PeerRegistry {
 // ─── mDNS Discovery Implementation ───────────────────────────────────────────
 
 pub struct MdnsDiscoveryEngine {
-    daemon: ServiceDaemon,
-    active_registration: Mutex<Option<ServiceInfo>>,
+    daemon: Arc<Mutex<ServiceDaemon>>,
+    active_registration: Arc<Mutex<Option<ServiceInfo>>>,
     is_browsing: Mutex<bool>,
     local_uuid: String,
     peer_registry: Arc<Mutex<PeerRegistry>>,
@@ -315,11 +318,13 @@ impl MdnsDiscoveryEngine {
     pub fn new(local_uuid: String) -> Result<Self, String> {
         let daemon =
             ServiceDaemon::new().map_err(|e| format!("Failed to create mDNS daemon: {e}"))?;
-        spawn_daemon_monitor(&daemon);
+        let daemon = Arc::new(Mutex::new(daemon));
+        let active_registration: Arc<Mutex<Option<ServiceInfo>>> = Arc::new(Mutex::new(None));
+        spawn_daemon_monitor(daemon.clone(), active_registration.clone());
         info!("[Discovery] mDNS daemon initialized (local UUID {local_uuid})");
         Ok(Self {
             daemon,
-            active_registration: Mutex::new(None),
+            active_registration,
             is_browsing: Mutex::new(false),
             local_uuid,
             peer_registry: Arc::new(Mutex::new(PeerRegistry::default())),
@@ -329,23 +334,67 @@ impl MdnsDiscoveryEngine {
 
 /// Logs daemon-level events (interface changes, socket errors, name conflicts).
 /// Without this, a dead multicast socket (e.g. OS firewall) is completely silent.
-fn spawn_daemon_monitor(daemon: &ServiceDaemon) {
-    let Ok(monitor) = daemon.monitor() else {
-        warn!("[Discovery] Could not attach daemon event monitor");
-        return;
+///
+/// When the host's network addresses change, the daemon is restarted (after a
+/// short quiet period) so multicast memberships and interface caches are fully
+/// rebuilt: mdns-sd 0.20.1 can go deaf to LAN peers after surviving network
+/// transitions, and only a fresh daemon reliably restores reception.
+fn spawn_daemon_monitor(
+    daemon: Arc<Mutex<ServiceDaemon>>,
+    active_registration: Arc<Mutex<Option<ServiceInfo>>>,
+) {
+    let monitor = match daemon.lock() {
+        Ok(current) => match current.monitor() {
+            Ok(monitor) => monitor,
+            Err(_) => {
+                warn!("[Discovery] Could not attach daemon event monitor");
+                return;
+            }
+        },
+        Err(_) => {
+            warn!("[Discovery] Could not attach daemon event monitor");
+            return;
+        }
     };
 
     std::thread::spawn(move || {
-        while let Ok(event) = monitor.recv() {
+        // Some(deadline) while waiting for address churn to settle.
+        let mut restart_after: Option<Instant> = None;
+        loop {
+            let event = if let Some(deadline) = restart_after {
+                let wait = deadline.saturating_duration_since(Instant::now());
+                match monitor.recv_timeout(wait) {
+                    Ok(event) => Some(event),
+                    // Quiet period elapsed: rebuild the daemon now.
+                    Err(flume::RecvTimeoutError::Timeout) => None,
+                    Err(flume::RecvTimeoutError::Disconnected) => return,
+                }
+            } else {
+                match monitor.recv() {
+                    Ok(event) => Some(event),
+                    Err(_) => {
+                        warn!("[Discovery] Daemon monitor channel closed");
+                        return;
+                    }
+                }
+            };
+
+            let Some(event) = event else {
+                restart_mdns_daemon(&daemon, &active_registration);
+                return; // A fresh monitor thread is attached by the restart.
+            };
+
             match event {
                 DaemonEvent::Error(err) => {
                     error!("[Discovery] mDNS daemon error: {err}")
                 }
                 DaemonEvent::IpAdd(ip) => {
-                    info!("[Discovery] Network address available: {ip}")
+                    info!("[Discovery] Network address available: {ip}");
+                    restart_after = Some(Instant::now() + DAEMON_RESTART_QUIET_PERIOD);
                 }
                 DaemonEvent::IpDel(ip) => {
-                    info!("[Discovery] Network address removed: {ip}")
+                    info!("[Discovery] Network address removed: {ip}");
+                    restart_after = Some(Instant::now() + DAEMON_RESTART_QUIET_PERIOD);
                 }
                 DaemonEvent::NameChange(change) => {
                     warn!(
@@ -362,8 +411,51 @@ fn spawn_daemon_monitor(daemon: &ServiceDaemon) {
                 _ => {}
             }
         }
-        warn!("[Discovery] Daemon monitor channel closed");
     });
+}
+
+/// Rebuilds the mDNS daemon from scratch after a network transition.
+///
+/// mdns-sd 0.20.1 masks multicast join failures on already-known interfaces and
+/// never retries them, so a daemon that survives network changes can end up
+/// unable to receive LAN peers even though advertisement still works. A fresh
+/// daemon re-enumerates all interfaces and re-joins multicast groups, restoring
+/// reception. The browse loop reconnects automatically when the old daemon's
+/// channels close.
+fn restart_mdns_daemon(
+    daemon: &Arc<Mutex<ServiceDaemon>>,
+    active_registration: &Arc<Mutex<Option<ServiceInfo>>>,
+) {
+    info!("[Discovery] Restarting mDNS daemon after network change");
+
+    let new_daemon = match ServiceDaemon::new() {
+        Ok(new_daemon) => new_daemon,
+        Err(error) => {
+            error!("[Discovery] Failed to restart mDNS daemon: {error}");
+            return;
+        }
+    };
+
+    // Re-announce the current advertisement (if any) on the new daemon.
+    if let Some(info) = active_registration.lock().ok().and_then(|guard| guard.clone()) {
+        match new_daemon.register(info) {
+            Ok(_) => info!("[Advertiser] Re-registered service after daemon restart"),
+            Err(error) => error!(
+                "[Advertiser] Failed to re-register service after daemon restart: {error}"
+            ),
+        }
+    }
+
+    let old_daemon = match daemon.lock() {
+        Ok(mut guard) => std::mem::replace(&mut *guard, new_daemon),
+        Err(error) => {
+            error!("[Discovery] mDNS daemon state unavailable after network change: {error}");
+            return;
+        }
+    };
+    let _ = old_daemon.shutdown();
+
+    spawn_daemon_monitor(daemon.clone(), active_registration.clone());
 }
 
 /// Handles one mdns-sd browse event: validates peer metadata, updates the
@@ -502,6 +594,8 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
         if port == 0 {
             if let Some(previous) = active_registration.take() {
                 self.daemon
+                    .lock()
+                    .map_err(|error| error.to_string())?
                     .unregister(previous.get_fullname())
                     .map_err(|error| format!("Failed to unregister mDNS service: {error}"))?;
                 info!(
@@ -551,8 +645,12 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
         if let Some(previous) = active_registration.as_ref() {
             if previous.get_fullname() != service_info.get_fullname() {
                 self.daemon
+                    .lock()
+                    .map_err(|error| error.to_string())?
                     .unregister(previous.get_fullname())
-                    .map_err(|error| format!("Failed to unregister prior mDNS service: {error}"))?;
+                    .map_err(|error| {
+                        format!("Failed to unregister prior mDNS service: {error}")
+                    })?;
                 info!(
                     "[Advertiser] Unregister requested: {}",
                     previous.get_fullname()
@@ -561,6 +659,8 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
         }
 
         self.daemon
+            .lock()
+            .map_err(|error| error.to_string())?
             .register(service_info.clone())
             .map_err(|error| format!("Failed to register mDNS service: {error}"))?;
 
@@ -587,7 +687,17 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
         let peer_registry = self.peer_registry.clone();
 
         std::thread::spawn(move || loop {
-            match daemon.browse(SERVICE_TYPE) {
+            // Re-acquire the current daemon on every iteration: after a network
+            // change the daemon is replaced, and the old browse channels close.
+            let current_daemon = match daemon.lock() {
+                Ok(current) => current.clone(),
+                Err(error) => {
+                    error!("[Discovery] mDNS daemon unavailable: {error}");
+                    std::thread::sleep(Duration::from_secs(5));
+                    continue;
+                }
+            };
+            match current_daemon.browse(SERVICE_TYPE) {
                 Ok(receiver) => {
                     info!("[Discovery] Browse active for {SERVICE_TYPE}");
 
