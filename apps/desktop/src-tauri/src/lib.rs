@@ -1,4 +1,5 @@
 pub mod device_discovery;
+pub mod fs_browser;
 pub mod logging;
 pub mod power_manager;
 pub mod state_manager;
@@ -128,6 +129,13 @@ pub fn run() {
             state_manager::remove_trusted_device,
             state_manager::get_trusted_devices,
             get_release_info,
+            fs_browser::get_disk_usage,
+            fs_browser::get_user_folders,
+            fs_browser::list_directory,
+            fs_browser::read_image_preview,
+            fs_browser::rename_path,
+            fs_browser::delete_path,
+            fs_browser::create_folder,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {

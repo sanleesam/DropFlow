@@ -81,13 +81,8 @@ const Toast: React.FC<ToastProps> = ({ toast, onDismiss }) => {
     <div
       role="alert"
       className={[
-        "group relative flex items-center gap-3 overflow-hidden rounded-[14px] border px-4 py-3",
-        "bg-[#111824]/95 backdrop-blur-xl",
-        "border backdrop-saturate-150",
+        "df-toast",
         style.border,
-        "shadow-[0_16px_40px_rgba(0,0,0,.34)]",
-        "animate-[toast-slide-in_0.3s_ease-out]",
-        "min-w-[280px] max-w-[400px]",
       ].join(" ")}
     >
       {/* Variant indicator bar */}
@@ -105,7 +100,7 @@ const Toast: React.FC<ToastProps> = ({ toast, onDismiss }) => {
       <span className={`flex-shrink-0 ${style.icon}`}>{icon}</span>
 
       {/* Message */}
-      <p className="flex-1 text-sm leading-5 text-slate-100">{message}</p>
+      <p className="flex-1 text-sm leading-5">{message}</p>
 
       {/* Close button */}
       <button

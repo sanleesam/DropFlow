@@ -207,7 +207,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     requireConfirmation: true,
     autoAcceptTrustedDevices: true,
     maxConcurrentTransfers: 3,
-    darkTheme: true,
+    darkTheme: false,
     reduceAnimations: false,
     updateChannel: "beta",
     trustedDevices: [],
@@ -217,7 +217,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // suppresses decorative animations and transitions app-wide.
   useEffect(() => {
     document.documentElement.classList.toggle("reduce-animations", settings.reduceAnimations);
-  }, [settings.reduceAnimations]);
+    document.documentElement.classList.toggle("dark", settings.darkTheme);
+  }, [settings.reduceAnimations, settings.darkTheme]);
 
   // Dynamically inject CSS variables onto document root based on active accent color
   useEffect(() => {
@@ -252,6 +253,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           autoOpenCompleted: typeof rustSet.autoOpenCompleted === "boolean" ? rustSet.autoOpenCompleted : prev.autoOpenCompleted,
           autoAcceptTrustedDevices: typeof rustSet.autoAcceptTrustedDevices === "boolean" ? rustSet.autoAcceptTrustedDevices : prev.autoAcceptTrustedDevices,
           maxConcurrentTransfers: rustSet.maxConcurrentTransfers || prev.maxConcurrentTransfers,
+          darkTheme: rustSet.theme === "dark",
           updateChannel:
             rustSet.updateChannel === "development" || rustSet.updateChannel === "beta"
               ? rustSet.updateChannel
