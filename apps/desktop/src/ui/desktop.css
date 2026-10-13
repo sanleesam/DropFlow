@@ -20,6 +20,8 @@
   --df-sidebar-width: 210px;
   --df-shadow: 0 4px 16px #17243806, 0 1px 2px #17243806;
   --df-shadow-floating: 0 16px 50px #0b152a26;
+  --df-reflection: linear-gradient(145deg, #ffffff70, #ffffff00 58%);
+  --df-control-reflection: linear-gradient(180deg, #ffffff70, #ffffff00);
   --df-space-1: 4px;
   --df-space-2: 8px;
   --df-space-3: 12px;
@@ -43,10 +45,10 @@
 html.dark {
   --df-bg: #101317;
   --df-sidebar: #171c23;
-  --df-surface: #1e242c;
-  --df-surface-muted: #171d24;
-  --df-border: #343c47;
-  --df-border-strong: #526171;
+  --df-surface: #1a2028;
+  --df-surface-muted: #141a21;
+  --df-border: #343e49;
+  --df-border-strong: #586b7e;
   --df-text: #eef3fc;
   --df-text-muted: #b6c0cd;
   --df-text-subtle: #a6b2c2;
@@ -54,11 +56,13 @@ html.dark {
   --df-success: #67d99c;
   --df-danger: #ff929b;
   --df-warning: #efbc6b;
-  --df-shadow: 0 4px 18px #0000001c, inset 0 1px #ffffff07;
+  --df-shadow: 0 8px 24px #00000026, inset 0 1px #ffffff0d;
   --df-shadow-floating: 0 20px 70px #00000066;
-  --df-native-sidebar: rgba(18, 22, 28, 0.76);
-  --df-native-workspace: rgba(16, 19, 23, 0.92);
-  --df-native-panel: rgba(30, 36, 44, 0.82);
+  --df-reflection: linear-gradient(145deg, #ffffff0b, #ffffff00 58%);
+  --df-control-reflection: linear-gradient(180deg, #ffffff09, #ffffff00);
+  --df-native-sidebar: rgba(16, 20, 26, 0.62);
+  --df-native-workspace: rgba(16, 19, 23, 0.88);
+  --df-native-panel: rgba(30, 37, 46, 0.76);
   --df-hover: #ffffff07;
   --df-art-frame: #151d2b;
   --df-art-edge: #65738a;
@@ -132,6 +136,7 @@ html[data-native-platform="macos"] .df-stage {
   padding: var(--df-space-6) 14px 20px;
   border-right: 1px solid var(--df-border);
   background: var(--df-sidebar);
+  box-shadow: inset -1px 0 #ffffff08;
 }
 /* A single OS backdrop sits below the WebView. Never stack CSS blur over it.
    Browser previews, failed native initialization and unsupported OSes stay solid. */
@@ -147,14 +152,14 @@ html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-si
   --df-text-subtle: #53647b;
 }
 html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-stage {
-  background: var(--df-native-workspace);
+  background: linear-gradient(155deg, #8ecaff05, transparent 45%), var(--df-native-workspace);
 }
 html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-v2-context {
-  background: var(--df-native-panel);
+  background: var(--df-reflection), var(--df-native-panel);
 }
 html.dark:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-sidebar {
-  --df-text-muted: #c9d2de;
-  --df-text-subtle: #c0cad6;
+  --df-text-muted: #f1f5fb;
+  --df-text-subtle: #edf2f8;
 }
 .df-brand {
   gap: 12px;
@@ -190,8 +195,9 @@ html.dark .df-nav-item:hover {
 .df-nav-item.active,
 html.dark .df-nav-item.active {
   color: var(--df-text);
-  background: var(--df-accent-soft);
-  border-color: #3b82f638;
+  background: var(--df-control-reflection), var(--df-accent-soft);
+  border-color: #82b9f65c;
+  box-shadow: inset 0 1px #ffffff12, 0 3px 10px #0000000d;
 }
 .df-nav-item.active svg {
   color: var(--df-accent);
@@ -283,6 +289,7 @@ html.dark .df-avatar {
 }
 .df-card {
   border-radius: var(--df-radius-card);
+  background: var(--df-reflection), var(--df-surface);
 }
 .df-card-pad {
   padding: var(--df-space-5);
@@ -302,20 +309,26 @@ html.dark .df-avatar {
 }
 .df-btn-primary,
 .df-send {
-  background: linear-gradient(180deg, #2563eb, #1d4ed8);
-  border: 1px solid #ffffff15;
-  box-shadow: 0 1px 3px #00000015;
+  background: linear-gradient(180deg, #2e72c8, #255fae);
+  border: 1px solid #8ecaff66;
+  box-shadow: inset 0 1px #ffffff20, 0 2px 5px #00000024;
+}
+.df-btn-primary:hover:not(:disabled),
+.df-send:hover:not(:disabled) {
+  background: linear-gradient(180deg, #3376c5, #2c66b5);
+  border-color: #a8d7ff;
 }
 .df-btn-soft,
 html.dark .df-btn-soft,
 .df-btn-ghost {
-  background: var(--df-surface-muted);
+  background: var(--df-control-reflection), var(--df-surface-muted);
   color: var(--df-text);
   border: 1px solid var(--df-border);
+  box-shadow: inset 0 1px #ffffff08, 0 1px 2px #0000000d;
 }
 .df-btn-soft:hover,
 .df-btn-ghost:hover:not(:disabled) {
-  background: var(--df-hover);
+  background: var(--df-control-reflection), var(--df-surface);
   border-color: var(--df-border-strong);
 }
 .df-btn-sm {
@@ -413,19 +426,20 @@ html.dark .df-search {
   gap: 8px;
   align-items: flex-start;
   text-align: left;
-  background: var(--df-surface);
+  background: var(--df-reflection), var(--df-surface);
   border: 1px solid var(--df-border);
   border-radius: 14px;
   padding: 16px;
+  box-shadow: var(--df-shadow);
 }
 .df-v2-device-card:hover {
   border-color: var(--df-border-strong);
 }
 .df-v2-device-card.selected {
   background:
-    linear-gradient(145deg, #3b82f60d, transparent), var(--df-surface);
-  border-color: #3b82f6;
-  box-shadow: inset 0 0 0 1px #3b82f6;
+    linear-gradient(145deg, #7bbdff18, transparent 65%), var(--df-surface);
+  border-color: #76b6f2;
+  box-shadow: inset 0 1px #a8d7ff26, 0 6px 20px #00000020;
 }
 .df-v2-device-card strong {
   font-size: 13px;
@@ -495,10 +509,11 @@ html.dark .df-search {
   justify-content: center;
   text-align: center;
   gap: 8px;
-  border: 1px dashed #3b82f675;
+  border: 1px dashed #659acb80;
   border-radius: 14px;
   background:
-    linear-gradient(130deg, #3b82f60a, transparent), var(--df-surface-muted);
+    radial-gradient(ellipse at 50% 0, #70b8ff14, transparent 75%), var(--df-surface-muted);
+  box-shadow: inset 0 1px #ffffff08, inset 0 -12px 36px #0000000a;
   padding: 24px;
   transition:
     border-color var(--df-duration),
