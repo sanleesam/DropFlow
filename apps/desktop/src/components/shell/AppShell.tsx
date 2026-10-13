@@ -8,7 +8,6 @@ import { DevicesPage } from "../../pages/DevicesPage";
 import { TransfersPage } from "../../pages/TransfersPage";
 import { FilesPage } from "../../pages/FilesPage";
 import { SettingsPage } from "../../pages/SettingsPage";
-import { CornerActions } from "./CornerActions";
 import { useDiskUsage } from "../../ui/useDisk";
 import { formatBytes } from "../../utils/formatters";
 
@@ -33,7 +32,8 @@ function BrandMark() {
 }
 
 export const AppShell: React.FC = () => {
-  const { page, setPage, incoming, closeIncoming } = useDropFlow();
+  const { page, setPage, incoming, closeIncoming, discovery, devices, sessionStore } = useDropFlow();
+  const running = Object.values(sessionStore.activeTransfers).filter((item) => ["Preparing...", "Sending...", "Receiving...", "Finishing..."].includes(item.status)).length;
   const disk = useDiskUsage();
   const usedPct = disk && disk.totalBytes > 0 ? Math.min(100, ((disk.totalBytes - disk.freeBytes) / disk.totalBytes) * 100) : 0;
   const storageLine = disk ? `${formatBytes(disk.totalBytes - disk.freeBytes)} of ${formatBytes(disk.totalBytes)} used` : "Checking this disk";
@@ -43,7 +43,7 @@ export const AppShell: React.FC = () => {
       <aside className="df-sidebar">
         <div className="df-brand">
           <BrandMark />
-          <strong>DropFlow</strong>
+          <div><strong>DropFlow</strong><small>Send files. Simply.</small></div>
         </div>
         <nav className="df-nav" aria-label="Main">
           {NAV.map((item) => (
@@ -55,7 +55,8 @@ export const AppShell: React.FC = () => {
               onClick={() => setPage(item.id)}
             >
               {item.icon(page === item.id)}
-              {item.label}
+              <span>{item.label}</span>
+              {item.id === "transfers" && running > 0 && <span className="df-nav-count">{running}</span>}
             </button>
           ))}
         </nav>
@@ -70,13 +71,9 @@ export const AppShell: React.FC = () => {
           <div className="df-storage-track"><span style={{ width: `${usedPct}%` }} /></div>
           <div className="df-storage-meta">{storageLine}</div>
         </div>
+        <div className="df-v2-network" role="status"><i className={`df-dot${discovery === "error" ? " bad" : discovery === "ready" ? "" : " idle"}`} /><div>{discovery === "error" ? "Discovery unavailable" : discovery === "ready" ? "Devices nearby" : "Discovering devices"}<small>{devices.length ? `${devices.length} nearby on your network` : "Local network only"}</small></div></div>
       </aside>
       <div className="df-stage">
-        {page === "settings" && (
-          <div className="df-topbar">
-            <CornerActions />
-          </div>
-        )}
         <div className="df-scroll">
           {page === "home" && <HomePage />}
           {page === "devices" && <DevicesPage />}
