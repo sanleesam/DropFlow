@@ -48,6 +48,7 @@ fn apply(window: &WebviewWindow, desired: u8) -> Result<(), window_vibrancy::Err
     }
     #[cfg(target_os = "windows")]
     {
+        let _ = desired;
         // Acrylic's legacy implementation has known drag/resize regressions.
         // Mica is wallpaper-influenced, NOT a live behind-window blur.
         window_vibrancy::apply_mica(window, None)?;
