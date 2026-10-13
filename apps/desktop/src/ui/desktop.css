@@ -4,13 +4,17 @@
     -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, sans-serif;
   --df-bg: #f3f5f9;
   --df-sidebar: #eaf0f7;
-  --df-surface: #fff;
-  --df-surface-muted: #f4f7fb;
+  --df-surface-solid: #fff;
+  --df-surface-muted-solid: #f4f7fb;
+  --df-surface: var(--df-surface-solid);
+  --df-surface-muted: var(--df-surface-muted-solid);
   --df-border: #dce3ed;
   --df-border-strong: #bcc9dc;
   --df-text: #172438;
-  --df-text-muted: #53647b;
-  --df-text-subtle: #63738a;
+  --df-text-muted-solid: #53647b;
+  --df-text-subtle-solid: #63738a;
+  --df-text-muted: var(--df-text-muted-solid);
+  --df-text-subtle: var(--df-text-subtle-solid);
   --df-accent-strong: #2563eb;
   --df-success: #16834c;
   --df-danger: #cb3544;
@@ -36,8 +40,16 @@
   --df-art-edge: #8b9db5;
   --df-art-screen: #102d60;
   --df-native-sidebar: rgba(234, 240, 247, 0.94);
-  --df-native-workspace: rgba(243, 245, 249, 0.94);
-  --df-native-panel: rgba(255, 255, 255, 0.84);
+  --df-native-workspace: rgba(243, 245, 249, 0.78);
+  --df-native-panel: rgba(255, 255, 255, 0.58);
+  --df-native-card: rgba(255, 255, 255, 0.52);
+  --df-native-inset: rgba(239, 245, 252, 0.38);
+  --df-control: var(--df-surface-muted-solid);
+  --df-native-control: rgba(250, 252, 255, 0.80);
+  --df-floating: var(--df-surface-solid);
+  --df-native-floating: rgba(250, 252, 255, 0.97);
+  --df-native-text-muted: #45546a;
+  --df-native-text-subtle: #53647b;
   --df-hover: #1d426709;
   --df-duration: 160ms;
   --df-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -45,13 +57,13 @@
 html.dark {
   --df-bg: #101317;
   --df-sidebar: #171c23;
-  --df-surface: #1a2028;
-  --df-surface-muted: #141a21;
+  --df-surface-solid: #1a2028;
+  --df-surface-muted-solid: #141a21;
   --df-border: #343e49;
   --df-border-strong: #586b7e;
   --df-text: #eef3fc;
-  --df-text-muted: #b6c0cd;
-  --df-text-subtle: #a6b2c2;
+  --df-text-muted-solid: #b6c0cd;
+  --df-text-subtle-solid: #a6b2c2;
   --df-track: #343e4b;
   --df-success: #67d99c;
   --df-danger: #ff929b;
@@ -61,8 +73,14 @@ html.dark {
   --df-reflection: linear-gradient(145deg, #ffffff0b, #ffffff00 58%);
   --df-control-reflection: linear-gradient(180deg, #ffffff09, #ffffff00);
   --df-native-sidebar: rgba(16, 20, 26, 0.62);
-  --df-native-workspace: rgba(16, 19, 23, 0.88);
-  --df-native-panel: rgba(30, 37, 46, 0.76);
+  --df-native-workspace: rgba(16, 19, 23, 0.68);
+  --df-native-panel: rgba(30, 37, 46, 0.44);
+  --df-native-card: rgba(30, 37, 46, 0.40);
+  --df-native-inset: rgba(16, 24, 34, 0.24);
+  --df-native-control: rgba(17, 25, 35, 0.68);
+  --df-native-floating: rgba(26, 32, 40, 0.96);
+  --df-native-text-muted: #e3ebf6;
+  --df-native-text-subtle: #dce6f2;
   --df-hover: #ffffff07;
   --df-art-frame: #151d2b;
   --df-art-edge: #65738a;
@@ -140,6 +158,21 @@ html[data-native-platform="macos"] .df-stage {
 }
 /* A single OS backdrop sits below the WebView. Never stack CSS blur over it.
    Browser previews, failed native initialization and unsupported OSes stay solid. */
+html:is([data-native-material="vibrancy"], [data-native-material="mica"]) {
+  --df-surface: var(--df-native-card);
+  --df-surface-muted: var(--df-native-inset);
+  --df-control: var(--df-native-control);
+  --df-floating: var(--df-native-floating);
+  --df-text-muted: var(--df-native-text-muted);
+  --df-text-subtle: var(--df-native-text-subtle);
+}
+html.dark:is([data-native-material="vibrancy"], [data-native-material="mica"]) {
+  --df-border: #c5ddf238;
+  --df-border-strong: #9baec4;
+  --df-shadow: 0 8px 24px #00000020, inset 0 1px #ffffff14;
+  --df-reflection: linear-gradient(145deg, #d9eaff0d, #ffffff00 62%);
+  --df-control-reflection: linear-gradient(180deg, #d9eaff10, #ffffff00);
+}
 html:is([data-native-material="vibrancy"], [data-native-material="mica"]),
 html:is([data-native-material="vibrancy"], [data-native-material="mica"]) body,
 html:is([data-native-material="vibrancy"], [data-native-material="mica"]) #root,
@@ -152,7 +185,9 @@ html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-si
   --df-text-subtle: #53647b;
 }
 html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-stage {
-  background: linear-gradient(155deg, #8ecaff05, transparent 45%), var(--df-native-workspace);
+  background:
+    radial-gradient(ellipse at 45% 0, #b7dcff08, transparent 65%),
+    var(--df-native-workspace);
 }
 html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-v2-context {
   background: var(--df-reflection), var(--df-native-panel);
@@ -160,6 +195,19 @@ html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-v2
 html.dark:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-sidebar {
   --df-text-muted: #f1f5fb;
   --df-text-subtle: #edf2f8;
+}
+/* Floating surfaces do not rely on a workspace tint beneath them. */
+.df-dialog,
+.df-toast,
+.df-picker-menu,
+.df-new-menu,
+html.dark .df-new-menu {
+  background: var(--df-reflection), var(--df-floating);
+  --df-surface: var(--df-surface-solid);
+  --df-surface-muted: var(--df-surface-muted-solid);
+  --df-control: var(--df-surface-muted-solid);
+  --df-text-muted: var(--df-text-muted-solid);
+  --df-text-subtle: var(--df-text-subtle-solid);
 }
 .df-brand {
   gap: 12px;
@@ -321,14 +369,14 @@ html.dark .df-avatar {
 .df-btn-soft,
 html.dark .df-btn-soft,
 .df-btn-ghost {
-  background: var(--df-control-reflection), var(--df-surface-muted);
+  background: var(--df-control-reflection), var(--df-control);
   color: var(--df-text);
   border: 1px solid var(--df-border);
   box-shadow: inset 0 1px #ffffff08, 0 1px 2px #0000000d;
 }
 .df-btn-soft:hover,
 .df-btn-ghost:hover:not(:disabled) {
-  background: var(--df-control-reflection), var(--df-surface);
+  background: var(--df-reflection), var(--df-control);
   border-color: var(--df-border-strong);
 }
 .df-btn-sm {
@@ -345,13 +393,13 @@ html.dark .df-btn-soft,
 }
 .df-input,
 .df-select {
-  background: var(--df-surface-muted);
+  background: var(--df-control);
   border-color: var(--df-border-strong);
   font-size: 13px;
 }
 .df-search,
 html.dark .df-search {
-  background: var(--df-surface-muted);
+  background: var(--df-control);
   color: var(--df-text-muted);
   min-width: 0;
 }
@@ -487,6 +535,8 @@ html.dark .df-search {
   gap: 9px;
   padding: 20px;
   text-align: center;
+  background: var(--df-reflection), var(--df-surface-muted);
+  box-shadow: inset 0 1px #ffffff08;
 }
 .df-v2-discovery svg {
   color: var(--df-text-muted);
@@ -1204,7 +1254,15 @@ html.dark .df-search {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-@media (prefers-reduced-transparency: reduce) {
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  html:is([data-native-material="vibrancy"], [data-native-material="mica"]) {
+    --df-surface: var(--df-surface-solid);
+    --df-surface-muted: var(--df-surface-muted-solid);
+    --df-control: var(--df-surface-muted-solid);
+    --df-floating: var(--df-surface-solid);
+    --df-text-muted: var(--df-text-muted-solid);
+    --df-text-subtle: var(--df-text-subtle-solid);
+  }
   html:is([data-native-material="vibrancy"], [data-native-material="mica"]) body,
   html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-shell,
   html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-stage {
