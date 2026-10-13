@@ -120,6 +120,7 @@ export const AppShell: React.FC = () => {
 
   return (
     <div className="df-shell">
+      <div className="df-native-titlebar" data-tauri-drag-region aria-hidden="true" />
       <aside className="df-sidebar">
         <div className="df-brand">
           <BrandMark />

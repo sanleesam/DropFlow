@@ -40,8 +40,8 @@ fn apply(window: &WebviewWindow, desired: u8) -> Result<(), window_vibrancy::Err
         } else {
             window_vibrancy::apply_vibrancy(
                 window,
-                window_vibrancy::NSVisualEffectMaterial::UnderWindowBackground,
-                Some(window_vibrancy::NSVisualEffectState::FollowsWindowActiveState),
+                window_vibrancy::NSVisualEffectMaterial::Sidebar,
+                Some(window_vibrancy::NSVisualEffectState::Active),
                 None,
             )?;
         }
@@ -85,8 +85,15 @@ pub fn refresh(window: &WebviewWindow) {
         2 => "mica",
         _ => "solid",
     };
+    let platform = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "other"
+    };
     if let Err(error) = window.eval(format!(
-        "document.documentElement.dataset.nativeMaterial = '{material}';"
+        "document.documentElement.dataset.nativeMaterial = '{material}'; document.documentElement.dataset.nativePlatform = '{platform}';"
     )) {
         log::debug!("[WindowMaterial] Page not ready; solid CSS fallback retained: {error}");
     }

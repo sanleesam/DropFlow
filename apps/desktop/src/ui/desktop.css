@@ -111,6 +111,23 @@ h3 {
   background:
     radial-gradient(ellipse at 60% 0, #3b82f60a, transparent 60%), var(--df-bg);
 }
+.df-native-titlebar {
+  display: none;
+}
+/* Native traffic lights stay above this empty drag region. No imitation chrome. */
+html[data-native-platform="macos"] .df-native-titlebar {
+  display: block;
+  position: fixed;
+  inset: 0 0 auto;
+  height: 36px;
+  z-index: 10;
+}
+html[data-native-platform="macos"] .df-sidebar {
+  padding-top: 60px;
+}
+html[data-native-platform="macos"] .df-stage {
+  padding-top: 36px;
+}
 .df-sidebar {
   padding: var(--df-space-6) 14px 20px;
   border-right: 1px solid var(--df-border);
