@@ -1,9 +1,10 @@
 # Desktop UI v2
 
-This is a frontend-only redesign on `feature/desktop-ui-v2`. Rust, DFP/1,
-discovery, Tauri configuration, providers, updater service, endpoints and release
-workflows are unchanged. The backend already defaults to dark mode; existing
-saved light/dark preferences are respected.
+This redesign is on `feature/desktop-ui-v2`. DFP/1, discovery, providers,
+updater service, endpoints and release workflows are unchanged. The subsequent
+native-glass extension changes only window initialization/configuration and CSS;
+see [native materials](NATIVE_WINDOW_MATERIALS.md). The backend already defaults
+to dark mode; existing saved light/dark preferences are respected.
 
 ## Design decisions and research
 
@@ -13,7 +14,8 @@ saved light/dark preferences are respected.
 - [Microsoft Mica](https://learn.microsoft.com/en-us/windows/apps/design/style/mica)
   and [Acrylic](https://learn.microsoft.com/en-us/windows/apps/design/style/acrylic)
   informed restrained material use, layered surfaces and opaque fallbacks.
-  DropFlow uses CSS interpretation, not native Mica/Acrylic integration.
+  The native extension now uses macOS vibrancy and Windows Mica, with controlled
+  CSS overlays and solid fallbacks. Acrylic was evaluated but not enabled.
 - [Raycast's technical design discussion](https://www.raycast.com/blog/a-technical-deep-dive-into-the-new-raycast)
   informed native system typography, default desktop cursors, short transitions
   and avoidance of gratuitous motion. Native window behavior remains unchanged.
@@ -25,9 +27,10 @@ no imitation traffic lights, decorative stock photos or fabricated network/OS da
 
 ## Significant changes
 
-- `ui/desktop.css` defines navy/light surfaces, readable text, spacing, radii,
-  borders, shadows and interaction tokens. Primary content is opaque. Only the
-  sidebar gets 16px backdrop blur at 84–86% opacity, with a solid fallback.
+- `ui/desktop.css` defines titanium/light surfaces, readable text, spacing, radii,
+  borders, shadows and interaction tokens. Primary content stays mostly opaque.
+  Native material is exposed only after successful initialization; the previous
+  CSS sidebar blur is removed to avoid double compositing.
 - Shared React primitives provide page headers, selectable device cards,
   original vector device visuals, progress bars, empty states, setting rows,
   switches and focus-contained dialogs.
@@ -60,8 +63,10 @@ no imitation traffic lights, decorative stock photos or fabricated network/OS da
 
 ## Assets and licenses
 
-No new runtime dependencies, downloaded illustrations or hotlinked images were
-introduced. Device illustrations are original inline SVGs, not copied from Apple,
+No new frontend runtime dependencies, downloaded illustrations or hotlinked images
+were introduced. The native extension directly references two crates already in
+Tauri's dependency graph, without version upgrades. Device illustrations are
+original inline SVGs, not copied from Apple,
 Raycast or reference artwork. The existing DropFlow brand mark is retained.
 
 [Lucide](https://lucide.dev/license) is the existing icon dependency. It is ISC
@@ -92,9 +97,10 @@ pnpm test:ui
 although its old console heading says 10) and 12 UI primitive assertions using
 Vite's existing toolchain. Generated test bundles are temporary and removed.
 
-Native `pnpm tauri dev` compiled and launched without backend changes. Browser
+Native `pnpm tauri dev` compiled and launched without transfer/backend changes. Browser
 visual review covers actual rendered pages, empty/error states, dark/light
 appearance and supported desktop sizes. Browser preview cannot perform native
-discovery or file dialogs. Native screenshot inspection requires macOS computer-use
-permissions. Physical macOS/Windows/Android transfers and actual update installation
-still require device testing before release.
+discovery or file dialogs. The native-glass extension was compiled, bundled and
+inspected on macOS; its exact verification limits are recorded in the native
+materials document. Physical macOS/Windows/Android transfers and actual update
+installation still require device testing before release.

@@ -1,4 +1,4 @@
-/* Desktop v2: materials are reserved for navigation; content stays opaque. */
+/* Titanium surfaces are opaque by default; only confirmed native materials open them. */
 :root {
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, sans-serif;
@@ -33,28 +33,32 @@
   --df-art-frame: #192638;
   --df-art-edge: #8b9db5;
   --df-art-screen: #102d60;
-  --df-glass: rgba(234, 240, 247, 0.86);
+  --df-native-sidebar: rgba(234, 240, 247, 0.94);
+  --df-native-workspace: rgba(243, 245, 249, 0.94);
+  --df-native-panel: rgba(255, 255, 255, 0.84);
   --df-hover: #1d426709;
   --df-duration: 160ms;
   --df-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 html.dark {
-  --df-bg: #0c1220;
-  --df-sidebar: #0e1727;
-  --df-surface: #141e2f;
-  --df-surface-muted: #101a2a;
-  --df-border: #263247;
-  --df-border-strong: #41516b;
+  --df-bg: #101317;
+  --df-sidebar: #171c23;
+  --df-surface: #1e242c;
+  --df-surface-muted: #171d24;
+  --df-border: #343c47;
+  --df-border-strong: #526171;
   --df-text: #eef3fc;
-  --df-text-muted: #a8b6cc;
-  --df-text-subtle: #95a5be;
-  --df-track: #29354a;
+  --df-text-muted: #b6c0cd;
+  --df-text-subtle: #a6b2c2;
+  --df-track: #343e4b;
   --df-success: #67d99c;
   --df-danger: #ff929b;
   --df-warning: #efbc6b;
-  --df-shadow: 0 4px 18px #00000012, inset 0 1px #ffffff03;
+  --df-shadow: 0 4px 18px #0000001c, inset 0 1px #ffffff07;
   --df-shadow-floating: 0 20px 70px #00000066;
-  --df-glass: rgba(14, 23, 39, 0.84);
+  --df-native-sidebar: rgba(18, 22, 28, 0.76);
+  --df-native-workspace: rgba(16, 19, 23, 0.92);
+  --df-native-panel: rgba(30, 36, 44, 0.82);
   --df-hover: #ffffff07;
   --df-art-frame: #151d2b;
   --df-art-edge: #65738a;
@@ -64,6 +68,8 @@ body {
   font-size: 14px;
 }
 button {
+  appearance: none;
+  -webkit-appearance: none;
   cursor: default;
   transition:
     background var(--df-duration) var(--df-ease),
@@ -110,14 +116,28 @@ h3 {
   border-right: 1px solid var(--df-border);
   background: var(--df-sidebar);
 }
-@supports (
-  (backdrop-filter: blur(16px)) or (-webkit-backdrop-filter: blur(16px))
-) {
-  .df-sidebar {
-    background: var(--df-glass);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-  }
+/* A single OS backdrop sits below the WebView. Never stack CSS blur over it.
+   Browser previews, failed native initialization and unsupported OSes stay solid. */
+html:is([data-native-material="vibrancy"], [data-native-material="mica"]),
+html:is([data-native-material="vibrancy"], [data-native-material="mica"]) body,
+html:is([data-native-material="vibrancy"], [data-native-material="mica"]) #root,
+html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-shell {
+  background: transparent;
+}
+html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-sidebar {
+  background: var(--df-native-sidebar);
+  --df-text-muted: #45546a;
+  --df-text-subtle: #53647b;
+}
+html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-stage {
+  background: var(--df-native-workspace);
+}
+html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-v2-context {
+  background: var(--df-native-panel);
+}
+html.dark:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-sidebar {
+  --df-text-muted: #c9d2de;
+  --df-text-subtle: #c0cad6;
 }
 .df-brand {
   gap: 12px;
@@ -1152,10 +1172,16 @@ html.dark .df-search {
   }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .df-sidebar {
+  html:is([data-native-material="vibrancy"], [data-native-material="mica"]) body,
+  html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-shell,
+  html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-stage {
+    background: var(--df-bg);
+  }
+  html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-sidebar {
     background: var(--df-sidebar);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
+  }
+  html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-v2-context {
+    background: var(--df-surface);
   }
 }
 @media (prefers-contrast: more) {
