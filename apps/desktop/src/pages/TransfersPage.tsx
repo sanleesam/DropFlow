@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Check, Clock, FileArchive, FileText, Folder, Gauge, Image as ImageIcon, Moon, Pause, Play, RotateCcw, Search, ShieldCheck, Wifi, X } from "lucide-react";
+import { ArrowLeftRight, Check, Clock, FileArchive, FileText, Folder, Gauge, Image as ImageIcon, Info, Play, Search, Wifi, X } from "lucide-react";
 import { useToast } from "../components/ToastProvider";
 import { useDropFlow } from "../session/DropFlowProvider";
-import { deviceArt, friendlyTransferError } from "../ui/artwork";
+import { friendlyTransferError } from "../ui/artwork";
+import { DeviceVisual, EmptyState, PageHeader, Progress } from "../components/ui/Desktop";
 import { ActiveTransferSession, RecentTransfer, formatRelativeTimestamp } from "../utils/transferSessionManager";
 
 type Filter = "all" | "send" | "receive" | "completed" | "failed";
@@ -23,17 +24,18 @@ function live(session: ActiveTransferSession): boolean {
 
 function fileTone(name: string): { bg: string; fg: string; icon: React.ReactNode; label: string } {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  if (["zip", "rar", "7z", "tar", "gz"].includes(ext)) return { bg: "#FFF1E6", fg: "#F08A24", icon: <FileArchive size={16} />, label: "ZIP Archive" };
-  if (["png", "jpg", "jpeg", "gif", "webp", "heic", "svg"].includes(ext)) return { bg: "#E7F0FF", fg: "#3B82F6", icon: <ImageIcon size={16} />, label: "Image" };
-  if (["mp4", "mov", "mkv", "avi", "webm"].includes(ext)) return { bg: "#F3E8FF", fg: "#8B5CF6", icon: <Play size={16} />, label: "Video" };
-  if (ext === "pdf") return { bg: "#FDECEC", fg: "#EF4444", icon: <FileText size={16} />, label: "PDF" };
-  return { bg: "#EEF2FF", fg: "#6366F1", icon: <FileText size={16} />, label: ext ? ext.toUpperCase() : "File" };
+  if (["zip", "rar", "7z", "tar", "gz"].includes(ext)) return { bg: "var(--df-warning-soft)", fg: "var(--df-warning)", icon: <FileArchive size={16} />, label: "Archive" };
+  if (["png", "jpg", "jpeg", "gif", "webp", "heic", "svg"].includes(ext)) return { bg: "var(--df-accent-soft)", fg: "var(--df-text)", icon: <ImageIcon size={16} />, label: "Image" };
+  if (["mp4", "mov", "mkv", "avi", "webm"].includes(ext)) return { bg: "var(--df-accent-soft)", fg: "var(--df-text)", icon: <Play size={16} />, label: "Video" };
+  if (ext === "pdf") return { bg: "var(--df-danger-soft)", fg: "var(--df-danger)", icon: <FileText size={16} />, label: "PDF" };
+  return { bg: "var(--df-accent-soft)", fg: "var(--df-text)", icon: <FileText size={16} />, label: ext ? ext.toUpperCase() : "File" };
 }
 
 function AreaSpark({ values, color }: { values: number[]; color: string }) {
   const width = 220;
   const height = 32;
-  const nums = values.length > 1 ? values : [1, 1];
+  if (values.length < 2) return null;
+  const nums = values;
   const max = Math.max(...nums, 1);
   const pts = nums.map((value, index) => {
     const x = (index / (nums.length - 1)) * width;
@@ -71,8 +73,9 @@ export const TransfersPage: React.FC = () => {
 
   const visibleActive = active.filter((session) => matches(session.direction, session.status, session.fileName, session.deviceName));
   const visibleHistory = history.filter((item) => matches(item.direction, item.status, item.fileName, item.deviceName));
-  const selectedActive = visibleActive.find((session) => session.id === picked) || visibleActive[0];
-  const selectedHistory = !selectedActive ? visibleHistory.find((item) => item.id === picked) || visibleHistory[0] : undefined;
+  const pickedHistory = visibleHistory.find((item) => item.id === picked);
+  const selectedActive = pickedHistory ? undefined : visibleActive.find((session) => session.id === picked) || visibleActive[0];
+  const selectedHistory = pickedHistory || (!selectedActive ? visibleHistory[0] : undefined);
 
   const openPathSafe = async (path: string) => {
     try {
@@ -99,19 +102,16 @@ export const TransfersPage: React.FC = () => {
 
   return (
     <div className="df-page df-transfers">
-      <header className="df-page-bar">
-        <div>
-          <h1>Transfers</h1>
-          <p>Send and receive files across your devices</p>
-        </div>
+      <PageHeader title="Transfers" description="Follow active transfers and revisit your recent files." />
+      <div className="df-v2-toolbar">
         <div className="df-chips">
           {FILTERS.map((item) => (
-            <button key={item.id} type="button" className={filter === item.id ? "df-chip active" : "df-chip"} onClick={() => setFilter(item.id)}>
+            <button key={item.id} type="button" aria-pressed={filter === item.id} className={filter === item.id ? "df-chip active" : "df-chip"} onClick={() => setFilter(item.id)}>
               {item.label}
             </button>
           ))}
         </div>
-      </header>
+      </div>
 
       <div className="df-tx-grid">
         <div className="df-tx-main">
@@ -119,11 +119,10 @@ export const TransfersPage: React.FC = () => {
             <div className="df-card-head">
               <h2>Active Transfers ({visibleActive.length})</h2>
               <div className="df-tx-bulk">
-                <button type="button" disabled title="A transfer can be cancelled, not paused"><Pause size={13} /> Pause All</button>
                 <button type="button" disabled={visibleActive.length === 0} onClick={cancelAll}><X size={13} /> Cancel All</button>
               </div>
             </div>
-            {visibleActive.length === 0 && <p className="df-kicker">No transfer is running right now.</p>}
+            {visibleActive.length === 0 && <EmptyState compact icon={<ArrowLeftRight size={22} />} title={filter === "all" ? "No active transfers" : "No matching active transfers"}>New transfers will appear here as soon as they start.</EmptyState>}
             {visibleActive.map((session) => (
               <ActiveRow
                 key={session.id}
@@ -141,10 +140,10 @@ export const TransfersPage: React.FC = () => {
               <h2>Recent Transfers</h2>
               <label className="df-search df-search-sm">
                 <Search size={14} />
-                <input value={query} placeholder="Search transfers..." onChange={(event) => setQuery(event.target.value)} />
+                <input aria-label="Search transfers" value={query} placeholder="Search transfers…" onChange={(event) => setQuery(event.target.value)} />
               </label>
             </div>
-            {visibleHistory.length === 0 && <p className="df-kicker">{query ? `No transfers match “${query}”.` : "Completed transfers will be listed here."}</p>}
+            {visibleHistory.length === 0 && <EmptyState compact icon={<Folder size={22} />} title={query || filter !== "all" ? "No matching transfers" : "No transfer history yet"}>{query || filter !== "all" ? "Try another search or filter." : "Completed and failed transfers will appear here."}</EmptyState>}
             {visibleHistory.map((item) => (
               <HistoryRow key={item.id} item={item} selected={selectedHistory?.id === item.id} onPick={() => setPicked(item.id)} onOpen={openPathSafe} onReveal={revealSafe} />
             ))}
@@ -170,7 +169,7 @@ export const TransfersPage: React.FC = () => {
 
 function ActiveRow({ session, selected, speeds, onPick, onCancel }: { session: ActiveTransferSession; selected: boolean; speeds: number[]; onPick: () => void; onCancel: () => void }) {
   const tone = fileTone(session.fileName);
-  const color = session.direction === "receive" ? "#8B5CF6" : "#2F7CF6";
+  const color = "#3B82F6";
   return (
     <div className={selected ? "df-tx-row picked" : "df-tx-row"}>
       <button type="button" className="df-tx-hit" onClick={onPick}>
@@ -179,14 +178,13 @@ function ActiveRow({ session, selected, speeds, onPick, onCancel }: { session: A
           <strong>{session.totalFiles > 1 ? `${session.totalFiles} files` : session.fileName}</strong>
           <span className="df-xfer-meta">{session.bytesInfo || session.speed} · {session.direction === "receive" ? "Receiving from" : "Sending to"} {session.deviceName}</span>
           <span className="df-tx-meter">
-            <span className="df-thinbar"><i style={{ width: `${session.progress}%`, background: color }} /></span>
+            <Progress value={session.progress} label={`Transfer of ${session.fileName}`} />
             <b>{session.progress}%</b>
           </span>
           <span className="df-tx-foot"><span>{session.speed}</span><AreaSpark values={speeds} color={color} /><span>{session.timeRemaining}</span></span>
         </span>
       </button>
       <span className="df-tx-row-actions">
-        <button type="button" className="df-pause" disabled title="A transfer can be cancelled, not paused"><Pause size={12} /></button>
         <button type="button" className="df-pause" aria-label="Cancel transfer" onClick={onCancel}><X size={12} /></button>
       </span>
     </div>
@@ -210,7 +208,7 @@ function HistoryRow({ item, selected, onPick, onOpen, onReveal }: { item: Recent
       </button>
       <span className="df-hist-actions">
         {path && <button type="button" aria-label="Show in folder" onClick={() => onReveal(path)}><Folder size={15} /></button>}
-        {failed && <button type="button" aria-label="Details" onClick={onPick}><RotateCcw size={15} /></button>}
+        {failed && <button type="button" aria-label="Transfer error details" onClick={onPick}><Info size={15} /></button>}
         {path && <button type="button" aria-label="Open" onClick={() => onOpen(path)}><MoreDots /></button>}
       </span>
     </div>
@@ -224,7 +222,7 @@ function MoreDots() {
 function ActiveDetail({ session, speeds, onCancel, onOpen, onReveal }: { session: ActiveTransferSession; speeds: number[]; onCancel: () => void; onOpen: (path: string) => void; onReveal: (path: string) => void }) {
   const flow = useDropFlow();
   const tone = fileTone(session.fileName);
-  const color = session.direction === "receive" ? "#8B5CF6" : "#2F7CF6";
+  const color = "#3B82F6";
   const peer = flow.devices.find((device) => device.name === session.deviceName);
   const path = session.completedFiles.find((file) => file.finalPath)?.finalPath;
   const from = session.direction === "receive" ? peer : null;
@@ -241,14 +239,14 @@ function ActiveDetail({ session, speeds, onCancel, onOpen, onReveal }: { session
         <button type="button" className="df-quiet" aria-label="Dismiss" onClick={() => flow.dismissTransfer(session.id)}><X size={16} /></button>
       </div>
       <div className="df-tx-meter">
-        <span className="df-thinbar df-thinbar-lg"><i style={{ width: `${session.progress}%`, background: color }} /></span>
+        <Progress value={session.progress} label={`Transfer of ${session.fileName}`} />
         <b>{session.progress}%</b>
       </div>
       <div className="df-tx-foot"><span>{session.speed}</span><AreaSpark values={speeds} color={color} /><span>{session.timeRemaining}</span></div>
       <div className="df-hop">
-        <Hop art={session.direction === "receive" ? deviceArt(from?.type) : deviceArt(flow.deviceType)} name={session.direction === "receive" ? session.deviceName : "This device"} sub={session.direction === "receive" ? "Online" : "This device"} />
+        <Hop type={session.direction === "receive" ? from?.type : flow.deviceType} name={session.direction === "receive" ? session.deviceName : "This device"} sub={session.direction === "receive" ? "Sender" : "This device"} />
         <span className="df-hop-link"><Wifi size={16} /></span>
-        <Hop art={session.direction === "receive" ? deviceArt(flow.deviceType) : deviceArt(to?.type)} name={session.direction === "receive" ? "This device" : session.deviceName} sub="Online" />
+        <Hop type={session.direction === "receive" ? flow.deviceType : to?.type} name={session.direction === "receive" ? "This device" : session.deviceName} sub="Recipient" />
       </div>
       <h3>Transfer Details</h3>
       <DetailRows rows={[
@@ -257,15 +255,11 @@ function ActiveDetail({ session, speeds, onCancel, onOpen, onReveal }: { session
         ["Files", String(session.totalFiles)],
         ["Type", tone.label],
         ["Estimated time", session.timeRemaining],
-        ["Average speed", session.speed],
+        ["Transfer speed", session.speed],
         ["Status", session.status],
       ]} />
       {session.status === "Failed" && <p className="df-kicker" style={{ color: "var(--df-danger)" }}>{friendlyTransferError(session.error)}</p>}
-      <h3>Options</h3>
-      <div className="df-info-row"><span><Moon size={14} /> Keep device awake until complete</span><button type="button" className="df-switch on" aria-checked disabled title="DropFlow already keeps this device awake during a transfer"><i /></button></div>
-      <div className="df-info-row"><span><ShieldCheck size={14} /> Verify files after transfer</span><button type="button" className="df-switch on" aria-checked disabled title="Received files are checksummed by the transfer"><i /></button></div>
       <div className="df-tx-end">
-        <button type="button" className="df-btn df-btn-soft" disabled title="A transfer can be cancelled, not paused"><Pause size={14} /> Pause</button>
         <button type="button" className="df-btn df-btn-danger" onClick={onCancel}><X size={14} /> Cancel</button>
       </div>
       {path && (
@@ -313,10 +307,10 @@ function HistoryDetail({ item, onOpen, onReveal }: { item: RecentTransfer; onOpe
   );
 }
 
-function Hop({ art, name, sub }: { art: string; name: string; sub: string }) {
+function Hop({ type, name, sub }: { type?: string; name: string; sub: string }) {
   return (
     <div className="df-hop-node">
-      <img src={art} alt="" />
+      <DeviceVisual type={type} />
       <strong>{name}</strong>
       <span>{sub}</span>
     </div>
