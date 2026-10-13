@@ -301,7 +301,7 @@ export function SettingsPage() {
                 <h2 className="df-v2-section-title">Appearance & motion</h2>
                 <SettingRow
                   title="Dark theme"
-                  description="Use the dark navy color scheme. Your preference is saved."
+                  description="Use the dark titanium color scheme. Your preference is saved."
                 >
                   <Switch
                     label="Dark theme"

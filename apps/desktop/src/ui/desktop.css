@@ -1293,7 +1293,8 @@ html.dark .df-switch.on {
   }
 }
 @media (prefers-contrast: more) {
-  :root {
+  :root,
+  html.dark:is([data-native-material="vibrancy"], [data-native-material="mica"]) {
     --df-border: var(--df-border-strong);
   }
 }
