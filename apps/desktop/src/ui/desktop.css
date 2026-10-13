@@ -1117,8 +1117,9 @@ html.dark .df-search {
   color: var(--df-text-muted);
   margin-bottom: 24px;
 }
-.df-v2-discovery[data-state="searching"] > svg {
-  animation: df-discover 4s linear infinite;
+.df-v2-discovery-spinner {
+  color: var(--df-accent) !important;
+  animation: df-discover 0.9s linear infinite;
 }
 @keyframes df-discover {
   to {

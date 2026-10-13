@@ -1,4 +1,4 @@
-import { AlertCircle, Radar, RefreshCw, Wifi } from "lucide-react";
+import { AlertCircle, LoaderCircle, RefreshCw, Wifi } from "lucide-react";
 export function DiscoveryState({
   state,
   onRetry,
@@ -12,7 +12,12 @@ export function DiscoveryState({
       {state === "error" ? (
         <AlertCircle size={26} />
       ) : state === "searching" ? (
-        <Radar size={26} />
+        <LoaderCircle
+          className="df-v2-discovery-spinner"
+          size={24}
+          strokeWidth={2.25}
+          aria-hidden="true"
+        />
       ) : (
         <Wifi size={26} />
       )}
