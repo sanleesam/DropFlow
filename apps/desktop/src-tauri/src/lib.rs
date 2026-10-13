@@ -5,6 +5,7 @@ pub mod power_manager;
 pub mod state_manager;
 pub mod transfer_manager;
 pub mod update_manager;
+mod window_material;
 
 use std::sync::{Arc, Mutex};
 use log::info;
@@ -61,6 +62,11 @@ pub fn run() {
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             if let Some(path) = logging::init(&log_dir) {
                 info!("[Lib] Logging to {}", path.display());
+            }
+
+            app.manage(window_material::MaterialState::default());
+            if let Some(window) = app.get_webview_window("main") {
+                window_material::refresh(&window);
             }
 
             let app_state = state_manager::load_or_create_state(app.handle());
@@ -137,7 +143,19 @@ pub fn run() {
             fs_browser::delete_path,
             fs_browser::create_folder,
         ])
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                if let Some(window) = webview.app_handle().get_webview_window("main") {
+                    window_material::refresh(&window);
+                }
+            }
+        })
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Focused(true)) {
+                if let Some(webview) = window.app_handle().get_webview_window("main") {
+                    window_material::refresh(&webview);
+                }
+            }
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.try_state::<device_discovery::DiscoveryState>() {
                     state.engine.update_advertisement("", "", "", 0).ok();

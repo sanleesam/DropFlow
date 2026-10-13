@@ -10,6 +10,7 @@ dependencies = [
  "flume",
  "log",
  "mdns-sd",
+ "objc2-app-kit",
  "semver",
  "serde",
  "serde_json",
@@ -24,6 +25,7 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
+ "window-vibrancy",
 ]
 
 [[package]]
