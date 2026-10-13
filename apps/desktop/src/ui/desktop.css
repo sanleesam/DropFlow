@@ -150,6 +150,18 @@ h3 { font-weight: 600; }
 .df-v2-release-notes { white-space: pre-wrap; color: var(--df-text-muted); font-size: 12px; max-height: 220px; overflow: auto; }
 .df-v2-about-mark { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 15px; background: linear-gradient(145deg,#3b82f6,#2563eb); color: white; margin: 18px 0; }
 .df-v2-installed { font-size: 12px; color: var(--df-text-muted); line-height: 1.8; }
+.df-v2-channel-fieldset { border: 0; padding: 0; margin: 24px 0 0; min-width: 0; }
+.df-v2-channel-fieldset legend { font-size: 14px; font-weight: 550; }
+.df-v2-version-row { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
+.df-v2-version-row strong { font-size: 20px; font-weight: 550; }
+.df-v2-update-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.df-v2-notes { margin-top: 20px; font-size: 13px; }
+.df-v2-notes summary { color: var(--df-text-muted); }
+.df-v2-release-notes { margin-top: 14px; }
+.df-v2-name-label { display: block; margin: 22px 0 8px; font-size: 12px; color: var(--df-text-muted); }
+.df-v2-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+.df-tx-meter .df-progress { flex: 1; }
+.df-hop-node .df-v2-device-art { height: 70px; }
 .df-dialog { border-radius: var(--df-radius-dialog); padding: 24px; box-shadow: var(--df-shadow-floating); max-height: calc(100vh - 48px); overflow: auto; }
 .df-modal-back { background: #030812a6; }
 .df-toast { position: relative; overflow: hidden; box-shadow: var(--df-shadow-floating); align-items: center; }
