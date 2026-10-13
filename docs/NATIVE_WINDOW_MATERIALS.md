@@ -1,14 +1,15 @@
 # Native window materials
 
-Focused extension of UI v2. React changes are limited to a blank native drag
-region. No provider, transfer, discovery, protocol, updater, application command,
+Focused extension of UI v2. Native integration adds a blank React drag region;
+the full-window follow-up changes shared CSS and the Appearance description.
+No provider, transfer, discovery, protocol, updater, application command,
 event, icon or release behavior is changed.
 
 ## Implementation and research
 
 - macOS uses one `NSVisualEffectView` with `Sidebar`, `BehindWindow` blending,
-  and `Active` state. The sidebar is the primary exposed glass surface; the
-  mostly opaque workspace masks the same native view. This is not a separate
+  and `Active` state. Translucent workspace, card and detail-panel fills expose
+  this same native view across every page. This is not a separate
   native effect for each HTML panel. Active keeps diffusion available when the
   app loses focus; native controls still show the system's inactive appearance.
 - Windows uses Mica on Windows 11 and solid CSS when the library reports an
@@ -56,19 +57,31 @@ controls or custom pointer handlers are added. Windows/Linux retain their chrome
 CSS stays opaque in browser previews and before native initialization. Native
 code publishes `data-native-material` only after application returns success,
 including after a page reload. Supported material states make html/body/root/shell
-transparent. Dark titanium sidebar opacity is 62%, workspace 88%, contextual
-panel 76%. Cards, inputs, dialogs and the drop area remain opaque for legibility.
+transparent. The full-window pass uses a 62% dark titanium sidebar, 68% workspace,
+40% card fills and 44% detail-panel fills. Nested inset/drop surfaces use 24%
+fills; inputs and ordinary buttons use 68% fills. These percentages describe
+individual layers, not final composed window opacity: a card also sits over the
+workspace tint. Floating dialogs, popovers and toasts use independent 96% fills,
+so they remain readable without relying on a workspace layer underneath.
+Light mode uses a 78% workspace, 52% cards, 58% detail panels, 80% controls and
+97% floating surfaces; its sidebar retains the 94% overlay.
+
 Shared reflection tokens, restrained inset highlights and soft shadows distinguish
-cards, controls and panels on every page. Selected devices use a single icy-blue
-edge instead of a doubled heavy outline. The drop zone has a faint inner blue
-light and muted dashed edge; primary buttons retain white-text contrast.
-There is no CSS backdrop blur. Small sidebar text is slightly brighter to preserve
-contrast over bright content. Light-mode preferences remain supported, with a
-94% sidebar overlay and darker secondary text. Worst-case flat white behind the
+cards, controls and panels on every page. Selected devices retain a single icy-blue
+edge. The drop zone has a faint inner blue light and muted dashed edge; primary
+buttons retain white-text contrast. Selected switches are blue in both themes,
+correcting a more-specific legacy dark style that made an enabled switch gray.
+Secondary text is brighter on the exposed workspace, but quieter within tinted
+cards to preserve hierarchy. Light-mode secondary colors are darkened for the
+new translucent surfaces. There is no CSS backdrop blur or image-based fake glass.
+Worst-case flat white behind the
 dark sidebar gives 4.59:1 for subtle text; flat black behind the light sidebar
 gives 4.61:1. Native blur itself is not relied on for these text-contrast bounds.
 Primary-button white text has at least 4.82:1 at rest and 4.63:1 on hover.
-Reduced-motion, reduced-transparency and high-contrast CSS fallbacks remain.
+Reduced-motion support remains. Reduced-transparency and increased-contrast media
+queries restore solid workspace, cards, inset areas, controls, floating surfaces
+and their original secondary text palette; increased contrast also strengthens
+borders. These CSS fallbacks do not change application settings.
 
 WebKit buttons use `appearance: none`, preventing light OS button chrome from
 overriding the dark surfaces. This native-rendering issue was found during testing.
@@ -120,7 +133,51 @@ device edges, subtle drop-zone illumination and consistent reflective buttons.
 The concept's more illustrative device artwork remains a discrepancy: the
 existing type-driven SVGs are preserved, not replaced or inferred from names.
 
-## Verification (2026-10-13, final fidelity pass)
+## Full-window extension verification (2026-10-13)
+
+This pass changes shared frontend material tokens, their accessibility fallbacks,
+and the Appearance description only. No Rust, native configuration, providers,
+Tauri commands, assets, dependencies, or update/release behavior is changed.
+`AGENTS.md` was separately reconciled with the inspected desktop/Android codebase,
+actual command working directories, and continuation on the designated branch.
+The old mandatory-new-branch rule no longer conflicts with an approved continuation;
+approval, preservation of unrelated work, focused scope and release safety remain.
+
+- `pnpm tsc --noEmit`, `pnpm build`, and `pnpm test:ui` passed. A local
+  production-assets debug `.app` was rebuilt at the existing bundle path with
+  updater artifacts disabled by a command-line override. No additional installed
+  app identity, release bundle, push, merge or publication was created.
+- Actual native Home, Devices, Transfers and Settings/Updates were inspected.
+  Appearance was reviewed in light mode, then the original dark preference was
+  restored. Update channels and all six saved history entries were preserved.
+- The clear-history confirmation opened with a visible Cancel focus ring and a
+  denser floating material. Escape dismissed it without clearing history.
+- The user directly confirmed the workspace, cards and right panel over Brave's
+  colored fixture: "Yes, glass is visible and readable". This establishes the
+  full-window on-screen effect; isolated captures still cannot prove live diffusion.
+- Native zoom/restore exercised layout repainting. As in the earlier pass, some
+  isolated captures contained stale navigation/tab/theme layers; settled captures
+  after zoom/restore were correct. The cause has not been established.
+- Files receives the same shared card/control tokens, verified in source. Its
+  previously identified native filesystem hang remains unresolved and blocks a
+  complete native Files visual acceptance. It was not retriggered or fixed here.
+- Reduced-motion code remains intact. Solid reduced-transparency/increased-contrast
+  fallbacks were inspected in CSS; OS accessibility preferences were not changed.
+  Color-compositing checks over black/white bounds informed the text palette, but
+  this is not a complete accessibility or performance certification.
+- No Android build, broad backend tests, physical transfer test, Windows run,
+  signing/notarization or updater installation was performed in this frontend pass.
+  Safari was not accessed; Brave alone hosted the local diagnostic backdrop.
+  The diagnostic tab/window was closed after validation; the user's existing
+  Brave window was preserved.
+
+Current local captures are under `/tmp/dropflow-full-window-glass-evidence/`,
+including `home-final.png`, `transfers-final.png`, `settings-updates-final.png`,
+`confirmation-dialog-final.png`, and `light-settings.png`. These are diagnostic
+artifacts, not release assets. The preceding native-probe evidence and broader
+checks below belong to the earlier sidebar fidelity pass, not this extension.
+
+## Earlier verification (2026-10-13, sidebar fidelity pass)
 
 - `pnpm tsc --noEmit`, `pnpm build`, and `pnpm test:ui` passed.
 - `cargo check --locked --offline` passed; `cargo test --locked --offline --lib`

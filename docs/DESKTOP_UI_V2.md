@@ -28,7 +28,9 @@ no imitation traffic lights, decorative stock photos or fabricated network/OS da
 ## Significant changes
 
 - `ui/desktop.css` defines titanium/light surfaces, readable text, spacing, radii,
-  borders, shadows and interaction tokens. Primary content stays mostly opaque.
+  borders, shadows and interaction tokens. Confirmed native materials expose
+  controlled translucency across the workspace, cards, and detail panels;
+  controls and floating surfaces retain stronger fills for readability.
   Native material is exposed only after successful initialization; the previous
   CSS sidebar blur is removed to avoid double compositing.
 - Shared React primitives provide page headers, selectable device cards,
@@ -81,7 +83,8 @@ below the content at 1120px; device details become a compact split panel. The
 file browser repositions its details panel at 1250px. Additional CSS handles
 narrower preview sizes without changing native constraints. Focus rings, named
 switches, radio groups, keyboard-operated settings tabs and progress semantics
-are shared across pages. `prefers-reduced-transparency` uses opaque navigation.
+are shared across pages. `prefers-reduced-transparency` and increased contrast
+restore opaque workspace, navigation, cards, controls and floating surfaces.
 
 ## Verification
 
