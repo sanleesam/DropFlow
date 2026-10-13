@@ -12,7 +12,7 @@
   --df-border-strong: #bcc9dc;
   --df-text: #172438;
   --df-text-muted-solid: #53647b;
-  --df-text-subtle-solid: #63738a;
+  --df-text-subtle-solid: #5b6b82;
   --df-text-muted: var(--df-text-muted-solid);
   --df-text-subtle: var(--df-text-subtle-solid);
   --df-accent-strong: #2563eb;
@@ -48,8 +48,10 @@
   --df-native-control: rgba(250, 252, 255, 0.80);
   --df-floating: var(--df-surface-solid);
   --df-native-floating: rgba(250, 252, 255, 0.97);
-  --df-native-text-muted: #45546a;
-  --df-native-text-subtle: #53647b;
+  --df-native-text-muted: #3a495f;
+  --df-native-text-subtle: #3f4e63;
+  --df-native-content-muted: #53647b;
+  --df-native-content-subtle: #53647b;
   --df-hover: #1d426709;
   --df-duration: 160ms;
   --df-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -81,6 +83,8 @@ html.dark {
   --df-native-floating: rgba(26, 32, 40, 0.96);
   --df-native-text-muted: #e3ebf6;
   --df-native-text-subtle: #dce6f2;
+  --df-native-content-muted: #cad6e4;
+  --df-native-content-subtle: #c3cfde;
   --df-hover: #ffffff07;
   --df-art-frame: #151d2b;
   --df-art-edge: #65738a;
@@ -195,6 +199,11 @@ html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-v2
 html.dark:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-sidebar {
   --df-text-muted: #f1f5fb;
   --df-text-subtle: #edf2f8;
+}
+/* Nested cards have an additional tint, allowing quieter secondary copy. */
+html:is([data-native-material="vibrancy"], [data-native-material="mica"]) :is(.df-card, .df-v2-device-card, .df-v2-discovery) {
+  --df-text-muted: var(--df-native-content-muted);
+  --df-text-subtle: var(--df-native-content-subtle);
 }
 /* Floating surfaces do not rely on a workspace tint beneath them. */
 .df-dialog,
@@ -753,7 +762,7 @@ html.dark .df-search {
   padding: 0 14px;
   font-size: 13px;
   color: var(--df-text-muted);
-  background: var(--df-surface-muted);
+  background: var(--df-control-reflection), var(--df-control);
 }
 .df-v2-tabs button.active {
   color: var(--df-text);
@@ -963,10 +972,11 @@ html.dark .df-search {
 .df-v2-activity .df-xfer-name {
   font-weight: 550;
 }
-.df-pause {
+.df-pause,
+html.dark .df-pause {
   width: 30px;
   height: 30px;
-  background: var(--df-surface-muted);
+  background: var(--df-control);
   border-color: var(--df-border);
   color: var(--df-text-muted);
 }
@@ -1025,8 +1035,9 @@ html.dark .df-search {
   font-size: 12px;
 }
 .df-hist-actions button,
-.df-tx-bulk button {
-  background: var(--df-surface-muted);
+.df-tx-bulk button,
+html.dark .df-tx-bulk button {
+  background: var(--df-control);
 }
 .df-hist .df-done {
   flex-wrap: wrap;
@@ -1067,11 +1078,15 @@ html.dark .df-search {
 }
 .df-crumb button,
 .df-action,
-.df-new-menu {
-  background: var(--df-surface-muted);
+html.dark .df-action {
+  background: var(--df-control-reflection), var(--df-control);
 }
 .df-action:hover {
   border-color: var(--df-border-strong);
+}
+.df-switch.on,
+html.dark .df-switch.on {
+  background: var(--df-accent);
 }
 .df-table {
   table-layout: fixed;
@@ -1262,6 +1277,8 @@ html.dark .df-search {
     --df-floating: var(--df-surface-solid);
     --df-text-muted: var(--df-text-muted-solid);
     --df-text-subtle: var(--df-text-subtle-solid);
+    --df-native-content-muted: var(--df-text-muted-solid);
+    --df-native-content-subtle: var(--df-text-subtle-solid);
   }
   html:is([data-native-material="vibrancy"], [data-native-material="mica"]) body,
   html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .df-shell,
