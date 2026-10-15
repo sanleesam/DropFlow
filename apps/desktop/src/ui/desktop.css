@@ -231,6 +231,7 @@ html.dark .df-new-menu {
 .df-mark {
   width: 40px;
   height: 40px;
+  object-fit: contain;
 }
 .df-brand strong {
   font-size: 18px;
@@ -930,13 +931,10 @@ html:not(.dark) .df-discovery-beacon-core svg {
   overflow: auto;
 }
 .df-v2-about-mark {
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 15px;
-  background: linear-gradient(145deg, #3b82f6, #2563eb);
-  color: white;
+  display: block;
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
   margin: 18px 0;
 }
 .df-v2-installed {

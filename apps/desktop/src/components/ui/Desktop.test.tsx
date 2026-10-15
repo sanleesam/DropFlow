@@ -7,10 +7,16 @@ import {
   Switch,
 } from "./Desktop";
 import { DiscoveryState } from "./DiscoveryState";
+import { BrandMark } from "./BrandMark";
 
 function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);
 }
+
+const brand = renderToStaticMarkup(<BrandMark className="df-v2-about-mark" />);
+assert(brand.includes("<img"), "Brand mark must use the shared artwork");
+assert(brand.includes('aria-hidden="true"') && brand.includes('alt=""'), "Adjacent app name must supply the brand label");
+assert(brand.includes('class="df-v2-about-mark"'), "Brand mark must preserve its placement class");
 
 const progress = renderToStaticMarkup(
   <Progress value={160} label="Example transfer" />,
@@ -114,4 +120,4 @@ const empty = renderToStaticMarkup(
 );
 assert(!empty.includes("df-discovery-beacon"), "Idle discovery must not imply an active scan");
 assert(empty.includes("Search again"), "Empty discovery must keep the retry action");
-console.log("Desktop UI primitive checks passed (18 assertions).");
+console.log("Desktop UI primitive checks passed (21 assertions).");

@@ -19,6 +19,13 @@ their beta counters do not move in lockstep:
 
 Do not assume the two platforms share a version number.
 
+## Desktop — Development (after Beta 17)
+
+- Replaced the desktop Dock/app icon with the new silver/icy-blue file-transfer
+  mark, including transparent macOS ICNS, Windows ICO and desktop PNG sizes.
+- Reused the transparent mark in the sidebar, About panel and browser favicon.
+- Beta 17 and mobile icons are unchanged.
+
 ## Desktop — [0.1.0-beta.17] — 2026-10-16
 
 ### Changed

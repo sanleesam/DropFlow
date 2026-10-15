@@ -18,6 +18,7 @@ import { FilesPage } from "../../pages/FilesPage";
 import { SettingsPage } from "../../pages/SettingsPage";
 import { useDiskUsage } from "../../ui/useDisk";
 import { formatBytes } from "../../utils/formatters";
+import { BrandMark } from "../ui/BrandMark";
 
 const NAV: {
   id: AppPage;
@@ -56,42 +57,6 @@ const NAV: {
     icon: () => <Settings size={18} strokeWidth={1.75} />,
   },
 ];
-
-function BrandMark() {
-  return (
-    <svg className="df-mark" viewBox="0 0 34 34" aria-hidden>
-      <rect width="34" height="34" rx="10" fill="#2F7CF6" />
-      <path
-        d="M10 13.2h9.2"
-        stroke="#fff"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M16.6 10.4 19.6 13.2 16.6 16"
-        stroke="#fff"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-      <path
-        d="M24 20.8H14.8"
-        stroke="#fff"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M17.4 23.6 14.4 20.8 17.4 18"
-        stroke="#fff"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-    </svg>
-  );
-}
 
 export const AppShell: React.FC = () => {
   const {

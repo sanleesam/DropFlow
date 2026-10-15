@@ -23,6 +23,7 @@ import {
   Switch,
 } from "../components/ui/Desktop";
 import { platformLabel } from "../ui/artwork";
+import { BrandMark } from "../components/ui/BrandMark";
 
 const TABS = [
   { id: "general", label: "General", icon: Settings },
@@ -333,9 +334,7 @@ export function SettingsPage() {
         <aside className="df-v2-stack df-v2-rail">
           <section className="df-card df-card-pad df-v2-context">
             <h2>About DropFlow</h2>
-            <div className="df-v2-about-mark">
-              <ArrowLeftRight size={28} />
-            </div>
+            <BrandMark className="df-v2-about-mark" />
             <h3>DropFlow</h3>
             <p className="df-v2-installed">
               Send files. Simply.
