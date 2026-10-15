@@ -20,9 +20,9 @@ counters move independently. See the versioning policy in [CHANGELOG.md](../CHAN
 ## Desktop update channels
 
 The desktop updater polls one of two channels. The user picks a channel in
-Settings → About; the choice is persisted in app settings (`state.json`) and
-survives updates. Existing installs default to **Beta**, and every channel
-manifest carries the same release, so no migration is needed.
+Settings → Updates; the choice is persisted in app settings (`state.json`) and
+survives updates. Existing installs without a saved choice default to **Beta**.
+Each channel has its own manifest and version line.
 
 | Channel | Audience | Version line | Updater manifest |
 | --- | --- | --- | --- |
@@ -34,13 +34,16 @@ builds are published automatically from `main`, while a Beta release is cut
 only when a Development milestone is coherent and tested. The maintainer
 decides when to promote.
 
-- Beta → Development: the newest Development build is always newer than any
-  Beta, so switching offers the latest build immediately.
-- Development → Beta: semver orders `0.1.0-beta.N` below `0.1.0-dev.N`, so a
-  user on a recent Development build may not be offered the next Beta update.
-  They should install the Beta build from the release page once, or keep the
-  channel on Development until a newer Beta lands. See
-  [Remaining concerns](#remaining-architectural-concerns).
+- Switching between Beta and Development offers the target channel's release
+  even when plain semver would order it below the installed release. Within
+  one line, only strictly newer builds are offered. This is implemented and
+  tested in `update_manager.rs`; channel changes invalidate pending checks and
+  downloads rather than reusing an update from the old channel.
+
+The About panel reports the **installed build's** version and release line.
+That line is independent of the selected update channel. CI supplies
+`DROPFLOW_RELEASE_TAG`; local builds without it derive their line from the
+package version, so a local `0.1.0-beta.17` build is labeled `beta`, not `stable`.
 
 There is no Stable channel yet. The channel enum in
 `state_manager::UpdateChannel` and the settings schema leave room to add one
@@ -137,11 +140,6 @@ previous build first (the signing key differs every run).
 
 ## Remaining architectural concerns
 
-- **Development → Beta downgrade**: the updater only offers newer versions,
-  and semver ranks `dev` above `beta` within the same `0.1.0` line, so a user
-  switching from a recent Development build back to Beta may need to install
-  that Beta build manually from the release page. A future improvement could
-  special-case channel switches to ignore version comparison.
 - **Dev channel storage growth**: only stale *installer* assets are pruned
   from the floating `development` release; `latest.json` and the current
   build's assets are kept. Monitor release size if build cadence increases.

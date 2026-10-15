@@ -219,7 +219,15 @@ release assets or checked-in screenshots. No live network settings or macOS
 system preferences were changed. Backend, providers and updater contracts are
 unchanged; no changes were pushed and no release was published.
 
-Before release: resolve the existing Files main-thread blockage; complete Reduce
+The maintainer subsequently clarified that Files works normally after granting
+folder permission (2026-10-16). The earlier blocked filesystem observation above
+is historical validation evidence, not a confirmed outstanding Files defect.
+No filesystem implementation or permission settings were changed in this pass.
+The Beta 17 local native check subsequently opened Files and successfully listed
+the Desktop folder. About showed `0.1.0-beta.17 · beta` while the saved update
+channel remained Development.
+
+Remaining platform acceptance: complete Reduce
 Transparency, free dragging, edge-resizing, fullscreen and file-drop checks on
 macOS, and separately validate Mica/system fallbacks and Snap/resize/drop behavior
 on Windows 11.

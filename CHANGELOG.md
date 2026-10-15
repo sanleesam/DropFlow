@@ -19,6 +19,36 @@ their beta counters do not move in lockstep:
 
 Do not assume the two platforms share a version number.
 
+## Desktop — [0.1.0-beta.17] — 2026-10-16
+
+### Changed
+
+- Complete desktop UI refresh across Home, Devices, Transfers, Files and
+  Settings with shared Titanium + Icy Blue surfaces and reusable controls.
+- Native full-window backdrop materials with opaque accessibility/platform
+  fallbacks, reflective glass edges and clearer focus states.
+- GSAP discovery pulses and restrained page transitions that respect the
+  application and system reduced-motion preferences.
+- Improved transfer status, file-selection feedback, notifications and
+  Beta/Development update controls using the existing application providers.
+- Removed the repository's `AGENTS.md` instructions at the maintainer's request.
+
+### Fixed
+
+- Local prerelease builds no longer report their installed release line as
+  "stable" when a CI release tag is absent. The selected update channel remains
+  an independent preference.
+
+### Validation notes
+
+- Earlier native Files-page validation was blocked during filesystem access;
+  the maintainer subsequently confirmed normal operation with folder permission
+  granted. The Beta 17 local native check also successfully listed the Desktop
+  folder. No filesystem or permission behavior was changed for this release.
+- Windows native visuals, updater installation and physical cross-device
+  transfers have not been validated as part of this UI refresh.
+- Transfer protocol and discovery behavior are unchanged by this redesign.
+
 ## Desktop — [0.1.0-beta.15]
 
 First desktop milestone intended for real users on Windows and macOS.
