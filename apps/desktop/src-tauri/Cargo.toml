@@ -1,6 +1,6 @@
 [package]
 name = "Dropflow"
-version = "0.1.0-beta.15"
+version = "0.1.0-beta.17"
 description = "DropFlow Local File Transfer Application"
 authors = ["DropFlow Team"]
 edition = "2021"
@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
@@ -35,4 +35,10 @@ semver = "1"
 log = { version = "0.4", features = ["std"] }
 flume = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# Already used transitively by Tauri; direct access preserves native errors.
+window-vibrancy = "=0.6.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSAccessibility"] }
 

@@ -3,6 +3,7 @@ import { ToastProvider } from "./components/ToastProvider";
 import { AppShell } from "./components/shell/AppShell";
 import { DropFlowProvider } from "./session/DropFlowProvider";
 import "./App.css";
+import "./ui/desktop.css";
 
 function App() {
   return (

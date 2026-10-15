@@ -5,6 +5,7 @@ pub mod power_manager;
 pub mod state_manager;
 pub mod transfer_manager;
 pub mod update_manager;
+mod window_material;
 
 use std::sync::{Arc, Mutex};
 use log::info;
@@ -22,26 +23,69 @@ pub struct ReleaseInfo {
 fn get_release_info() -> ReleaseInfo {
     let raw_tag = option_env!("DROPFLOW_RELEASE_TAG").unwrap_or("");
     let app_version = env!("CARGO_PKG_VERSION");
+    release_info(app_version, raw_tag)
+}
 
-    let (display_version, channel, release_tag) = if !raw_tag.is_empty() {
-        let tag_clean = raw_tag.strip_prefix('v').unwrap_or(raw_tag);
-        let ch = if tag_clean.contains("-beta") {
-            "beta"
-        } else if tag_clean.contains("-dev") {
-            "development"
-        } else {
-            "stable"
-        };
-        (tag_clean.to_string(), ch.to_string(), raw_tag.to_string())
+fn release_info(app_version: &str, raw_tag: &str) -> ReleaseInfo {
+    // A local build has no CI tag. Its package version still identifies its
+    // release line; this is independent of the user's selected update channel.
+    let display_version = if raw_tag.is_empty() {
+        app_version
     } else {
-        (app_version.to_string(), "stable".to_string(), String::new())
+        raw_tag.strip_prefix('v').unwrap_or(raw_tag)
+    };
+    let parsed = semver::Version::parse(display_version).ok();
+    let channel = match parsed.as_ref().map(|version| version.pre.as_str()) {
+        Some("") => "stable",
+        Some(pre) => match pre.split('.').next() {
+            Some("beta") => "beta",
+            Some("dev") => "development",
+            _ => "prerelease",
+        },
+        None => "unknown",
     };
 
     ReleaseInfo {
         version: app_version.to_string(),
-        display_version,
-        release_tag,
-        channel,
+        display_version: display_version.to_string(),
+        release_tag: raw_tag.to_string(),
+        channel: channel.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod release_info_tests {
+    use super::release_info;
+
+    #[test]
+    fn local_beta_is_not_labeled_stable() {
+        let info = release_info("0.1.0-beta.17", "");
+        assert_eq!(info.version, "0.1.0-beta.17");
+        assert_eq!(info.display_version, info.version);
+        assert_eq!(info.channel, "beta");
+        assert!(info.release_tag.is_empty());
+    }
+
+    #[test]
+    fn ci_tag_remains_authoritative() {
+        let info = release_info("0.1.0-beta.15", "v0.1.0-beta.17");
+        assert_eq!(info.display_version, "0.1.0-beta.17");
+        assert_eq!(info.channel, "beta");
+        assert_eq!(info.release_tag, "v0.1.0-beta.17");
+    }
+
+    #[test]
+    fn development_builds_are_identified_with_and_without_a_tag() {
+        for tag in ["", "v0.1.0-dev.6", "0.1.0-dev.6"] {
+            assert_eq!(release_info("0.1.0-dev.6", tag).channel, "development");
+        }
+    }
+
+    #[test]
+    fn only_a_final_version_is_stable() {
+        assert_eq!(release_info("0.1.0", "").channel, "stable");
+        assert_eq!(release_info("0.1.0-rc.1", "").channel, "prerelease");
+        assert_eq!(release_info("invalid", "").channel, "unknown");
     }
 }
 
@@ -61,6 +105,11 @@ pub fn run() {
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             if let Some(path) = logging::init(&log_dir) {
                 info!("[Lib] Logging to {}", path.display());
+            }
+
+            app.manage(window_material::MaterialState::default());
+            if let Some(window) = app.get_webview_window("main") {
+                window_material::refresh(&window);
             }
 
             let app_state = state_manager::load_or_create_state(app.handle());
@@ -137,7 +186,19 @@ pub fn run() {
             fs_browser::delete_path,
             fs_browser::create_folder,
         ])
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                if let Some(window) = webview.app_handle().get_webview_window("main") {
+                    window_material::refresh(&window);
+                }
+            }
+        })
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Focused(true)) {
+                if let Some(webview) = window.app_handle().get_webview_window("main") {
+                    window_material::refresh(&webview);
+                }
+            }
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.try_state::<device_discovery::DiscoveryState>() {
                     state.engine.update_advertisement("", "", "", 0).ok();
