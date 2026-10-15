@@ -89,6 +89,7 @@ export function HomePage() {
                 <DiscoveryState
                   state={flow.discovery}
                   onRetry={flow.retryDiscovery}
+                  reduceMotion={settings.reduceAnimations}
                 />
               )}
             </div>

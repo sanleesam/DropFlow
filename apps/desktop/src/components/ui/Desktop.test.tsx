@@ -96,4 +96,22 @@ assert(
   ).includes("Search again"),
   "Discovery failures must offer recovery",
 );
-console.log("Desktop UI primitive checks passed (12 assertions).");
+const searching = renderToStaticMarkup(
+  <DiscoveryState state="searching" onRetry={() => undefined} />,
+);
+assert(searching.includes('role="status"'), "Discovery must announce its state");
+assert(
+  searching.includes('class="df-discovery-beacon" aria-hidden="true"'),
+  "The signal beacon must remain decorative",
+);
+assert(
+  (searching.match(/class="df-discovery-ring"/g) || []).length === 2,
+  "Active discovery must have two pulse rings",
+);
+assert(!searching.includes("Search again"), "Do not offer retry during a search");
+const empty = renderToStaticMarkup(
+  <DiscoveryState state="empty" onRetry={() => undefined} />,
+);
+assert(!empty.includes("df-discovery-beacon"), "Idle discovery must not imply an active scan");
+assert(empty.includes("Search again"), "Empty discovery must keep the retry action");
+console.log("Desktop UI primitive checks passed (18 assertions).");

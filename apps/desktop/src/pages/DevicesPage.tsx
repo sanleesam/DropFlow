@@ -157,7 +157,11 @@ export function DevicesPage() {
                 />
               ))}
               {!q && flow.devices.length === 0 && (
-                <DiscoveryState state={flow.discovery} onRetry={refresh} />
+                <DiscoveryState
+                  state={flow.discovery}
+                  onRetry={refresh}
+                  reduceMotion={settings.reduceAnimations}
+                />
               )}
             </div>
             {q && !showLocal && !peers.length && (

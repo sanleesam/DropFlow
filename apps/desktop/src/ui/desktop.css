@@ -26,6 +26,9 @@
   --df-shadow-floating: 0 16px 50px #0b152a26;
   --df-reflection: linear-gradient(145deg, #ffffff70, #ffffff00 58%);
   --df-control-reflection: linear-gradient(180deg, #ffffff70, #ffffff00);
+  --df-glass-edge: linear-gradient(140deg, #ffffffed, #91acc238 32%, #ffffff50 58%, #6e8ca54d);
+  --df-glass-inset: #ffffff80;
+  --df-glass-divider: #7992ac55;
   --df-space-1: 4px;
   --df-space-2: 8px;
   --df-space-3: 12px;
@@ -74,6 +77,9 @@ html.dark {
   --df-shadow-floating: 0 20px 70px #00000066;
   --df-reflection: linear-gradient(145deg, #ffffff0b, #ffffff00 58%);
   --df-control-reflection: linear-gradient(180deg, #ffffff09, #ffffff00);
+  --df-glass-edge: linear-gradient(140deg, #e1efff66, #b1d5f51f 32%, #ffffff08 58%, #a5c5e53d);
+  --df-glass-inset: #d6eaff0d;
+  --df-glass-divider: #b2cde840;
   --df-native-sidebar: rgba(16, 20, 26, 0.62);
   --df-native-workspace: rgba(16, 19, 23, 0.68);
   --df-native-panel: rgba(30, 37, 46, 0.44);
@@ -171,7 +177,7 @@ html:is([data-native-material="vibrancy"], [data-native-material="mica"]) {
   --df-text-subtle: var(--df-native-text-subtle);
 }
 html.dark:is([data-native-material="vibrancy"], [data-native-material="mica"]) {
-  --df-border: #c5ddf238;
+  --df-border: #c5ddf21f;
   --df-border-strong: #9baec4;
   --df-shadow: 0 8px 24px #00000020, inset 0 1px #ffffff14;
   --df-reflection: linear-gradient(145deg, #d9eaff0d, #ffffff00 62%);
@@ -347,6 +353,40 @@ html.dark .df-avatar {
 .df-card {
   border-radius: var(--df-radius-card);
   background: var(--df-reflection), var(--df-surface);
+}
+/* Thin reflective rims sit above the existing native-backed fills. The mask
+   removes the center: it never covers content or introduces another blur. */
+:is(.df-card, .df-v2-device-card, .df-v2-discovery, .df-v2-drop) {
+  position: relative;
+}
+:is(.df-card, .df-v2-device-card, .df-v2-discovery, .df-v2-drop)::before,
+.df-discovery-edge {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--df-glass-edge);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.df-discovery-edge {
+  background: linear-gradient(135deg, #b9ddffb3, #6faef51f 45%, #83bdff6b);
+  box-shadow: 0 0 22px #83bdff12;
+  opacity: 0.3;
+}
+.df-card,
+.df-v2-device-card {
+  box-shadow: var(--df-shadow), inset 0 1px var(--df-glass-inset);
+}
+.df-storage-side,
+.df-v2-sendbar,
+.df-v2-update-status,
+.df-setting {
+  border-image: linear-gradient(90deg, transparent, var(--df-glass-divider) 20%, var(--df-glass-divider) 80%, transparent) 1;
 }
 .df-card-pad {
   padding: var(--df-space-5);
@@ -535,17 +575,58 @@ html.dark .df-search {
 }
 .df-v2-discovery {
   min-height: 190px;
-  border: 1px dashed var(--df-border-strong);
+  border: 1px solid var(--df-border);
   border-radius: 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  padding: 20px;
+  gap: 12px;
+  padding: 24px 20px;
   text-align: center;
   background: var(--df-reflection), var(--df-surface-muted);
   box-shadow: inset 0 1px #ffffff08;
+}
+.df-v2-discovery[data-state="searching"] {
+  background:
+    radial-gradient(ellipse at 50% 0, #83bdff0c, transparent 70%),
+    var(--df-reflection), var(--df-surface-muted);
+}
+.df-discovery-beacon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin: 1px 0 5px;
+  flex-shrink: 0;
+}
+.df-discovery-ring {
+  position: absolute;
+  inset: 4px;
+  border: 1px solid #83bdff80;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+.df-discovery-beacon-core {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--df-control-reflection), var(--df-control);
+  border: 1px solid #83bdff66;
+  box-shadow: inset 0 1px #dceeff33, 0 3px 12px #00000012;
+}
+.df-discovery-beacon-core svg {
+  color: #8fc5ff;
+}
+html:not(.dark) .df-discovery-beacon-core svg {
+  color: #2563b4;
+}
+.df-v2-discovery[data-state="error"] > svg {
+  color: var(--df-danger);
 }
 .df-v2-discovery svg {
   color: var(--df-text-muted);
@@ -568,11 +649,11 @@ html.dark .df-search {
   justify-content: center;
   text-align: center;
   gap: 8px;
-  border: 1px dashed #659acb80;
+  border: 1px solid var(--df-border);
   border-radius: 14px;
   background:
     radial-gradient(ellipse at 50% 0, #70b8ff14, transparent 75%), var(--df-surface-muted);
-  box-shadow: inset 0 1px #ffffff08, inset 0 -12px 36px #0000000a;
+  box-shadow: inset 0 1px var(--df-glass-inset), inset 0 -12px 36px #0000000a;
   padding: 24px;
   transition:
     border-color var(--df-duration),
@@ -592,9 +673,10 @@ html.dark .df-search {
   font-size: 12px;
 }
 .df-v2-drop.over {
-  background: var(--df-accent-soft);
+  background: radial-gradient(ellipse at 50% 0, #83bdff26, transparent 80%), var(--df-surface-muted);
   border-color: #75aaff;
   border-style: solid;
+  box-shadow: inset 0 1px #c5e4ff40, 0 0 0 3px #75aaff18;
 }
 .df-v2-drop-actions {
   display: flex;
@@ -1214,15 +1296,6 @@ html.dark .df-switch.on {
   color: var(--df-text-muted);
   margin-bottom: 24px;
 }
-.df-v2-discovery-spinner {
-  color: var(--df-accent) !important;
-  animation: df-discover 0.9s linear infinite;
-}
-@keyframes df-discover {
-  to {
-    transform: rotate(360deg);
-  }
-}
 @media (max-width: 800px) {
   :root {
     --df-sidebar-width: 72px;
@@ -1270,6 +1343,16 @@ html.dark .df-switch.on {
   }
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :is(.df-card, .df-v2-device-card, .df-v2-discovery, .df-v2-drop)::before,
+  .df-discovery-edge {
+    display: none;
+  }
+  .df-storage-side,
+  .df-v2-sendbar,
+  .df-v2-update-status,
+  .df-setting {
+    border-image: none;
+  }
   html:is([data-native-material="vibrancy"], [data-native-material="mica"]) {
     --df-surface: var(--df-surface-solid);
     --df-surface-muted: var(--df-surface-muted-solid);
@@ -1299,6 +1382,9 @@ html.dark .df-switch.on {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .df-discovery-ring {
+    display: none;
+  }
   *,
   *::before,
   *::after {
@@ -1306,6 +1392,9 @@ html.dark .df-switch.on {
     animation: none !important;
     transition: none !important;
   }
+}
+.reduce-animations .df-discovery-ring {
+  display: none;
 }
 .reduce-animations *,
 .reduce-animations *::before,

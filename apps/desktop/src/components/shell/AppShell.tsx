@@ -1,4 +1,6 @@
-import React from "react";
+import React, { useLayoutEffect, useRef } from "react";
+import { useSettings } from "../SettingsProvider";
+import { mountPageMotion } from "../../ui/motion";
 import {
   ArrowLeftRight,
   Folder,
@@ -107,6 +109,12 @@ export const AppShell: React.FC = () => {
     ),
   ).length;
   const disk = useDiskUsage();
+  const { settings } = useSettings();
+  const contentRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (settings.reduceAnimations || !contentRef.current) return;
+    return mountPageMotion(contentRef.current);
+  }, [page, settings.reduceAnimations]);
   const usedPct =
     disk && disk.totalBytes > 0
       ? Math.min(
@@ -190,7 +198,7 @@ export const AppShell: React.FC = () => {
         </div>
       </aside>
       <div className="df-stage">
-        <div className="df-scroll">
+        <div className="df-scroll" ref={contentRef}>
           {page === "home" && <HomePage />}
           {page === "devices" && <DevicesPage />}
           {page === "transfers" && <TransfersPage />}
