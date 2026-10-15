@@ -356,10 +356,11 @@ html.dark .df-avatar {
 }
 /* Thin reflective rims sit above the existing native-backed fills. The mask
    removes the center: it never covers content or introduces another blur. */
-:is(.df-card, .df-v2-device-card, .df-v2-discovery, .df-v2-drop) {
+:is(.df-card, .df-v2-device-card, .df-v2-discovery, .df-v2-drop, .df-dialog, .df-btn-soft, .df-btn-ghost, .df-v2-tabs button, .df-v2-channel, .df-search, .df-action) {
   position: relative;
 }
-:is(.df-card, .df-v2-device-card, .df-v2-discovery, .df-v2-drop)::before,
+:is(.df-card, .df-v2-device-card, .df-v2-discovery, .df-v2-drop, .df-dialog, .df-btn-soft, .df-btn-ghost, .df-v2-tabs button, .df-v2-channel, .df-search, .df-action)::before,
+.df-toast::after,
 .df-discovery-edge {
   content: "";
   position: absolute;
@@ -527,7 +528,7 @@ html.dark .df-search {
   border: 1px solid var(--df-border);
   border-radius: 14px;
   padding: 16px;
-  box-shadow: var(--df-shadow);
+  box-shadow: var(--df-shadow), inset 0 1px var(--df-glass-inset);
 }
 .df-v2-device-card:hover {
   border-color: var(--df-border-strong);
@@ -619,7 +620,7 @@ html.dark .df-search {
   border: 1px solid #83bdff66;
   box-shadow: inset 0 1px #dceeff33, 0 3px 12px #00000012;
 }
-.df-discovery-beacon-core svg {
+.df-v2-discovery .df-discovery-beacon-core svg {
   color: #8fc5ff;
 }
 html:not(.dark) .df-discovery-beacon-core svg {
@@ -886,8 +887,8 @@ html:not(.dark) .df-discovery-beacon-core svg {
   background: var(--df-surface-muted);
 }
 .df-v2-channel.selected {
-  border-color: #3b82f6;
-  box-shadow: inset 0 0 0 1px #3b82f6;
+  border-color: #76b6f2;
+  box-shadow: inset 0 1px #c5e4ff26;
   background: var(--df-accent-soft);
 }
 .df-v2-channel input {
@@ -1343,7 +1344,8 @@ html.dark .df-switch.on {
   }
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  :is(.df-card, .df-v2-device-card, .df-v2-discovery, .df-v2-drop)::before,
+  :is(.df-card, .df-v2-device-card, .df-v2-discovery, .df-v2-drop, .df-dialog, .df-btn-soft, .df-btn-ghost, .df-v2-tabs button, .df-v2-channel, .df-search, .df-action)::before,
+  .df-toast::after,
   .df-discovery-edge {
     display: none;
   }
@@ -1377,6 +1379,7 @@ html.dark .df-switch.on {
 }
 @media (prefers-contrast: more) {
   :root,
+  html.dark,
   html.dark:is([data-native-material="vibrancy"], [data-native-material="mica"]) {
     --df-border: var(--df-border-strong);
   }
