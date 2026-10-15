@@ -379,6 +379,10 @@ html.dark .df-avatar {
   box-shadow: 0 0 22px #83bdff12;
   opacity: 0.3;
 }
+.df-toast::after {
+  /* Toasts clip their status strip; keep the reflective rim inside that clip. */
+  inset: 0;
+}
 .df-card,
 .df-v2-device-card {
   box-shadow: var(--df-shadow), inset 0 1px var(--df-glass-inset);

@@ -68,7 +68,7 @@ Light mode uses a 78% workspace, 52% cards, 58% detail panels, 80% controls and
 
 Shared reflection tokens, restrained inset highlights and soft shadows distinguish
 cards, controls and panels on every page. Selected devices retain a single icy-blue
-edge. The drop zone has a faint inner blue light and muted dashed edge; primary
+edge. The drop zone has a faint inner blue light and a reflective glass rim; primary
 buttons retain white-text contrast. Selected switches are blue in both themes,
 correcting a more-specific legacy dark style that made an enabled switch gray.
 Secondary text is brighter on the exposed workspace, but quieter within tinted
@@ -82,6 +82,11 @@ Reduced-motion support remains. Reduced-transparency and increased-contrast medi
 queries restore solid workspace, cards, inset areas, controls, floating surfaces
 and their original secondary text palette; increased contrast also strengthens
 borders. These CSS fallbacks do not change application settings.
+
+The 2026-10-16 frontend motion pass adds GSAP-powered active-discovery pulses and
+shared masked edge reflections without altering the native view or tint opacities.
+It replaces dashed discovery/drop frames and extends the glass rims to controls
+and floating surfaces. See [UI motion details](DESKTOP_UI_V2.md#discovery-pulse-and-reflective-edges-2026-10-16).
 
 WebKit buttons use `appearance: none`, preventing light OS button chrome from
 overriding the dark surfaces. This native-rendering issue was found during testing.
