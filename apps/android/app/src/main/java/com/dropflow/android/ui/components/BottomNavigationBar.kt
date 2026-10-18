@@ -17,6 +17,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Color
+import com.dropflow.android.ui.theme.IcyBlue
+import com.dropflow.android.ui.theme.SurfaceGlassBorder
 import com.dropflow.android.ui.navigation.Screen
 import com.dropflow.android.ui.theme.BlueAccentPrimary
 import com.dropflow.android.ui.theme.SurfaceDark
@@ -37,7 +42,7 @@ fun BottomNavigationBar(
     )
 
     NavigationBar(
-        modifier = modifier,
+        modifier = modifier.border(0.5.dp, SurfaceGlassBorder),
         containerColor = SurfaceDark,
         contentColor = TextPrimary
     ) {
@@ -55,15 +60,15 @@ fun BottomNavigationBar(
                 icon = {
                     Icon(
                         imageVector = if (selected) filledIcon else outlinedIcon,
-                        contentDescription = screen.title
+                        contentDescription = null
                     )
                 },
                 label = { Text(screen.title, fontSize = 11.sp) },
                 selected = selected,
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = BlueAccentPrimary,
-                    selectedTextColor = BlueAccentPrimary,
-                    indicatorColor = BlueAccentPrimary.copy(alpha = 0.2f),
+                    selectedIconColor = IcyBlue,
+                    selectedTextColor = IcyBlue,
+                    indicatorColor = IcyBlue.copy(alpha = 0.09f),
                     unselectedIconColor = TextSecondary,
                     unselectedTextColor = TextSecondary
                 ),

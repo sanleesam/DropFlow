@@ -9,6 +9,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.navigation.compose.rememberNavController
 import com.dropflow.android.core.network.transfer.StorageManager
@@ -57,7 +59,8 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            DropFlowTheme {
+            val preferences by settingsViewModel.uiState.collectAsState()
+            DropFlowTheme(reduceMotion = preferences.reduceMotion) {
                 val navController = rememberNavController()
                 DropFlowNavHost(
                     navController = navController,

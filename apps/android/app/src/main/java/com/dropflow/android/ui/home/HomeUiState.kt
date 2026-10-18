@@ -18,6 +18,7 @@ data class HomeUiState(
     val activeProgress: TransferProgressPayload? = null,
     val outgoingTransferActive: Boolean = false,
     val transferResultMessage: String? = null,
+    val transferResultId: String? = null,
     val isTransferResultError: Boolean = false,
     val errorMessage: String? = null
 )

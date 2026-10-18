@@ -1,6 +1,8 @@
 package com.dropflow.android.ui.about
 
+import com.dropflow.android.BuildConfig
+
 data class AboutUiState(
-    val appVersion: String = "0.1.0-beta.1",
+    val appVersion: String = BuildConfig.VERSION_NAME,
     val buildChannel: String = "Beta"
 )

@@ -10,6 +10,7 @@ import com.dropflow.android.core.network.transfer.TransferEngineListener
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 class HistoryViewModel(
     private val transferEngine: TransferEngine
@@ -23,19 +24,17 @@ class HistoryViewModel(
     }
 
     fun setFilterTab(tab: HistoryFilterTab) {
-        val current = _uiState.value
-        _uiState.value = current.copy(
+        _uiState.update { current -> current.copy(
             selectedFilterTab = tab,
             filteredItems = applyFilter(current.allHistoryItems, tab, current.searchQuery)
-        )
+        ) }
     }
 
     fun setSearchQuery(query: String) {
-        val current = _uiState.value
-        _uiState.value = current.copy(
+        _uiState.update { current -> current.copy(
             searchQuery = query,
             filteredItems = applyFilter(current.allHistoryItems, current.selectedFilterTab, query)
-        )
+        ) }
     }
 
     private fun applyFilter(items: List<TransferItem>, tab: HistoryFilterTab, query: String): List<TransferItem> {
@@ -64,12 +63,11 @@ class HistoryViewModel(
     }
 
     private fun addHistoryItem(transfer: TransferItem) {
-        val current = _uiState.value
-        val currentList = listOf(transfer) + current.allHistoryItems.filterNot { it.id == transfer.id }
-        _uiState.value = current.copy(
-            allHistoryItems = currentList,
-            filteredItems = applyFilter(currentList, current.selectedFilterTab, current.searchQuery)
-        )
+        _uiState.update { current ->
+            val currentList = listOf(transfer) + current.allHistoryItems.filterNot { it.id == transfer.id }
+            current.copy(allHistoryItems = currentList,
+                filteredItems = applyFilter(currentList, current.selectedFilterTab, current.searchQuery))
+        }
     }
 
     companion object {

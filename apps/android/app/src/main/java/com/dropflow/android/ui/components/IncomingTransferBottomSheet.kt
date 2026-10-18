@@ -1,6 +1,8 @@
 package com.dropflow.android.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,12 +43,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import com.dropflow.android.core.network.transfer.TransferRequestPayload
 import com.dropflow.android.core.util.formatBytes
 import com.dropflow.android.ui.theme.BackgroundDark
 import com.dropflow.android.ui.theme.BlueAccentPrimary
+import com.dropflow.android.ui.theme.BlueAccentStrong
 import com.dropflow.android.ui.theme.SurfaceGlassBorder
 import com.dropflow.android.ui.theme.TextPrimary
 import com.dropflow.android.ui.theme.TextSecondary
@@ -86,6 +92,7 @@ fun IncomingTransferBottomSheet(
         Column(
             modifier = modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
@@ -109,9 +116,9 @@ fun IncomingTransferBottomSheet(
                     )
                 }
 
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Incoming Transfer Request",
+                        text = "READY TO RECEIVE?",
                         color = TextSecondary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
@@ -121,7 +128,9 @@ fun IncomingTransferBottomSheet(
                         text = request.senderName,
                         color = TextPrimary,
                         fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -156,7 +165,8 @@ fun IncomingTransferBottomSheet(
                             color = TextPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
-                            maxLines = 1
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
@@ -176,6 +186,7 @@ fun IncomingTransferBottomSheet(
             ) {
                 Checkbox(
                     checked = trustDevice,
+                    modifier = Modifier.semantics { contentDescription = "Trust this device during this app session" },
                     onCheckedChange = { trustDevice = it },
                     colors = CheckboxDefaults.colors(
                         checkedColor = BlueAccentPrimary,
@@ -183,7 +194,7 @@ fun IncomingTransferBottomSheet(
                     )
                 )
                 Text(
-                    text = "Always trust ${request.senderName} for future transfers",
+                    text = "Trust this device during this app session",
                     color = TextPrimary,
                     fontSize = 12.sp
                 )
@@ -221,7 +232,7 @@ fun IncomingTransferBottomSheet(
                         .height(48.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = BlueAccentPrimary,
+                        containerColor = BlueAccentStrong,
                         contentColor = TextPrimary
                     )
                 ) {

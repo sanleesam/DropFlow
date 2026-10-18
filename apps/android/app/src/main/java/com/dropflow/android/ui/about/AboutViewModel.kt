@@ -10,8 +10,8 @@ class AboutViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(
         AboutUiState(
-            appVersion = try { BuildConfig.VERSION_NAME } catch (_: Throwable) { "0.1.0" },
-            buildChannel = try { BuildConfig.BUILD_TYPE.replaceFirstChar { it.uppercase() } } catch (_: Throwable) { "Development" }
+            appVersion = BuildConfig.VERSION_NAME,
+            buildChannel = if (BuildConfig.DEBUG) "Preview build" else "Beta release"
         )
     )
     val uiState: StateFlow<AboutUiState> = _uiState.asStateFlow()

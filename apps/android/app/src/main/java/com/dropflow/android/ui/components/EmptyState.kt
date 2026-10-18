@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.sp
 import com.dropflow.android.ui.theme.BlueAccentPrimary
 import com.dropflow.android.ui.theme.TextPrimary
 import com.dropflow.android.ui.theme.TextSecondary
+import com.dropflow.android.ui.theme.IcyBlue
+import com.dropflow.android.ui.theme.BlueAccentStrong
 
 @Composable
 fun EmptyState(
@@ -82,7 +84,7 @@ fun EmptyState(
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
                     onClick = onAction,
-                    colors = ButtonDefaults.buttonColors(containerColor = BlueAccentPrimary)
+                    colors = ButtonDefaults.buttonColors(containerColor = BlueAccentStrong, contentColor = TextPrimary)
                 ) {
                     Text(text = actionLabel, color = TextPrimary, fontSize = 12.sp)
                 }
