@@ -9,6 +9,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.annotation.RequiresApi
 import java.io.File
 import java.io.IOException
 
@@ -45,12 +46,14 @@ class StorageManager(private val context: Context) {
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun prepareMediaStoreTarget(sanitizedName: String): WritableTarget {
         val resolver = context.contentResolver
         val displayName = sanitizedName.substringAfterLast('/')
         val relativePath = "Download/$RECEIVE_SUBDIR"
 
         for (attempt in 0 until 10) {
+            var pendingUri: Uri? = null
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
                 put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
@@ -60,6 +63,7 @@ class StorageManager(private val context: Context) {
             try {
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                     ?: throw IOException("MediaStore insert returned null for '$displayName'")
+                pendingUri = uri
                 Log.d(TAG, "MediaStore target created for '$displayName' -> $uri")
                 return WritableTarget(
                     mode = TargetMode.MEDIA_STORE,
@@ -70,11 +74,15 @@ class StorageManager(private val context: Context) {
                     displayName = displayName
                 )
             } catch (e: java.io.FileNotFoundException) {
+                pendingUri?.let { runCatching { resolver.delete(it, null, null) } }
                 // DISPLAY_NAME already exists: MediaStore appended " (n)" to the
                 // display name but openOutputStream can still fail on the conflicting
                 // row — retrying inserts a fresh entry that resolves the collision.
                 Log.d(TAG, "MediaStore name collision for '$displayName', retrying")
                 continue
+            } catch (e: Exception) {
+                pendingUri?.let { runCatching { resolver.delete(it, null, null) } }
+                throw e
             }
         }
         throw IOException("Could not create a unique MediaStore entry for '$sanitizedName'")
@@ -114,7 +122,9 @@ class StorageManager(private val context: Context) {
                         put(MediaStore.MediaColumns.IS_PENDING, 0)
                         put(MediaStore.MediaColumns.SIZE, totalBytes)
                     }
-                    context.contentResolver.update(target.uri!!, values, null, null)
+                    if (context.contentResolver.update(target.uri!!, values, null, null) != 1) {
+                        throw IOException("Could not publish '${target.displayName}'")
+                    }
                     Log.d(TAG, "MediaStore entry published: ${target.uri} ($totalBytes bytes)")
                 }
             }
@@ -126,6 +136,7 @@ class StorageManager(private val context: Context) {
                 Log.d(TAG, "Legacy file finalized: ${target.file!!.absolutePath} ($totalBytes bytes)")
             }
         }
+        target.published = true
     }
 
     /**
@@ -144,6 +155,7 @@ class StorageManager(private val context: Context) {
             TargetMode.LEGACY_FILE -> {
                 runCatching {
                     preparePartFile(target.file!!).delete()
+                    if (target.published) target.file.delete()
                 }
             }
         }
@@ -188,4 +200,7 @@ class WritableTarget(
     val file: File?,
     val uri: Uri?,
     val displayName: String
-)
+) {
+    var published: Boolean = false
+        internal set
+}

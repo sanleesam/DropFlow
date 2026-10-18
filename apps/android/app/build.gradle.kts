@@ -6,8 +6,8 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// Optional release signing. Create a `keystore.properties` file (gitignored) at
-// the repo root with storeFile / storePassword / keyAlias / keyPassword to sign
+// Optional release signing. Create `apps/android/keystore.properties` (gitignored)
+// with storeFile / storePassword / keyAlias / keyPassword to sign
 // release builds locally; CI injects the same file from secrets. Without it,
 // release builds stay unsigned.
 val keystoreProperties = Properties().apply {
@@ -26,8 +26,8 @@ android {
         applicationId = "com.dropflow.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 17
-        versionName = "0.1.0-beta.1"
+        versionCode = 18
+        versionName = "0.1.0-beta.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -102,4 +102,5 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     debugImplementation(libs.androidx.ui.tooling)
+    testImplementation("junit:junit:4.13.2")
 }
