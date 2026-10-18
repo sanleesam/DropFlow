@@ -65,23 +65,14 @@ jobs:
               printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
               printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
             } > keystore.properties
-            echo "SIGNED_WITH_EPHEMERAL_KEY=false" >> "$GITHUB_OUTPUT"
           else
-            echo "No signing secrets configured; generating an ephemeral keystore."
-            keytool -genkeypair -v \
-              -keystore release.keystore \
-              -alias dropflow-beta \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass dropflow-beta -keypass dropflow-beta \
-              -dname "CN=DropFlow Beta, O=DropFlow, C=US"
-            {
-              printf 'storeFile=release.keystore\n'
-              printf 'storePassword=dropflow-beta\n'
-              printf 'keyAlias=dropflow-beta\n'
-              printf 'keyPassword=dropflow-beta\n'
-            } > keystore.properties
-            echo "SIGNED_WITH_EPHEMERAL_KEY=true" >> "$GITHUB_OUTPUT"
+            echo "::error::All four Android signing secrets are required. Reuse the Beta 1 signing key so users can upgrade."
+            exit 1
           fi
+
+      - name: Validate Android
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon
+        working-directory: ./apps/android
 
       - name: Build Release APK
         run: ./gradlew :app:assembleRelease --no-daemon
@@ -103,16 +94,16 @@ jobs:
           {
             echo "DropFlow for Android ${VERSION}"
             echo ""
-            echo "First public Android beta build."
+            RELEASE_NOTES="docs/releases/android-${VERSION}.md"
+            if [ -f "$RELEASE_NOTES" ]; then
+              cat "$RELEASE_NOTES"
+            else
+              echo "See CHANGELOG.md for the changes in this Android beta."
+            fi
             echo ""
             echo "### Install"
             echo "- Download the APK below and open it on your device (Android 8.0+)."
             echo "- You may need to allow installing apps from this source."
-            if [ "${{ steps.configure-signing.outputs.SIGNED_WITH_EPHEMERAL_KEY }}" = "true" ]; then
-              echo ""
-              echo "> **Note:** This build is signed with an ephemeral CI key. If a previous"
-              echo "> DropFlow build is installed, uninstall it before installing this one."
-            fi
           } > "$NOTES_FILE"
 
           gh release create "$TAG_NAME" \

@@ -87,13 +87,15 @@ workflow_dispatch). **No git tags are created.**
 Promotion to Beta is a maintainer decision: tag a coherent milestone as
 `v*-beta.*` and the Beta workflow takes it from there.
 
-## Android Beta release (e.g. 0.1.0-beta.1)
+## Android Beta release (e.g. 0.1.0-beta.2)
 
 1. Bump `versionName` / `versionCode` in `apps/android/app/build.gradle.kts`
    (`versionCode` only ever increases, so in-place installs upgrade).
-2. Run `./gradlew assembleDebug` (and `assembleRelease` if signing is
-   configured) in `apps/android`.
-3. Commit and tag: `git tag android-v0.1.0-beta.1 && git push origin android-v0.1.0-beta.1`.
+2. Run `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease` in
+   `apps/android`. A local release APK is unsigned unless release signing is configured.
+   Complete the physical-device and upgrade checks in
+   [Android Beta 2 preparation](ANDROID_BETA2.md) before publishing.
+3. Commit and tag: `git tag android-v0.1.0-beta.2 && git push origin android-v0.1.0-beta.2`.
 4. `release-android.yml` verifies the tag matches `versionName`, builds
    `assembleRelease`, renames the APK to `DropFlow-android-<version>.apk`, and
    attaches it to a GitHub prerelease titled `DropFlow Android <version>`.
@@ -110,7 +112,7 @@ Release APKs must be signed or they cannot be installed. Two options:
   - `ANDROID_KEYSTORE_PASSWORD`
   - `ANDROID_KEY_ALIAS`
   - `ANDROID_KEY_PASSWORD`
-- **Local**: create a gitignored `keystore.properties` at the repo root:
+- **Local**: create a gitignored `keystore.properties` in `apps/android/`:
 
   ```properties
   storeFile=/absolute/path/to/dropflow.jks
@@ -121,9 +123,11 @@ Release APKs must be signed or they cannot be installed. Two options:
 
   `app/build.gradle.kts` picks it up automatically for `assembleRelease`.
 
-If neither is configured, the CI workflow generates an **ephemeral** keystore so
-the APK is still installable; the release notes then warn users to uninstall any
-previous build first (the signing key differs every run).
+CI now fails if any of the four signing secrets is absent. Never generate a new
+key for each release: Beta 2 must use the Beta 1 certificate for an in-place
+upgrade. If Beta 1 used the old ephemeral fallback and its key was not retained,
+recover that key or explicitly document a one-time reinstall requirement before
+publishing. The workflow uses `docs/releases/android-<version>.md` as release notes.
 
 ## Pre-flight checklist (both platforms)
 
