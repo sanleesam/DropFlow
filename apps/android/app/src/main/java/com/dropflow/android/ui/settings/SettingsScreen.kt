@@ -63,12 +63,6 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
         }
         item {
             SettingsGroup(Icons.Default.Palette, "Appearance") {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatusPill("TITANIUM")
-                    Text("Icy Blue", color = IcyBlue, fontSize = 13.sp)
-                }
-                Text("The same cool graphite and reflective silver as DropFlow on desktop.",
-                    color = TextSecondary, fontSize = 13.sp, lineHeight = 20.sp)
                 SettingSwitch("Reduce animations", "Keep discovery calm and still.", state.reduceMotion, viewModel::updateReduceMotion)
             }
         }
