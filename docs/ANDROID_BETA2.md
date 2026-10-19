@@ -115,9 +115,13 @@ Keep DropFlow open for this beta's sharing workflow.
 
 The pre-existing deletion of `TASKS.md` was left untouched and unstaged.
 
-## Subsequent real-app test attempt
+## Subsequent real-app tests
 
-The 2026-10-19 test against the installed Mac Development build `0.1.0-dev.7`
-was blocked at automatic discovery; it did not pass a real inter-app transfer.
-See [the test observations](ANDROID_MAC_EMULATOR_TEST.md). Android Appearance
-settings were also corrected to remove design-description labels (commit `359ccbe`).
+The 2026-10-19 follow-up passed real-app single and multi-file transfers in both
+directions against installed Mac Development `0.1.0-dev.7`, using test-only address
+fixtures. Six delivered files were verified byte-for-byte and by SHA-256. Decline
+handling also passed. Normal discovery remains unresolved in this setup, and a
+15-second sender approval timeout was reproduced. See [the full evidence and
+limits](ANDROID_MAC_EMULATOR_TEST.md). These findings keep publication gated.
+Android Appearance settings were also corrected to remove design-description
+labels (commit `359ccbe`).

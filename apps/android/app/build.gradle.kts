@@ -29,7 +29,8 @@ android {
         versionCode = 18
         versionName = "0.1.0-beta.2"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = providers.gradleProperty("dropflowInteropRunner")
+            .orElse("androidx.test.runner.AndroidJUnitRunner").get()
         vectorDrawables {
             useSupportLibrary = true
         }
