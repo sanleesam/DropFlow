@@ -114,3 +114,10 @@ Keep DropFlow open for this beta's sharing workflow.
   release-preparation commit.
 
 The pre-existing deletion of `TASKS.md` was left untouched and unstaged.
+
+## Subsequent real-app test attempt
+
+The 2026-10-19 test against the installed Mac Development build `0.1.0-dev.7`
+was blocked at automatic discovery; it did not pass a real inter-app transfer.
+See [the test observations](ANDROID_MAC_EMULATOR_TEST.md). Android Appearance
+settings were also corrected to remove design-description labels (commit `359ccbe`).
