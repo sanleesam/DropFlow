@@ -22,8 +22,8 @@ Automated validation and the native Mac bundle build passed. The first dev.8
 launch reproduced an empty browser; its new Refresh action recovered Susserga
 in about 2.3 seconds. The final build adds one automatic startup retry after
 five seconds when the peer list remains empty. A subsequent cold launch detected
-Susserga in about 1.5 seconds without a manual action. Hosted publication and
-remaining live checks are recorded below.
+Susserga in about 1.5 seconds without a manual action. The dev.8 tag and hosted macOS/Windows build both completed successfully.
+Remaining live checks are recorded below.
 
 ## Evidence from the reported failure
 
@@ -48,8 +48,9 @@ independent saved-file integrity check.
 
 Local diagnostic evidence from this session is under
 `/tmp/dropflow-discovery-audit/`, including `probe-0201.log`,
-`installed-restart.log` and automated-check logs. These temporary files are not
-part of the committed source and should be retained separately if needed later.
+`installed-restart.log` and automated-check logs. A retained copy of the key logs is also in the gitignored
+`apps/desktop/src-tauri/target/dev8-audit-evidence/` in this worktree. These local
+evidence files are not published with the source.
 
 ## Discovery pipeline reviewed
 
@@ -112,7 +113,7 @@ not all reproduced with physical devices in this session.
 ### P1 — IPv6-only transfer handoff is invalid; endpoint fallback is absent
 
 `DropFlowProvider.tsx` selects only `targetDevice.addresses[0].address`
-(`sendSelected`, around line 388) and discards its interface scope.
+(`sendSelected`, line 400) and discards its interface scope.
 `transfer_manager/sender.rs:83–91` formats the endpoint as `ip:port` and parses it
 as a `SocketAddr`. An IPv6 literal requires brackets; a link-local IPv6 address
 also needs its interface scope. The current formatting therefore fails for an
@@ -167,6 +168,17 @@ current Mac/Windows discovery observations do not retest delayed acceptance.
 Follow-up: use a bounded approval timeout consistent with the prompt, restore
 the streaming timeout after acceptance, and test delayed accept/decline.
 
+### P3 — Mac disk-space status stays in a loading state
+
+The live Mac views repeatedly displayed `Checking this disk`. In
+`fs_browser.rs`, `disk_usage_of` explicitly returns an error on non-Windows
+platforms. `useDiskUsage` turns that error into `null`, which the UI also uses
+for its initial loading state. This makes an unsupported operation look as if
+it is still running.
+
+Follow-up: implement disk usage on supported Mac filesystems or show an explicit
+unavailable state. This does not affect the mDNS detection fix.
+
 ## Development release audit
 
 Previously, a `v0.1.0-dev.8` tag alone would not run the Development workflow.
@@ -189,7 +201,7 @@ pre-existing `TASKS.md` deletion in the original checkout was left untouched.
 
 ## Validation record
 
-| Check | Result at draft checkpoint |
+| Check | Verified result |
 | --- | --- |
 | Baseline failure reproduced | Passed: Mac dev.7 zero peers while Windows service was resolvable |
 | Unchanged-app restart recovery | Passed: Mac UI detected Susserga; user confirmed Windows detected Mac |
@@ -197,14 +209,37 @@ pre-existing `TASKS.md` deletion in the original checkout was left untouched.
 | Frontend checks | 31 passed: 10 lifecycle and 21 primitive/UI checks |
 | Frontend production build | Passed |
 | Development version resolver | 5 tests passed |
-| Development workflow syntax | Parsed locally; hosted CI not yet executed |
-| New native application build | Passed: local macOS ARM64 dev.8 bundle; updater artifact signing delegated to CI |
-| Post-fix automatic Mac → Windows discovery | Passed: final native dev.8 cold launch detected Susserga in about 1.5 seconds |
-| Post-fix Windows → Mac discovery | Pending |
+| Development workflow syntax | Parsed locally; tagged dev.8 hosted workflow completed successfully on macOS and Windows |
+| New native application build | Local macOS ARM64 bundle and hosted Mac build passed; published updater signature verified cryptographically |
+| Post-fix automatic Mac → Windows discovery | Passed: local dev.8 cold launch in about 1.5 seconds; downloaded CI dev.8 installed in Applications detected Susserga in about 3.4 seconds |
+| Post-fix Windows → Mac discovery | Baseline user confirmation covers dev.7 ↔ Beta17; Windows-side display of the final dev.8 install was not independently confirmed |
 | Native Refresh and stale-peer cleanup | Two native Refresh checks recovered Susserga in about 2.3 and 1.3 seconds; registry-reset regression passed |
-| Real Mac/Windows file transfer | Baseline user-initiated transfer acknowledged; generated dev.8 request did not complete because recipient acceptance was not observed; round-trip integrity pending |
+| Real Mac/Windows file transfer | Baseline user-initiated transfer acknowledged; generated dev.8 requests connected and handshook, but no acceptance/final ACK was recorded; round-trip integrity remains unverified |
 | Natural sleep/wake and network-transition reproduction | Not covered; no live network settings changed |
-| dev.8 tag, hosted builds, release assets and updater manifest | Pending |
+| dev.8 tag and hosted builds | `v0.1.0-dev.8` published at `6ab7ad9`; macOS ARM64, Windows x64 and combined-manifest jobs passed in run `40457006305` |
+
+The downloaded Mac archive was verified with `minisign-verify` against the
+public updater key checked into `tauri.conf.json`. Its bundle version is
+`0.1.0-dev.8`, and its network purpose description is present. The installed
+`/Applications/DropFlow.app` executable matches the downloaded CI executable
+(SHA-256 `03cd2b27a43fd56a6b3f48dc24bfb69b34e408a706eaa883641a19125f943c15`).
+The earlier dev.7 app was backed up locally before replacement. The CI app is
+still ad hoc/linker signed; updater signature verification does not establish
+Apple Developer ID signing or notarization.
+
+Release links: [dev.8 source tag](https://github.com/sanleesam/DropFlow/tree/v0.1.0-dev.8),
+[completed workflow](https://github.com/sanleesam/DropFlow/actions/runs/40457006305),
+and [Development downloads](https://github.com/sanleesam/DropFlow/releases/tag/development).
+The existing floating release kept its older body despite successful asset
+publication. It was corrected manually to dev.8, and a follow-up workflow step
+now refreshes release notes after the merged manifest is uploaded.
+
+The final merged `latest.json` advertises `0.1.0-dev.8` for both
+`darwin-aarch64` and `windows-x86_64`. Both the Mac archive (7,403,116 bytes)
+and Windows installer (4,984,138 bytes) passed cryptographic updater-signature
+verification against the checked-in public key. The final floating release
+contains only the dev.8 installers, current archive/signature, and manifest.
+The Windows installer was downloaded for verification, not installed or run.
 
 ## Limits and release interpretation
 

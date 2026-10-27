@@ -267,6 +267,36 @@ jobs:
             --prerelease 2>/dev/null || true
           gh release upload development latest.json --clobber
 
+      # tauri-action does not replace the body of an existing floating release.
+      # Refresh it only after the combined updater manifest is published, so the
+      # displayed version describes the completed multi-platform release.
+      - name: Refresh Development Release Notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'EOF'
+          import os
+          from pathlib import Path
+
+          version = os.environ["DEV_VERSION"]
+          revision = os.environ["GITHUB_SHA"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          audit_url = f"https://github.com/{repo}/blob/{revision}/docs/DEV8_DISCOVERY_AUDIT.md"
+          commit_url = f"https://github.com/{repo}/commit/{revision}"
+          notes = f"""Latest build: **{version}** ([commit `{revision[:12]}`]({commit_url})).
+
+          Development builds contain experimental changes. See the [discovery audit]({audit_url}) for the verified scope and remaining issues.
+
+          Known issues documented there include IPv6/multiple-address transfers, visibility persistence and name validation, approval timeouts, and Mac disk-space status. Discovery recovery does not establish complete cross-device transfer coverage.
+
+          For curated milestone releases, select the **Beta** channel in Settings → Updates.
+          """
+          Path("development-release-notes.md").write_text(notes, encoding="utf-8")
+          EOF
+          gh release edit development \
+            --title "DropFlow Development Channel" \
+            --notes-file development-release-notes.md
+
       # The floating `development` release is overwritten every run; delete
       # installer assets from older runs so it does not grow without bound.
       # NEVER delete anything the freshly published manifest references:
