@@ -26,6 +26,21 @@ Do not assume the two platforms share a version number.
 - Reused the transparent mark in the sidebar, About panel and browser favicon.
 - Beta 17 and mobile icons are unchanged.
 
+## Desktop — [0.1.0-dev.8] — 2026-10-27
+
+- Repair Search again/Refresh so it rebuilds discovery sockets, refreshes the
+  advertisement and removes stale peers before resolving the network again.
+- Add one bounded startup recovery attempt and recover an empty browser when
+  returning to the app; upgrade mDNS discovery to 0.21.6 for published recovery
+  fixes around multicast joins, sleep, unresolved services and event pressure.
+- Remove competing rename advertisements that could publish an invalid device
+  type or reveal a hidden device. Preserve current visibility during recovery.
+- Honor requested diagnostic log levels in release builds and include the macOS
+  local-network purpose description in the application bundle.
+- Support explicit Development tags and run regression checks before publishing.
+- See [the discovery audit](docs/DEV8_DISCOVERY_AUDIT.md) for live Mac/Windows
+  evidence, the unproven original trigger, and remaining transport/settings issues.
+
 ## Desktop — [0.1.0-beta.17] — 2026-10-16
 
 ### Changed

@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Dropflow"
-version = "0.1.0-beta.17"
+version = "0.1.0-dev.8"
 dependencies = [
  "chrono",
  "flume",
@@ -2078,9 +2078,9 @@ dependencies = [
 
 [[package]]
 name = "mdns-sd"
-version = "0.20.1"
+version = "0.21.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb75febbe5fa1837a52fdbd1c735e168286c5c645fc2ddd31526f65c49941c2e"
+checksum = "8562654710f72a9cbce4b0d5b7c366a2f94330ba1ce3740f15e932ea2d37b161"
 dependencies = [
  "fastrand",
  "flume",

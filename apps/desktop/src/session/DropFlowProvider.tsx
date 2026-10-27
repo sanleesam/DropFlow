@@ -90,6 +90,8 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [filesDeviceId, setFilesDeviceId] = useState("this");
   const discoveryEventRevision = useRef(0);
   const devicesRef = useRef<Device[]>([]);
+  const discoveryRestarting = useRef(false);
+  const lastDiscoveryRefresh = useRef(Date.now());
   devicesRef.current = devices;
 
   useEffect(() => {
@@ -205,13 +207,37 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [addToast, settings.autoOpenCompleted]);
 
   const retryDiscovery = useCallback(() => {
+    if (discoveryRestarting.current) return;
+    discoveryRestarting.current = true;
+    lastDiscoveryRefresh.current = Date.now();
     setDiscovery("searching");
     setShowEmpty(false);
-    invoke("start_discovery").catch((error) => {
+    invoke("restart_discovery").catch((error) => {
       console.error("Failed to look for devices", error);
       setDiscovery("error");
-    });
+    }).finally(() => { discoveryRestarting.current = false; });
   }, []);
+
+  useEffect(() => {
+    // A daemon created while the app/network is becoming ready may never
+    // resolve the initial peer set. Make one bounded recovery attempt.
+    const timer = window.setTimeout(() => {
+      if (devicesRef.current.length === 0) retryDiscovery();
+    }, 5_000);
+    return () => window.clearTimeout(timer);
+  }, [retryDiscovery]);
+
+  useEffect(() => {
+    // Returning after sleep or a network transition should recover an empty
+    // browser without requiring the user to quit the whole app.
+    const recoverEmptyDiscovery = () => {
+      if (devicesRef.current.length === 0 && Date.now() - lastDiscoveryRefresh.current > 30_000) {
+        retryDiscovery();
+      }
+    };
+    window.addEventListener("focus", recoverEmptyDiscovery);
+    return () => window.removeEventListener("focus", recoverEmptyDiscovery);
+  }, [retryDiscovery]);
 
   useEffect(() => {
     let disposed = false;
@@ -219,6 +245,7 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let unlistenLost: (() => void) | undefined;
 
     const applyDiscoveredPeer = (newDevice: Device) => {
+      setLostDeviceName((name) => name === newDevice.name ? null : name);
       discoveryEventRevision.current += 1;
       setDevices((previousDevices) => {
         const existingIndex = previousDevices.findIndex((device) => device.id === newDevice.id);

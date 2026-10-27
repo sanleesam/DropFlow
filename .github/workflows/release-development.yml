@@ -2,12 +2,11 @@ name: Release Development
 
 # DEVELOPMENT channel. Frequent experimental builds, fully independent of Beta:
 #   Beta:        tags `v*-beta.*` + floating `beta` release   -> release-beta.yml
-#   Development: pushes to `main` (or manual) + floating `development` release -> this workflow
+#   Development: main, manual or `v*-dev.*` tags + floating `development` release -> this workflow
 #
-# Dev builds never create Git tags, never touch the `beta` release, and use
-# their own version line (`0.1.0-dev.<run number>`) so the Beta counter stays
-# reserved for curated milestone releases. The desktop updater picks the
-# manifest of whichever channel the user selected in Settings → About.
+# Explicit Development tags pin the version (for example v0.1.0-dev.8).
+# Main/manual branch builds retain automatic run numbering. Neither path touches
+# the Beta release. One resolver supplies every build and manifest version.
 
 # Serialize Development publication: only one run at a time may mutate the
 # floating `development` release. Cancelling in-progress runs (and dropping
@@ -25,12 +24,38 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*-dev.*'
   workflow_dispatch:
 
 jobs:
+  resolve-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test Development Version Resolution
+        run: node --test scripts/resolve-development-version.test.mjs
+      - name: Resolve Canonical Development Version
+        id: version
+        run: node scripts/resolve-development-version.mjs
+
   publish-development:
+    needs: resolve-version
     permissions:
       contents: write
+    env:
+      DEV_VERSION: ${{ needs.resolve-version.outputs.version }}
+      DEV_TAG: ${{ needs.resolve-version.outputs.tag }}
 
     strategy:
       fail-fast: false
@@ -64,17 +89,24 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Frontend Dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
         working-directory: ./apps/desktop
 
-      - name: Sync Application Version with Development Build Number
+      - name: Run Frontend Regression Checks
+        run: pnpm test:ui && pnpm build
+        working-directory: ./apps/desktop
+
+      - name: Run Rust Regression Tests
+        run: cargo test --locked
+        working-directory: ./apps/desktop/src-tauri
+
+      - name: Sync Application Version with Development Release
         shell: bash
         run: |
-          DEV_VERSION="0.1.0-dev.${{ github.run_number }}"
           echo "Updating project versions to $DEV_VERSION..."
           node -e "
             const fs = require('fs');
-            const ver = '$DEV_VERSION';
+            const ver = process.env.DEV_VERSION;
 
             const pkgPath = 'apps/desktop/package.json';
             const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
@@ -98,16 +130,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          DROPFLOW_RELEASE_TAG: v0.1.0-dev.${{ github.run_number }}
+          DROPFLOW_RELEASE_TAG: ${{ env.DEV_TAG }}
         with:
           projectPath: ./apps/desktop
           args: ${{ matrix.args }}
           tagName: 'development'
           releaseName: 'DropFlow Development Channel'
           releaseBody: |
-            Frequent development builds, published automatically on every push to `main`.
+            Development builds published from `main`, manual runs or explicit Development tags.
 
-            Latest build: `0.1.0-dev.${{ github.run_number }}` (commit ${{ github.sha }}).
+            Latest build: `${{ env.DEV_VERSION }}` (commit ${{ github.sha }}).
 
             These builds may contain unfinished or unstable changes. For curated
             milestone releases, switch to the **Beta** channel in Settings → About.
@@ -121,12 +153,17 @@ jobs:
       - name: Verify Platform Updater Manifest
         env:
           EXPECTED_PLATFORM: ${{ matrix.updater_key }}
+          EXPECTED_VERSION: ${{ env.DEV_VERSION }}
         shell: bash
         run: |
           node -e "
             const fs = require('fs');
             const key = process.env.EXPECTED_PLATFORM;
             const data = JSON.parse(fs.readFileSync('latest.json', 'utf8'));
+            if (data.version !== process.env.EXPECTED_VERSION) {
+              console.error('ERROR: updater manifest version does not match ' + process.env.EXPECTED_VERSION);
+              process.exit(1);
+            }
             const entry = (data.platforms || {})[key];
             if (!entry) {
               console.error('ERROR: updater manifest is missing platform ' + key);
@@ -147,10 +184,12 @@ jobs:
           if-no-files-found: error
 
   sync-development-channel:
-    needs: publish-development
+    needs: [resolve-version, publish-development]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      DEV_VERSION: ${{ needs.resolve-version.outputs.version }}
 
     steps:
       - name: Checkout Repository
@@ -171,14 +210,12 @@ jobs:
       # are untouched fallbacks.
       - name: Merge Platform Manifests into One latest.json
         env:
-          TAG_REF: v0.1.0-dev.${{ github.run_number }}
           REQUIRED_PLATFORMS: 'darwin-aarch64 windows-x86_64'
         run: |
           python3 - <<'EOF'
           import glob, json, os, sys
 
-          tag = os.environ["TAG_REF"]
-          version = tag[1:] if tag.startswith("v") else tag
+          version = os.environ["DEV_VERSION"]
           required_platforms = os.environ["REQUIRED_PLATFORMS"].split()
 
           paths = sorted(glob.glob("manifests/*/latest.json"))
@@ -226,7 +263,7 @@ jobs:
         run: |
           gh release create development \
             --title "DropFlow Development Channel" \
-            --notes "Frequent development builds. Latest: 0.1.0-dev.${{ github.run_number }}." \
+            --notes "Frequent development builds. Latest: ${DEV_VERSION}." \
             --prerelease 2>/dev/null || true
           gh release upload development latest.json --clobber
 
@@ -242,14 +279,13 @@ jobs:
       - name: Remove Stale Development Assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CURRENT_VERSION: 0.1.0-dev.${{ github.run_number }}
         run: |
           python3 - <<'EOF'
           import json, os, subprocess
           from urllib.parse import urlparse
 
           repo = os.environ["GITHUB_REPOSITORY"]
-          current_version = os.environ["CURRENT_VERSION"]
+          current_version = os.environ["DEV_VERSION"]
 
           # Manifest-driven keep-set: every asset the published manifest
           # references, plus each one's .sig companion.

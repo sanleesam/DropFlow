@@ -12,6 +12,7 @@ see [Desktop update channels](#desktop-update-channels).
 | Platform | Tag format | Example | Workflow | Produces |
 | --- | --- | --- | --- | --- |
 | Desktop | `v<version>-beta.N` | `v0.1.0-beta.15` | `release-beta.yml` | macOS/Windows installers + `latest.json` updater manifest |
+| Desktop Development | `v<version>-dev.N` | `v0.1.0-dev.8` | `release-development.yml` | macOS/Windows installers on the floating `development` release |
 | Android | `android-v<version>` | `android-v0.1.0-beta.1` | `release-android.yml` | Signed release APK on a GitHub prerelease |
 
 Both platforms share the product line (`DropFlow v0.1.0`) but their beta
@@ -27,7 +28,7 @@ Each channel has its own manifest and version line.
 | Channel | Audience | Version line | Updater manifest |
 | --- | --- | --- | --- |
 | Beta | Curated, tested milestone releases | `0.1.0-beta.N` (tag `v0.1.0-beta.N`) | `releases/download/beta/latest.json` |
-| Development | Frequent experimental builds | `0.1.0-dev.<run number>` (no tag) | `releases/download/development/latest.json` |
+| Development | Frequent experimental builds | `0.1.0-dev.N` (explicit tag or automatic run number) | `releases/download/development/latest.json` |
 
 Not every experimental change should become a Beta release: Development
 builds are published automatically from `main`, while a Beta release is cut
@@ -69,15 +70,21 @@ later without a data migration.
 
 ## Desktop Development channel (automated)
 
-`release-development.yml` runs on every push to `main` (and manually via
-workflow_dispatch). **No git tags are created.**
+`release-development.yml` runs on pushes to `main`, explicit `v*-dev.*` tags,
+and manually via workflow_dispatch. The workflow does not create version tags.
+To publish an exact build number, commit the validated desktop change, create
+`v0.1.0-dev.8` at that commit and push that tag. Avoid pushing the same commit to
+`main` at the same time: that would start a second automatically numbered build.
 
 - Builds the same macOS/Windows matrix and verifies each platform's updater
   manifest, using the same per-platform artifact protection as the Beta
   workflow.
-- Versions the build `0.1.0-dev.<run number>`, synced into `package.json`,
+- Uses the exact version from a Development tag, or `0.1.0-dev.<run number>`
+  for branch/manual runs, synced into `package.json`,
   `tauri.conf.json` and `Cargo.toml` at build time, so the Beta counter stays
   reserved for milestone releases.
+- Runs version-resolver tests, frontend regression checks/build and locked Rust
+  tests before publishing; one canonical version feeds both platform manifests.
 - Publishes installers and the merged `latest.json` to the floating
   `development` release and deletes installer assets from older runs so the
   release does not grow without bound.

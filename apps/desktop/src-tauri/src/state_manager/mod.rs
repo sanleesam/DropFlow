@@ -314,7 +314,6 @@ pub fn save_settings(
     settings: UserSettings,
 ) -> Result<(), String> {
     let mut state = container.state.lock().map_err(|e| e.to_string())?;
-    let old_name = state.settings.device_name.clone();
     let old_channel = state.settings.update_channel;
     state.settings = settings.clone();
 
@@ -333,23 +332,9 @@ pub fn save_settings(
         }
     }
 
-    // If device name changed, notify discovery engine
-    if old_name != settings.device_name {
-        if let Some(discovery) = app.try_state::<crate::device_discovery::DiscoveryState>() {
-            let port = app
-                .try_state::<crate::transfer_manager::TransferState>()
-                .and_then(|ts| ts.receiver.lock().ok()?.as_ref().map(|r| r.port()))
-                .unwrap_or(0);
-
-            discovery
-                .engine
-                .update_advertisement(&state.device_uuid, &settings.device_name, "Desktop", port)
-                .ok();
-            info!("[StateManager] Updated device advertisement name to '{}'",
-                settings.device_name
-            );
-        }
-    }
+    // DropFlowProvider owns advertisement updates with the current visibility
+    // and device type. Re-advertising here races that effect, can unhide a
+    // hidden device, and previously published the invalid type "Desktop".
 
     Ok(())
 }
