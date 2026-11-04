@@ -14,6 +14,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dropflow.android.R
+import com.dropflow.android.BuildConfig
+import com.dropflow.android.core.model.releaseLabel
 import com.dropflow.android.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -23,7 +25,7 @@ fun TopAppBar(modifier: Modifier = Modifier, onRefresh: (() -> Unit)? = null) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Image(painterResource(R.drawable.ic_dropflow_logo), null, Modifier.size(32.dp))
             Text("DropFlow", fontSize = 19.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
-            StatusPill("BETA 2")
+            StatusPill(releaseLabel(BuildConfig.VERSION_NAME, false).uppercase())
         }
     }, actions = {
         if (onRefresh != null) IconButton(onClick = onRefresh) {

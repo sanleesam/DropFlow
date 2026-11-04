@@ -24,7 +24,7 @@ import com.dropflow.android.ui.components.*
 import com.dropflow.android.ui.theme.*
 
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) {
+fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, modifier: Modifier = Modifier) {
     val state by viewModel.uiState.collectAsState()
     var draft by rememberSaveable(state.deviceName) { mutableStateOf(state.deviceName) }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -32,7 +32,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
     val save = { if (canSave) { viewModel.updateDeviceName(draft); keyboard?.hide() }; Unit }
     LazyColumn(modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        item { PageIntro("MAKE IT YOURS", "A little more you.", "Thoughtful controls for the way you share.") }
+        item { PageIntro("PREFERENCES", "Settings", "Make DropFlow fit the way you work.") }
         item {
             SettingsGroup(Icons.Default.Badge, "Device identity") {
                 Text("This is how you appear on nearby devices.", color = TextSecondary, fontSize = 13.sp)
@@ -64,6 +64,16 @@ fun SettingsScreen(viewModel: SettingsViewModel, modifier: Modifier = Modifier) 
         item {
             SettingsGroup(Icons.Default.Palette, "Appearance") {
                 SettingSwitch("Reduce animations", "Keep discovery calm and still.", state.reduceMotion, viewModel::updateReduceMotion)
+            }
+        }
+        item {
+            GlassCard(Modifier.fillMaxWidth()) {
+                TextButton(onClick = onAbout, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                    Icon(Icons.Default.Info, null, tint = IcyBlue)
+                    Spacer(Modifier.width(12.dp))
+                    Text("About DropFlow", modifier = Modifier.weight(1f), color = TextPrimary)
+                    Icon(Icons.Default.ChevronRight, null, tint = TextMuted)
+                }
             }
         }
         item {

@@ -23,7 +23,7 @@ fun AboutScreen(viewModel: AboutViewModel, modifier: Modifier = Modifier) {
     val state by viewModel.uiState.collectAsState()
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        item { PageIntro("A CLOSER CONNECTION", "Made for nearby.", "Less between you and your files.") }
+        item { PageIntro("ANDROID", "About DropFlow", "Send files. Simply.") }
         item {
             GlassCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally,
