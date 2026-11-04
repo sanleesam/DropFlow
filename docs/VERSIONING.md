@@ -26,7 +26,7 @@ has its own `DFP/1` identifier; app versions are not protocol versions.
 `apps/desktop/package.json` is the canonical desktop target. Run:
 
 ```sh
-node scripts/desktop-version.mjs set 0.1.1-beta.18
+node scripts/desktop-version.mjs set 0.1.1-beta.19
 node scripts/desktop-version.mjs check
 node --test scripts/desktop-version.test.mjs
 ```
@@ -36,13 +36,17 @@ The checker fails builds if they drift. Tagged Beta builds must match the
 committed target; CI no longer silently changes the target to match a wrong tag.
 Development CI derives, for example, `0.1.1-dev.8` from that same core version.
 
-The next desktop fix release is `0.1.1-beta.18`. Counter 18 is intentional:
+The next desktop fix release is `0.1.1-beta.19`. Keeping the counter above 17 is intentional:
 legacy Beta 17 updaters compare only beta counters. Starting at beta.1 would
 strand those installs despite the newer core version. The new updater compares
 full SemVer within each channel, including future core-version transitions.
 Beta and Development channel switching remains an explicit product preference
 and can offer the other channel's build even when it sorts lower in SemVer.
 Normal releases never auto-downgrade to prereleases.
+
+The `v0.1.1-beta.18` build was cancelled before publication when a release-history
+audit found that published Development 8 fixes had not reached main. Its tag is
+retained unchanged; beta.19 includes those fixes instead of reusing that tag.
 
 The current supported publication channels remain Beta and Development. Alpha,
 RC and normal versions are valid policy stages, not a claim that their desktop

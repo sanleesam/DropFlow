@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use chrono::Utc;
-use log::{Level, LevelFilter, Metadata, Record};
+use log::{LevelFilter, Metadata, Record};
 
 const LOG_FILE_NAME: &str = "dropflow.log";
 const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024; // 5 MB per file, one rotated backup
@@ -18,15 +18,12 @@ const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024; // 5 MB per file, one rotated bac
 struct DropFlowLogger {
     file: Mutex<Option<File>>,
     file_path: PathBuf,
+    filter: LevelFilter,
 }
 
 impl log::Log for DropFlowLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= if cfg!(debug_assertions) {
-            Level::Debug
-        } else {
-            Level::Info
-        }
+        metadata.level() <= self.filter
     }
 
     fn log(&self, record: &Record) {
@@ -85,11 +82,6 @@ fn rotate_if_needed(path: &Path) {
 pub fn init(log_dir: &Path) -> Option<PathBuf> {
     let file_path = log_dir.join(LOG_FILE_NAME);
 
-    let logger = DropFlowLogger {
-        file: Mutex::new(None),
-        file_path: file_path.clone(),
-    };
-
     let level = if cfg!(debug_assertions) {
         LevelFilter::Debug
     } else {
@@ -102,6 +94,12 @@ pub fn init(log_dir: &Path) -> Option<PathBuf> {
         .and_then(|spec| spec.parse::<LevelFilter>().ok())
         .unwrap_or(level);
 
+    let logger = DropFlowLogger {
+        file: Mutex::new(None),
+        file_path: file_path.clone(),
+        filter,
+    };
+
     let set = log::set_boxed_logger(Box::new(logger)).is_ok();
     if set {
         log::set_max_level(filter);
@@ -112,5 +110,33 @@ pub fn init(log_dir: &Path) -> Option<PathBuf> {
         Some(file_path)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use log::{Level, Log};
+
+    #[test]
+    fn requested_log_level_controls_dependency_diagnostics() {
+        for filter in [
+            LevelFilter::Off,
+            LevelFilter::Info,
+            LevelFilter::Debug,
+            LevelFilter::Trace,
+        ] {
+            let logger = DropFlowLogger {
+                file: Mutex::new(None),
+                file_path: PathBuf::new(),
+                filter,
+            };
+            for level in [Level::Error, Level::Info, Level::Debug, Level::Trace] {
+                assert_eq!(
+                    logger.enabled(&Metadata::builder().level(level).build()),
+                    level <= filter
+                );
+            }
+        }
     }
 }
