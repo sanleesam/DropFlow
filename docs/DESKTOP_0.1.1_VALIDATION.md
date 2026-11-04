@@ -79,3 +79,23 @@ the external test receive directory exposed the Files-browser limitation above.
 A native incoming 1 MiB transfer accepted through the real prompt passed, and
 a fresh native three-file folder send passed exact bytes/SHA-256 checks after
 20 seconds of recipient delay, including the Android-compatible JSON final ACK.
+
+## Published artifacts and channel safety
+
+[`v0.1.1-beta.19`](https://github.com/sanleesam/DropFlow/releases/tag/v0.1.1-beta.19)
+published successfully. Both native platform jobs and the Beta channel sync
+passed in Actions run `41848257204`. Downloaded Mac and Windows updater artifacts
+passed Minisign verification against the configured Tauri public key. The Mac
+bundle reports `0.1.1-beta.19`, includes local-network metadata, and embeds an
+icon byte-identical to the source ICNS. All four manifest platform/variant URLs
+reference the correct versioned release; the floating Beta manifest matches it.
+The installed application was not replaced.
+
+Development run 10 exposed a separate pipeline failure: Windows uploaded while
+the macOS job never started, leaving a mixed floating manifest. The channel was
+restored to complete Development 8 metadata. The subsequent publication fix
+stages installers in a versioned draft and changes the channel only after both
+platforms pass. Run 11 again had no started macOS job: its Windows artifacts
+remain a draft, the sync job was skipped, and the public channel stayed on
+Development 8. No incomplete Development 11 was published. This is a runner
+availability limitation, not evidence of a native build failure.
