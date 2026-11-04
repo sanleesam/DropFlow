@@ -8,14 +8,10 @@ name: Release Development
 # Main/manual branch builds retain automatic run numbering. Neither path touches
 # the Beta release. One resolver supplies every build and manifest version.
 
-# Serialize Development publication: only one run at a time may mutate the
-# floating `development` release. Cancelling in-progress runs (and dropping
-# superseded queued runs) guarantees an older run can never publish after a
-# newer one. Cancellations almost always land during the build phase, before
-# any release mutation; the merge job below additionally uploads the merged
-# latest.json BEFORE pruning stale assets, so an interrupted run always leaves
-# the manifest pointing at assets that still exist. Beta is a separate
-# workflow with its own tag-triggered releases and stays fully independent.
+# Each build stages installers under its version tag. Only the sync job updates
+# the floating Development manifest, after BOTH platforms pass. Partial builds
+# cannot mutate installers referenced by the last complete channel manifest.
+# Serialize channel publication; Beta has its own independent workflow.
 concurrency:
   group: release-development
   cancel-in-progress: true
@@ -44,7 +40,7 @@ jobs:
         with:
           node-version: 22
       - name: Test Development Version Resolution
-        run: node --test scripts/desktop-version.test.mjs scripts/resolve-development-version.test.mjs
+        run: node --test scripts/desktop-version.test.mjs scripts/resolve-development-version.test.mjs scripts/release-workflow.test.mjs
       - name: Resolve Canonical Development Version
         id: version
         run: node scripts/resolve-development-version.mjs
@@ -116,8 +112,10 @@ jobs:
         with:
           projectPath: ./apps/desktop
           args: ${{ matrix.args }}
-          tagName: 'development'
-          releaseName: 'DropFlow Development Channel'
+          tagName: ${{ env.DEV_TAG }}
+          releaseCommitish: ${{ github.sha }}
+          releaseName: 'DropFlow ${{ env.DEV_VERSION }} Development'
+          releaseDraft: true
           releaseBody: |
             Development builds published from `main`, manual runs or explicit Development tags.
 
@@ -172,6 +170,7 @@ jobs:
       contents: write
     env:
       DEV_VERSION: ${{ needs.resolve-version.outputs.version }}
+      DEV_TAG: ${{ needs.resolve-version.outputs.tag }}
 
     steps:
       - name: Checkout Repository
@@ -198,6 +197,7 @@ jobs:
           import glob, json, os, sys
 
           version = os.environ["DEV_VERSION"]
+          tag = os.environ["DEV_TAG"]
           required_platforms = os.environ["REQUIRED_PLATFORMS"].split()
 
           paths = sorted(glob.glob("manifests/*/latest.json"))
@@ -217,6 +217,8 @@ jobs:
               for key, entry in data.get("platforms", {}).items():
                   if not isinstance(entry, dict) or not entry.get("signature") or not entry.get("url"):
                       sys.exit(f"ERROR: platform '{key}' in {path} has an incomplete updater entry: {entry}")
+                  if f"/releases/download/{tag}/" not in entry["url"]:
+                      sys.exit(f"ERROR: platform '{key}' does not reference this versioned release")
                   owned = key == owner or key.startswith(owner + "-")
                   if key not in platforms or owned:
                       platforms[key] = entry
@@ -234,15 +236,13 @@ jobs:
           print(json.dumps(merged, indent=2))
           EOF
 
-      # Upload the merged manifest BEFORE pruning stale assets: at that point
-      # both the previous and the new installers still exist, so even if this
-      # run is cancelled right afterwards the manifest on the release points
-      # at assets that are present. Cleanup only ever removes assets that the
-      # just-published manifest does not reference.
+      # The versioned release is complete before the floating channel changes.
       - name: Publish Merged Manifest to Development Channel
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          gh release upload "$DEV_TAG" latest.json --clobber
+          gh release edit "$DEV_TAG" --draft=false
           gh release create development \
             --title "DropFlow Development Channel" \
             --notes "Frequent development builds. Latest: ${DEV_VERSION}." \
@@ -250,53 +250,5 @@ jobs:
           gh release upload development latest.json --clobber
           gh release edit development --notes "$(python3 -c 'import json; print(json.load(open("latest.json")).get("notes", "Development build"))')"
 
-      # The floating `development` release is overwritten every run; delete
-      # installer assets from older runs so it does not grow without bound.
-      # NEVER delete anything the freshly published manifest references:
-      # Tauri's macOS updater artifacts are versionless
-      # (e.g. DropFlow_aarch64.app.tar.gz), so the version-substring rule alone
-      # would orphan the darwin manifest URLs. The referenced-name keep-set is
-      # read from the local latest.json written by the merge step above — the
-      # exact manifest just published. Runs are serialized by the
-      # workflow-level concurrency group, so this can never race a newer run.
-      - name: Remove Stale Development Assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python3 - <<'EOF'
-          import json, os, subprocess
-          from urllib.parse import urlparse
-
-          repo = os.environ["GITHUB_REPOSITORY"]
-          current_version = os.environ["DEV_VERSION"]
-
-          # Manifest-driven keep-set: every asset the published manifest
-          # references, plus each one's .sig companion.
-          with open("latest.json") as f:
-              manifest = json.load(f)
-          referenced = set()
-          for entry in manifest.get("platforms", {}).values():
-              url = entry.get("url", "") if isinstance(entry, dict) else ""
-              name = os.path.basename(urlparse(url).path)
-              if name:
-                  referenced.add(name)
-                  referenced.add(name + ".sig")
-
-          release = json.loads(
-              subprocess.check_output(
-                  ["gh", "api", f"repos/{repo}/releases/tags/development"], text=True
-              )
-          )
-          for asset in release.get("assets", []):
-              name = asset.get("name", "")
-              if (
-                  name == "latest.json"
-                  or f"_{current_version}_" in name
-                  or name in referenced
-              ):
-                  continue
-              print(f"Deleting stale development asset: {name}")
-              subprocess.check_call(
-                  ["gh", "api", "-X", "DELETE", f"repos/{repo}/releases/assets/{asset['id']}"]
-              )
-          EOF
+      # Legacy floating-release assets are retained. New installers live under
+      # immutable version tags, so failed/partial builds cannot replace them.

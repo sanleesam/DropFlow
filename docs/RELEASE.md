@@ -77,7 +77,8 @@ later without a data migration.
 ## Desktop Development channel (automated)
 
 `release-development.yml` runs on pushes to `main`, explicit `v*-dev.*` tags,
-and manually via workflow_dispatch. The workflow does not create version tags.
+and manually via workflow_dispatch. Automatic runs now create a versioned
+Development release/tag at the built commit; explicit tags retain their number.
 To publish an exact build number, commit the validated desktop change, create
 `v0.1.1-dev.10` at that commit and push that tag. Avoid pushing the same commit to
 `main` at the same time: that would start a second automatically numbered build.
@@ -91,9 +92,10 @@ To publish an exact build number, commit the validated desktop change, create
   reserved for milestone releases.
 - Runs version-resolver tests, frontend regression checks/build and locked Rust
   tests before publishing; one canonical version feeds both platform manifests.
-- Publishes installers and the merged `latest.json` to the floating
-  `development` release and deletes installer assets from older runs so the
-  release does not grow without bound.
+- Stages installers in a draft versioned Development release. Only
+  after both platforms succeed does it publish the merged `latest.json` to the
+  versioned release, publishes it, and updates the floating `development` channel. Failed/partial runs
+  leave the last complete channel intact. Legacy floating assets are retained.
 - Builds may be unstable; the release body points testers at the Beta channel
   for curated milestones.
 
