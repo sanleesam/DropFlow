@@ -156,6 +156,7 @@ pub fn run() {
             update_manager::download_and_install_update,
             update_manager::clear_pending_update,
             device_discovery::start_discovery,
+            device_discovery::restart_discovery,
             device_discovery::update_advertisement,
             device_discovery::get_local_uuid,
             device_discovery::get_current_peers,

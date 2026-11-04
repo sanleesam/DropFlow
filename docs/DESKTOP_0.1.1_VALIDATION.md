@@ -1,4 +1,4 @@
-# Desktop 0.1.1-beta.18 validation — 2026-11-04
+# Desktop 0.1.1-beta.19 validation — 2026-11-04
 
 ## Scope and findings
 
@@ -23,7 +23,7 @@ lost failed selections and perpetual unsupported disk-usage loading state.
   path sanitization, folder expansion, state/history persistence, update
   ordering, channel-generation races, power guards and file-browser CRUD.
 - Native macOS debug app built with a separate validation bundle identifier.
-  About reports `0.1.1-beta.18 · beta`. Devices, Transfers, Files and Settings
+  The initial test build reports `0.1.1-beta.18 · beta`. Devices, Transfers, Files and Settings
   navigation smoke checks passed without changing the installed app.
 - Two native sends to a loopback DFP/1 peer passed: a nested folder with spaces,
   Unicode text, a zero-byte file and a 1 MiB binary. Both waited 20 seconds for
@@ -56,6 +56,26 @@ ports; trigger the existing native send_files command for the receive mode.
 - File delivery is not an atomic multi-file filesystem transaction. A disk
   failure during promotion may leave already verified completed files; the
   transfer reports failure rather than acknowledging complete success.
+- The Files browser is restricted to the user's home directory. Receiving to
+  a configured external directory works, but browsing that directory in-app
+  currently reports a boundary error; use the system file manager instead.
 
 This evidence supports a beta fix release, not a claim that every possible
 device, network, filesystem race or security scenario is certified.
+
+## Release-history correction
+
+Before beta.18 finished publishing, the run was cancelled: Development 8 had
+previously shipped from an off-main commit. That commit is integrated for
+beta.19, preserving its mdns-sd 0.21.6 upgrade, discovery recovery and macOS
+local-network metadata. See `DEV8_DISCOVERY_AUDIT.md` for that release's earlier
+physical Mac/Windows observations; those are not new beta.19 hardware tests.
+The beta.18 tag is not moved or reused.
+
+After integration, all 57 Rust tests, nine version/resolver tests, TypeScript,
+UI regression checks, production frontend build and native macOS debug bundle
+passed. About shows `0.1.1-beta.19 · beta`. All five pages were opened again;
+the external test receive directory exposed the Files-browser limitation above.
+A native incoming 1 MiB transfer accepted through the real prompt passed, and
+a fresh native three-file folder send passed exact bytes/SHA-256 checks after
+20 seconds of recipient delay, including the Android-compatible JSON final ACK.

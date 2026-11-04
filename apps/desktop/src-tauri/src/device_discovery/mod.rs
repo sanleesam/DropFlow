@@ -63,6 +63,8 @@ pub trait DiscoveryEngine: Send + Sync {
 
     fn start_browsing(&self, app: AppHandle) -> Result<(), String>;
 
+    fn restart_browsing(&self, app: AppHandle) -> Result<(), String>;
+
     fn current_peers(&self) -> Result<Vec<DiscoveredDevice>, String>;
 }
 
@@ -302,6 +304,10 @@ impl PeerRegistry {
         peers.sort_by(|left, right| left.id.cmp(&right.id));
         peers
     }
+
+    fn reset(&mut self) -> Vec<DiscoveredDevice> {
+        std::mem::take(self).snapshot()
+    }
 }
 
 // ─── mDNS Discovery Implementation ───────────────────────────────────────────
@@ -318,9 +324,10 @@ impl MdnsDiscoveryEngine {
     pub fn new(local_uuid: String) -> Result<Self, String> {
         let daemon =
             ServiceDaemon::new().map_err(|e| format!("Failed to create mDNS daemon: {e}"))?;
+        let monitor = daemon.monitor().map_err(|error| error.to_string())?;
         let daemon = Arc::new(Mutex::new(daemon));
         let active_registration: Arc<Mutex<Option<ServiceInfo>>> = Arc::new(Mutex::new(None));
-        spawn_daemon_monitor(daemon.clone(), active_registration.clone());
+        spawn_daemon_monitor(daemon.clone(), active_registration.clone(), monitor);
         info!("[Discovery] mDNS daemon initialized (local UUID {local_uuid})");
         Ok(Self {
             daemon,
@@ -335,28 +342,14 @@ impl MdnsDiscoveryEngine {
 /// Logs daemon-level events (interface changes, socket errors, name conflicts).
 /// Without this, a dead multicast socket (e.g. OS firewall) is completely silent.
 ///
-/// When the host's network addresses change, the daemon is restarted (after a
-/// short quiet period) so multicast memberships and interface caches are fully
-/// rebuilt: mdns-sd 0.20.1 can go deaf to LAN peers after surviving network
-/// transitions, and only a fresh daemon reliably restores reception.
+/// When the host's network addresses change, restart after a short quiet period
+/// so multicast memberships and interface caches are fully rebuilt. The library
+/// also retries failed joins; explicit replacement covers completed transitions.
 fn spawn_daemon_monitor(
     daemon: Arc<Mutex<ServiceDaemon>>,
     active_registration: Arc<Mutex<Option<ServiceInfo>>>,
+    monitor: flume::Receiver<DaemonEvent>,
 ) {
-    let monitor = match daemon.lock() {
-        Ok(current) => match current.monitor() {
-            Ok(monitor) => monitor,
-            Err(_) => {
-                warn!("[Discovery] Could not attach daemon event monitor");
-                return;
-            }
-        },
-        Err(_) => {
-            warn!("[Discovery] Could not attach daemon event monitor");
-            return;
-        }
-    };
-
     std::thread::spawn(move || {
         // Some(deadline) while waiting for address churn to settle.
         let mut restart_after: Option<Instant> = None;
@@ -380,7 +373,11 @@ fn spawn_daemon_monitor(
             };
 
             let Some(event) = event else {
-                restart_mdns_daemon(&daemon, &active_registration);
+                if let Err(error) = restart_mdns_daemon(&daemon, &active_registration) {
+                    error!("[Discovery] mDNS recovery failed: {error}");
+                    restart_after = Some(Instant::now() + DAEMON_RESTART_QUIET_PERIOD);
+                    continue;
+                }
                 return; // A fresh monitor thread is attached by the restart.
             };
 
@@ -416,46 +413,45 @@ fn spawn_daemon_monitor(
 
 /// Rebuilds the mDNS daemon from scratch after a network transition.
 ///
-/// mdns-sd 0.20.1 masks multicast join failures on already-known interfaces and
-/// never retries them, so a daemon that survives network changes can end up
-/// unable to receive LAN peers even though advertisement still works. A fresh
-/// daemon re-enumerates all interfaces and re-joins multicast groups, restoring
-/// reception. The browse loop reconnects automatically when the old daemon's
-/// channels close.
+/// A fresh daemon re-enumerates interfaces and rejoins multicast groups. This
+/// also backs the explicit Search again action, which must recover the sockets
+/// rather than just report that an existing browser is running. The browse loop
+/// reconnects automatically when the old daemon's channels close.
 fn restart_mdns_daemon(
     daemon: &Arc<Mutex<ServiceDaemon>>,
     active_registration: &Arc<Mutex<Option<ServiceInfo>>>,
-) {
-    info!("[Discovery] Restarting mDNS daemon after network change");
+) -> Result<(), String> {
+    info!("[Discovery] Restarting mDNS daemon and refreshing service discovery");
 
-    let new_daemon = match ServiceDaemon::new() {
-        Ok(new_daemon) => new_daemon,
-        Err(error) => {
-            error!("[Discovery] Failed to restart mDNS daemon: {error}");
-            return;
-        }
-    };
+    let new_daemon =
+        ServiceDaemon::new().map_err(|error| format!("Failed to restart mDNS daemon: {error}"))?;
+    // Capture this daemon's receiver before publication. Concurrent restarts
+    // must not accidentally attach two monitor loops to the latest daemon.
+    let monitor = new_daemon.monitor().map_err(|error| error.to_string())?;
 
     // Re-announce the current advertisement (if any) on the new daemon.
-    if let Some(info) = active_registration.lock().ok().and_then(|guard| guard.clone()) {
-        match new_daemon.register(info) {
-            Ok(_) => info!("[Advertiser] Re-registered service after daemon restart"),
-            Err(error) => error!(
-                "[Advertiser] Failed to re-register service after daemon restart: {error}"
-            ),
+    // Match update_advertisement's lock order and keep the current registration
+    // stable through replacement so an in-flight rename/visibility update wins.
+    let registration = active_registration
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if let Some(info) = registration.as_ref() {
+        if let Err(error) = new_daemon.register(info.clone()) {
+            let _ = new_daemon.shutdown();
+            return Err(format!("Failed to re-register service: {error}"));
         }
+        info!("[Advertiser] Re-registered service after daemon restart");
     }
 
-    let old_daemon = match daemon.lock() {
-        Ok(mut guard) => std::mem::replace(&mut *guard, new_daemon),
-        Err(error) => {
-            error!("[Discovery] mDNS daemon state unavailable after network change: {error}");
-            return;
-        }
+    let old_daemon = {
+        let mut guard = daemon.lock().map_err(|error| error.to_string())?;
+        std::mem::replace(&mut *guard, new_daemon)
     };
+    drop(registration);
     let _ = old_daemon.shutdown();
 
-    spawn_daemon_monitor(daemon.clone(), active_registration.clone());
+    spawn_daemon_monitor(daemon.clone(), active_registration.clone(), monitor);
+    Ok(())
 }
 
 /// Handles one mdns-sd browse event: validates peer metadata, updates the
@@ -624,7 +620,10 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
         // Parity with the Android advertisement so peers can render richer
         // device info; unknown TXT keys are ignored by older peers.
         properties.insert("platform".to_string(), "Desktop".to_string());
-        properties.insert("operating_system".to_string(), std::env::consts::OS.to_string());
+        properties.insert(
+            "operating_system".to_string(),
+            std::env::consts::OS.to_string(),
+        );
         properties.insert(
             "application_version".to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
@@ -648,9 +647,7 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
                     .lock()
                     .map_err(|error| error.to_string())?
                     .unregister(previous.get_fullname())
-                    .map_err(|error| {
-                        format!("Failed to unregister prior mDNS service: {error}")
-                    })?;
+                    .map_err(|error| format!("Failed to unregister prior mDNS service: {error}"))?;
                 info!(
                     "[Advertiser] Unregister requested: {}",
                     previous.get_fullname()
@@ -710,18 +707,27 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
                         match receiver.recv_timeout(Duration::from_secs(BROWSE_HEARTBEAT_SECS)) {
                             Ok(event) => {
                                 idle_minutes = 0;
-                                handle_browse_event(
-                                    event,
-                                    &local_uuid,
-                                    &peer_registry,
-                                    &app,
-                                );
+                                handle_browse_event(event, &local_uuid, &peer_registry, &app);
                             }
                             Err(timeout_error) => match timeout_error {
                                 flume::RecvTimeoutError::Disconnected => {
                                     warn!(
                                         "[Discovery] Browse channel disconnected (daemon stopped or shut down); restarting browse"
                                     );
+                                    // A replacement daemon has a fresh cache and
+                                    // cannot emit removals for the old cache.
+                                    let stale = match peer_registry.lock() {
+                                        Ok(mut registry) => registry.reset(),
+                                        Err(error) => {
+                                            error!(
+                                                "[Discovery] Could not clear stale peers: {error}"
+                                            );
+                                            Vec::new()
+                                        }
+                                    };
+                                    for device in stale {
+                                        emit_peer_lost(&app, &device.id);
+                                    }
                                     break;
                                 }
                                 flume::RecvTimeoutError::Timeout => {
@@ -732,10 +738,7 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
                                             idle_minutes
                                         );
                                     } else {
-                                        debug!(
-                                            "[Discovery] Browse idle for {} min",
-                                            idle_minutes
-                                        );
+                                        debug!("[Discovery] Browse idle for {} min", idle_minutes);
                                     }
                                 }
                             },
@@ -758,6 +761,11 @@ impl DiscoveryEngine for MdnsDiscoveryEngine {
             .lock()
             .map(|registry| registry.snapshot())
             .map_err(|error| error.to_string())
+    }
+
+    fn restart_browsing(&self, app: AppHandle) -> Result<(), String> {
+        restart_mdns_daemon(&self.daemon, &self.active_registration)?;
+        self.start_browsing(app)
     }
 }
 
@@ -898,12 +906,65 @@ pub fn start_discovery(app: AppHandle, state: State<'_, DiscoveryState>) -> Resu
     state.engine.start_browsing(app)
 }
 
+#[tauri::command]
+pub fn restart_discovery(app: AppHandle, state: State<'_, DiscoveryState>) -> Result<(), String> {
+    state.engine.restart_browsing(app)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         is_self_peer, validate_peer_metadata, DiscoveredDevice, PeerAddress, PeerRegistry,
         PeerUpsert, ServiceRemoval, PROTOCOL_VERSION,
     };
+
+    #[test]
+    fn refresh_replaces_the_daemon_and_closes_the_old_browser() {
+        use mdns_sd::{DaemonStatus, ServiceDaemon, ServiceEvent};
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        let original = ServiceDaemon::new_with_port(0).unwrap();
+        let browser = original
+            .browse("_dropflow-refresh-test._tcp.local.")
+            .unwrap();
+        assert!(matches!(
+            browser.recv_timeout(Duration::from_secs(3)).unwrap(),
+            ServiceEvent::SearchStarted(_)
+        ));
+        let daemon = Arc::new(Mutex::new(original));
+        let registration = Arc::new(Mutex::new(None));
+
+        super::restart_mdns_daemon(&daemon, &registration).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            match browser
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            {
+                Err(flume::RecvTimeoutError::Disconnected) => break,
+                Err(error) => panic!("old browser remained active after refresh: {error}"),
+                Ok(_) => {}
+            }
+        }
+        let replacement = daemon.lock().unwrap();
+        assert_eq!(
+            replacement
+                .status()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(3))
+                .unwrap(),
+            DaemonStatus::Running
+        );
+        assert!(
+            registration.lock().unwrap().is_none(),
+            "refresh must not unhide a device"
+        );
+        replacement
+            .shutdown()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap();
+    }
 
     fn ipv4_address() -> PeerAddress {
         PeerAddress {
@@ -932,6 +993,27 @@ mod tests {
             port: 42382,
             version: PROTOCOL_VERSION.to_string(),
         }
+    }
+
+    #[test]
+    fn daemon_refresh_discards_peers_and_old_service_mappings() {
+        let mut registry = PeerRegistry::default();
+        registry.upsert("old-service".to_string(), valid_device("old-peer"));
+        let stale = registry.reset();
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0].id, "old-peer");
+        assert!(registry.snapshot().is_empty());
+        assert!(matches!(
+            registry.remove_service("old-service"),
+            ServiceRemoval::UnknownService
+        ));
+        assert!(matches!(
+            registry
+                .upsert("new-service".to_string(), valid_device("new-peer"))
+                .peer,
+            PeerUpsert::Added(_)
+        ));
+        assert_eq!(registry.snapshot()[0].id, "new-peer");
     }
 
     #[test]
