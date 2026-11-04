@@ -1,5 +1,9 @@
 # Android Beta 2 preparation
 
+> Historical 2026-10-19 snapshot. This Beta 2 candidate was never published and
+> is superseded by [Android 0.2.0-alpha.1 preparation](ANDROID_ALPHA1.md).
+> The dated results below are retained as history, not current release claims.
+
 Prepared on 2026-10-19 on `codex/android-beta2-titanium`.
 Android version: **0.1.0-beta.2**, versionCode **18** (Beta 1 was 17).
 Desktop source and desktop release versions are unchanged. Nothing has been

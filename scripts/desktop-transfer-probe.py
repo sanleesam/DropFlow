@@ -34,17 +34,21 @@ def read(sock):
     assert size <= 1024 * 1024
     return header[5], exact(sock, size)
 
-def receiving_peer(delay):
+def receiving_peer(delay, flat=False, port=0):
     root = Path(tempfile.mkdtemp(prefix="dropflow-send-probe-"))
     folder = root / "Folder with spaces"
     (folder / "nested").mkdir(parents=True)
     expected = {"Folder with spaces/empty.txt": b"", "Folder with spaces/nested/写真.txt": "Hello DropFlow".encode(),
                 "Folder with spaces/binary.bin": bytes(range(256)) * 4096}
+    if flat:
+        prefix = "alpha-qa-" + uuid.uuid4().hex[:6] + "-"
+        expected = {prefix + Path(name).name: data for name, data in expected.items()}
+        folder = root
     for name, data in expected.items():
         (root / name).write_bytes(data)
     with socket.socket() as server:
-        server.bind(("127.0.0.1", 0)); server.listen(1); server.settimeout(180)
-        print(json.dumps({"port": server.getsockname()[1], "folder": str(folder)}), flush=True)
+        server.bind(("127.0.0.1", port)); server.listen(1); server.settimeout(300)
+        print(json.dumps({"port": server.getsockname()[1], "folder": str(folder), "files": [str(root / name) for name in expected]}), flush=True)
         conn, _ = server.accept()
         with conn:
             conn.settimeout(90)
@@ -123,8 +127,9 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(); p.add_argument("mode", choices=["receive", "send"])
     p.add_argument("--delay", type=float, default=0); p.add_argument("--port", type=int); p.add_argument("--dest", type=Path)
     p.add_argument("--case")
+    p.add_argument("--flat", action="store_true", help="Generate flat fixtures for Android SAF selection")
     args = p.parse_args()
-    if args.mode == "receive": receiving_peer(args.delay)
+    if args.mode == "receive": receiving_peer(args.delay, args.flat, args.port or 0)
     else:
         for case in ([args.case] if args.case else ["success", "checksum", "cancel", "disconnect", "header-mismatch", "session-mismatch", "traversal"]):
             send_case(args.port, args.dest, case)

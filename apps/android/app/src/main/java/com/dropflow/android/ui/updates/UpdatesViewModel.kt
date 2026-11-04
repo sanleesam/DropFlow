@@ -82,6 +82,8 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
         val manifest = _state.value.manifest ?: return
         if (_state.value.phase !in listOf(UpdatePhase.AVAILABLE, UpdatePhase.ERROR)) return
         if (!manifest.isNewerThan(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toLong())) return
+        readyApk?.delete()
+        readyApk = null
         val token = generation
         _state.update { it.copy(phase = UpdatePhase.DOWNLOADING, downloaded = 0, message = null) }
         operation = viewModelScope.launch {

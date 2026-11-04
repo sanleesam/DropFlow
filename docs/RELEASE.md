@@ -17,7 +17,7 @@ see [Desktop update channels](#desktop-update-channels).
 | --- | --- | --- | --- | --- |
 | Desktop | `v<version>-beta.N` | `v0.1.1-beta.19` | `release-beta.yml` | macOS/Windows installers + `latest.json` updater manifest |
 | Desktop Development | `v<version>-dev.N` | `v0.1.1-dev.10` | `release-development.yml` | macOS/Windows installers on the floating `development` release |
-| Android | `android-v<version>` | `android-v0.1.0-beta.1` | `release-android.yml` | Signed release APK on a GitHub prerelease |
+| Android | `android-v<version>` | `android-v0.2.0-alpha.1` | `release-android.yml` | Same-key signed APK + Android updater manifest |
 
 Desktop and Android core versions and prerelease maturity move independently.
 See [VERSIONING.md](VERSIONING.md); protocol compatibility is tracked separately.
@@ -102,19 +102,23 @@ To publish an exact build number, commit the validated desktop change, create
 Promotion to Beta is a maintainer decision: tag a coherent milestone as
 `v*-beta.*` and the Beta workflow takes it from there.
 
-## Android Beta release (e.g. 0.1.0-beta.2)
+## Android release (current candidate: 0.2.0-alpha.1)
 
 1. Bump `versionName` / `versionCode` in `apps/android/app/build.gradle.kts`
-   (`versionCode` only ever increases, so in-place installs upgrade).
+   (`versionCode` only ever increases). Run `node scripts/android-version.mjs check`
+   and `node --test scripts/android-version.test.mjs scripts/android-updater-manifest.test.mjs`.
 2. Run `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease` in
    `apps/android`. A local release APK is unsigned unless release signing is configured.
    Complete the physical-device and upgrade checks in
-   [Android Beta 2 preparation](ANDROID_BETA2.md) before publishing.
-3. Commit and tag: `git tag android-v0.1.0-beta.2 && git push origin android-v0.1.0-beta.2`.
+   [Android Alpha 1 preparation](ANDROID_ALPHA1.md) before publishing.
+3. Only after the gates pass, commit and tag the matching version, for example
+   `android-v0.2.0-alpha.1`. Do not publish this candidate while its gates remain open.
 4. `release-android.yml` verifies the tag matches `versionName`, builds
    `assembleRelease`, renames the APK to `DropFlow-android-<version>.apk`, and
-   attaches it to a GitHub prerelease titled `DropFlow Android <version>`.
-   Android releases never touch the desktop updater manifest.
+   verifies its actual version and original certificate, and generates a size/SHA-256
+   Android updater manifest. Versioned assets precede the serialized channel update.
+   Prerelease versions are marked prerelease; normal versions are not. Android releases
+   never touch desktop updater manifests. See [ANDROID_UPDATES.md](ANDROID_UPDATES.md).
 
 ## Android signing
 
@@ -139,10 +143,11 @@ Release APKs must be signed or they cannot be installed. Two options:
   `app/build.gradle.kts` picks it up automatically for `assembleRelease`.
 
 CI now fails if any of the four signing secrets is absent. Never generate a new
-key for each release: Beta 2 must use the Beta 1 certificate for an in-place
+key for each release: Alpha 1 must use the Beta 1 certificate for an in-place
 upgrade. If Beta 1 used the old ephemeral fallback and its key was not retained,
-recover that key or explicitly document a one-time reinstall requirement before
-publishing. The workflow uses `docs/releases/android-<version>.md` as release notes.
+recover that key. Changing the signing identity/requiring a reinstall needs an
+explicit migration decision and a corresponding release-policy change; current
+CI rejects another signer. The workflow uses `docs/releases/android-<version>.md` as release notes.
 
 ## Pre-flight checklist (both platforms)
 

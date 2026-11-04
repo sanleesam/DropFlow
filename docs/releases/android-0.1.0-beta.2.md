@@ -1,3 +1,8 @@
+# Archived candidate — not published
+
+This candidate was superseded by `0.2.0-alpha.1`. See
+[current Android readiness](../ANDROID_ALPHA1.md); do not tag this old candidate.
+
 ### A new look, shared with desktop
 
 Android now carries DropFlow's Titanium + Icy Blue design: cool graphite,

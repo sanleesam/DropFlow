@@ -77,6 +77,11 @@ fun UpdatesScreen(viewModel: UpdatesViewModel, modifier: Modifier = Modifier) {
                         OutlinedButton(viewModel::cancelDownload) { Text("Cancel download") }
                     }
                     UpdatePhase.AVAILABLE -> PrimaryAction("Download update", Icons.Default.Download, viewModel::download, Modifier.fillMaxWidth())
+                    UpdatePhase.ERROR -> {
+                        if (state.manifest != null && state.manifest!!.isNewerThan(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toLong()))
+                            PrimaryAction("Retry download", Icons.Default.Download, viewModel::download, Modifier.fillMaxWidth())
+                        else PrimaryAction("Try again", Icons.Default.Refresh, viewModel::check, Modifier.fillMaxWidth())
+                    }
                     UpdatePhase.READY, UpdatePhase.INSTALLER_OPEN -> PrimaryAction("Install update", Icons.Default.SystemUpdate,
                         { viewModel.install(context) }, Modifier.fillMaxWidth())
                     UpdatePhase.PERMISSION_REQUIRED -> {

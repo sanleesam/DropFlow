@@ -18,15 +18,15 @@ No unnecessary setup.
 
 ## Current Status
 
-🚧 Beta
+🚧 Desktop Beta · Android Alpha development
 
-Desktop and Android are released **independently**, each with its own beta
-numbering (desktop continues its `0.1.0-beta.N` line; Android starts a fresh
-public beta cycle at `0.1.0-beta.1`). Both are part of DropFlow v0.1.0.
+Desktop and Android have independent Semantic Versions and maturity stages.
+Published versions are never renamed. See [the versioning policy](docs/VERSIONING.md).
 Current releases:
 
-- **Desktop**: `0.1.0-beta.15` (Windows, macOS)
-- **Android**: `0.1.0-beta.1`
+- **Desktop**: [`0.1.1-beta.19`](https://github.com/sanleesam/DropFlow/releases/tag/v0.1.1-beta.19) (Windows x64, macOS arm64)
+- **Android**: published legacy `0.1.0-beta.1`; the next, **unreleased** source target
+  is `0.2.0-alpha.1` (install number 18). See [current Android readiness](docs/ANDROID_ALPHA1.md).
 
 See [CHANGELOG.md](CHANGELOG.md), [docs/RELEASE.md](docs/RELEASE.md) and [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
@@ -37,21 +37,20 @@ by different tag prefixes — never tag both platforms with the same ref:
 
 | Platform | Tag example | Workflow | Artifact |
 | --- | --- | --- | --- |
-| Desktop | `v0.1.0-beta.15` | `.github/workflows/release-beta.yml` | Signed installers + `latest.json` updater manifest |
-| Android | `android-v0.1.0-beta.1` | `.github/workflows/release-android.yml` | Signed release APK |
+| Desktop Beta | `v0.1.1-beta.19` | `.github/workflows/release-beta.yml` | Updater-signed bundles + `latest.json` |
+| Android | `android-v0.2.0-alpha.1` | `.github/workflows/release-android.yml` | Same-key signed APK + Android-only updater manifest |
 
 ### Completed
 
 - ✅ Device discovery (mDNS)
 - ✅ Custom TCP transfer engine (DFP/1)
-- ✅ Transfer history
-- ✅ Persistent application state
+- ✅ Desktop persistent history/state; Android session history and saved preferences
 - ✅ Native desktop interface
 - ✅ Smooth view transitions
-- ✅ Resumable file transfers
+- ✅ Desktop resume support (Android SAF resume is not implemented)
 - ✅ Sleep prevention during active transfers
 - ✅ Android app with discovery, send and receive
-- ✅ Built-in updater
+- ✅ Desktop built-in updater; Android verified update flow implemented, publication/upgrade acceptance pending
 
 ### Troubleshooting discovery
 
@@ -80,7 +79,7 @@ Discovery uses mDNS on UDP port 5353. If a device never appears:
 
 ### Mobile
 
-- ✅ Android (Beta)
+- 🚧 Android (Alpha development; older public APK used a Beta label)
 
 ---
 

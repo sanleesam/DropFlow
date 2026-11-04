@@ -17,8 +17,14 @@ adb_path = Path(os.environ.get('ANDROID_HOME', str(Path.home() / 'Library/Androi
 args.artifacts.mkdir(parents=True, exist_ok=True)
 def adb(*parts): return subprocess.check_output([str(adb_path), '-s', args.serial, *parts])
 def nodes():
-    adb('shell', 'uiautomator', 'dump', '/sdcard/dropflow-alpha-ui.xml')
-    return list(ET.fromstring(adb('shell', 'cat', '/sdcard/dropflow-alpha-ui.xml')).iter('node'))
+    for attempt in range(5):
+        try:
+            adb('shell', 'rm', '-f', '/sdcard/dropflow-alpha-ui.xml')
+            adb('shell', 'uiautomator', 'dump', '/sdcard/dropflow-alpha-ui.xml')
+            return list(ET.fromstring(adb('shell', 'cat', '/sdcard/dropflow-alpha-ui.xml')).iter('node'))
+        except (subprocess.CalledProcessError, ET.ParseError):
+            if attempt == 4: raise
+            time.sleep(.5)
 def scroll(up=False):
     area = next(n for n in nodes() if n.get('scrollable') == 'true')
     a,b,c,d = map(int, re.findall(r'\d+', area.get('bounds')))
