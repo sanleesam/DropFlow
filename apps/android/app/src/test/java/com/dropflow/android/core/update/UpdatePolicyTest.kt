@@ -8,6 +8,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class UpdatePolicyTest {
+    @Test fun connectivityFailuresHaveReadableRecoveryMessages() {
+        assertTrue(updateErrorMessage(java.net.UnknownHostException("github.com")).contains("Check your internet connection"))
+        assertTrue(updateErrorMessage(java.net.SocketTimeoutException()).contains("too long"))
+        assertTrue(updateErrorMessage(javax.net.ssl.SSLException("certificate")).contains("secure connection"))
+        assertEquals("Update checksum did not match", updateErrorMessage(IllegalArgumentException("Update checksum did not match")))
+    }
     private val body = "update fixture".toByteArray()
     private val valid = AndroidUpdateManifest(1, "0.2.0-alpha.2", 19, "com.dropflow.android",
         "https://github.com/sanleesam/DropFlow/releases/download/android-v0.2.0-alpha.2/DropFlow-android-0.2.0-alpha.2.apk",

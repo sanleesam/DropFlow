@@ -73,7 +73,7 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
             } catch (_: ChannelNotPublished) {
                 if (token == generation) _state.update { it.copy(phase = UpdatePhase.UNAVAILABLE, checkedAt = System.currentTimeMillis()) }
             } catch (error: Exception) {
-                if (token == generation) _state.update { it.copy(phase = UpdatePhase.ERROR, message = error.message ?: "Could not check for updates") }
+                if (token == generation) _state.update { it.copy(phase = UpdatePhase.ERROR, message = updateErrorMessage(error)) }
             }
         }
     }
@@ -117,7 +117,7 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
             } catch (cancelled: CancellationException) { target.delete(); throw cancelled
             } catch (error: Exception) {
                 target.delete()
-                if (token == generation) _state.update { it.copy(phase = UpdatePhase.ERROR, message = error.message ?: "Could not download update") }
+                if (token == generation) _state.update { it.copy(phase = UpdatePhase.ERROR, message = updateErrorMessage(error)) }
             } finally { partial.delete() }
         }
     }
@@ -155,7 +155,7 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
                 _state.update { it.copy(phase = UpdatePhase.INSTALLER_OPEN) }
             } catch (cancelled: CancellationException) { throw cancelled
             } catch (error: Exception) {
-                _state.update { it.copy(phase = UpdatePhase.ERROR, message = error.message ?: "Could not open Android installer") }
+                _state.update { it.copy(phase = UpdatePhase.ERROR, message = updateErrorMessage(error)) }
             }
         }
     }

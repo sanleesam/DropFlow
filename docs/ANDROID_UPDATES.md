@@ -1,6 +1,9 @@
 # Android update delivery
 
 Android updates are independent of desktop Beta/Development manifests.
+Legacy Android Beta 1 has no in-app updater: the first same-key Alpha upgrade
+must be installed manually from its published APK. The new Updates screen serves
+subsequent upgrades; it cannot add an updater to an already installed old APK.
 
 | Android channel | Version stages | Manifest |
 | --- | --- | --- |

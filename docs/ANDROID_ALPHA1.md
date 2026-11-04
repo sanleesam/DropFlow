@@ -33,7 +33,7 @@ language and respects the saved reduced-motion preference.
 
 ## Current verification
 
-- 20 Android JVM tests passed, including approval/streaming timeout phases,
+- 21 Android JVM tests passed, including approval/streaming timeout phases,
   version labels, receiver integrity and updater ordering/URL/hash/length policy.
 - Type-specific version and manifest tests plus desktop version/workflow tests:
   16 Node tests passed. Workflow YAML parses; versionName/tag/code checks pass.
@@ -48,6 +48,11 @@ language and respects the saved reduced-motion preference.
   channel release yet. About shows `0.2.0-alpha.1` and `Alpha · Debug build`.
 - Beta channel selection survived an app force-stop/relaunch and checked the
   Beta endpoint rather than Alpha. The original Alpha preference was restored.
+- A later restarted emulator reported a GitHub DNS failure. The updater exposed
+  the error instead of claiming it was current; connectivity errors have readable
+  recovery messages. This later run does not replace the earlier online result.
+  Final navigation checks passed in that state, including the About/Updates
+  back buttons returning to Settings and the correct Alpha debug identity.
 - A separate test APK exercised the real Android JSON parser and APK parser:
   installed debug APK identity/signing preflight passed; mismatched metadata,
   fractional install numbers and the unsigned release APK were rejected.
