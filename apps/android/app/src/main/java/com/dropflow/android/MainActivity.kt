@@ -20,6 +20,7 @@ import com.dropflow.android.ui.home.HomeViewModel
 import com.dropflow.android.ui.navigation.DropFlowNavHost
 import com.dropflow.android.ui.settings.SettingsViewModel
 import com.dropflow.android.ui.theme.DropFlowTheme
+import com.dropflow.android.ui.updates.UpdatesViewModel
 
 class MainActivity : ComponentActivity() {
 
@@ -44,6 +45,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private val aboutViewModel: AboutViewModel by viewModels()
+    private val updatesViewModel: UpdatesViewModel by viewModels {
+        UpdatesViewModel.factory(applicationContext, (application as DropFlowApplication).userPreferencesRepository)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,7 +71,8 @@ class MainActivity : ComponentActivity() {
                     homeViewModel = homeViewModel,
                     historyViewModel = historyViewModel,
                     settingsViewModel = settingsViewModel,
-                    aboutViewModel = aboutViewModel
+                    aboutViewModel = aboutViewModel,
+                    updatesViewModel = updatesViewModel
                 )
             }
         }

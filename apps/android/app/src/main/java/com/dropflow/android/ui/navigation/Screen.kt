@@ -6,4 +6,5 @@ sealed class Screen(val route: String, val title: String) {
     object History : Screen("history", "Transfers")
     object Settings : Screen("settings", "Settings")
     object About : Screen("about", "About")
+    object Updates : Screen("updates", "Updates")
 }

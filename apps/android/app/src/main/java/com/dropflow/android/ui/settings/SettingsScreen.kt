@@ -24,7 +24,7 @@ import com.dropflow.android.ui.components.*
 import com.dropflow.android.ui.theme.*
 
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, modifier: Modifier = Modifier) {
+fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, onUpdates: () -> Unit, modifier: Modifier = Modifier) {
     val state by viewModel.uiState.collectAsState()
     var draft by rememberSaveable(state.deviceName) { mutableStateOf(state.deviceName) }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -59,6 +59,16 @@ fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, modifier: 
                 StatusPill("Downloads / DropFlow")
                 Text("Received files appear here after verification. Files with the same name are saved as separate copies.",
                     color = TextSecondary, fontSize = 13.sp, lineHeight = 20.sp)
+            }
+        }
+        item {
+            GlassCard(Modifier.fillMaxWidth()) {
+                TextButton(onClick = onUpdates, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                    Icon(Icons.Default.SystemUpdate, null, tint = IcyBlue)
+                    Spacer(Modifier.width(12.dp))
+                    Text("Updates", modifier = Modifier.weight(1f), color = TextPrimary)
+                    Icon(Icons.Default.ChevronRight, null, tint = TextMuted)
+                }
             }
         }
         item {

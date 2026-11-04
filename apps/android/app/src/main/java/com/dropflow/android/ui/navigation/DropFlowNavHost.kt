@@ -22,12 +22,13 @@ import com.dropflow.android.ui.history.*
 import com.dropflow.android.ui.home.*
 import com.dropflow.android.ui.settings.*
 import com.dropflow.android.ui.theme.*
+import com.dropflow.android.ui.updates.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DropFlowNavHost(navController: NavHostController, homeViewModel: HomeViewModel,
     historyViewModel: HistoryViewModel, settingsViewModel: SettingsViewModel,
-    aboutViewModel: AboutViewModel, modifier: Modifier = Modifier) {
+    aboutViewModel: AboutViewModel, updatesViewModel: UpdatesViewModel, modifier: Modifier = Modifier) {
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route ?: Screen.Home.route
     val state by homeViewModel.uiState.collectAsState()
@@ -89,9 +90,10 @@ fun DropFlowNavHost(navController: NavHostController, homeViewModel: HomeViewMod
                             composable(Screen.Devices.route) { DevicesScreen(homeViewModel) }
                             composable(Screen.History.route) { HistoryScreen(historyViewModel) }
                             composable(Screen.Settings.route) {
-                                SettingsScreen(settingsViewModel, onAbout = { navigate(Screen.About) })
+                                SettingsScreen(settingsViewModel, onAbout = { navigate(Screen.About) }, onUpdates = { navigate(Screen.Updates) })
                             }
                             composable(Screen.About.route) { AboutScreen(aboutViewModel) }
+                            composable(Screen.Updates.route) { UpdatesScreen(updatesViewModel) }
                         }
                     }
                 }

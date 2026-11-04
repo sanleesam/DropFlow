@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compareVersions, parseAndroidVersion, validateAndroidRelease } from "./android-version.mjs";
+import { androidChannel, compareVersions, parseAndroidVersion, validateAndroidRelease } from "./android-version.mjs";
 const baseline = { versionName: "0.1.0-beta.1", versionCode: 17, signingCertificateSha256: "a".repeat(64) };
 const current = { versionName: "0.2.0-alpha.1", versionCode: 18 };
+
+test("Android release maturity selects its own updater channel", () => {
+  for (const [version, channel] of [["0.2.0-alpha.1", "alpha"], ["0.2.0-beta.1", "beta"], ["0.2.0-rc.1", "beta"], ["0.2.0", "stable"]]) assert.equal(androidChannel(version), channel);
+});
 
 test("Android metadata is unambiguous canonical SemVer with an install number", () => {
   assert.deepEqual(parseAndroidVersion('versionCode = 18\nversionName = "0.2.0-alpha.1"'), current);

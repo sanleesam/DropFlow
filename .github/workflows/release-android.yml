@@ -14,6 +14,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-android
+  cancel-in-progress: false
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -38,10 +42,11 @@ jobs:
         env:
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          node --test scripts/android-version.test.mjs
+          node --test scripts/android-version.test.mjs scripts/android-updater-manifest.test.mjs
           node scripts/android-version.mjs check "$TAG_NAME"
           VERSION=$(node scripts/android-version.mjs version)
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "CHANNEL=$(node scripts/android-version.mjs channel)" >> "$GITHUB_OUTPUT"
           if [[ "$VERSION" == *-* ]]; then
             echo "PRERELEASE=true" >> "$GITHUB_OUTPUT"
           else
@@ -103,6 +108,9 @@ jobs:
           test "$ACTUAL_CODE" = "$(node scripts/android-version.mjs code)"
           test "$ACTUAL_VERSION" = "$VERSION"
 
+      - name: Generate Android Updater Manifest
+        run: node scripts/android-updater-manifest.mjs create "DropFlow-android-${{ steps.verify-tag.outputs.VERSION }}.apk" "${{ github.ref_name }}" > latest.json
+
       - name: Create GitHub Release and Upload APK
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -132,4 +140,21 @@ jobs:
             --title "DropFlow Android ${VERSION}" \
             --notes-file "$NOTES_FILE" \
             "${FLAGS[@]}" \
-            "DropFlow-android-${VERSION}.apk"
+            "DropFlow-android-${VERSION}.apk" latest.json
+
+      - name: Publish Android Update Channel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANNEL: ${{ steps.verify-tag.outputs.CHANNEL }}
+          VERSION: ${{ steps.verify-tag.outputs.VERSION }}
+        run: |
+          DECISION=$(node scripts/android-updater-manifest.mjs should-publish latest.json)
+          if [ "$DECISION" = "skip" ]; then
+            echo "Android channel already contains this or a newer release."
+            exit 0
+          fi
+          CHANNEL_TAG="android-${CHANNEL}"
+          gh release create "$CHANNEL_TAG" --title "DropFlow Android ${CHANNEL} channel" \
+            --notes "Android ${CHANNEL} updates. Latest: ${VERSION}." --prerelease 2>/dev/null || true
+          gh release upload "$CHANNEL_TAG" latest.json --clobber
+          gh release edit "$CHANNEL_TAG" --notes "Android ${CHANNEL} updates. Latest: ${VERSION}."

@@ -5,6 +5,11 @@ import { parseVersion } from "./desktop-version.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+export function androidChannel(version) {
+  const { stage } = parseVersion(version);
+  return stage === "stable" ? "stable" : ["beta", "rc"].includes(stage) ? "beta" : "alpha";
+}
+
 export function parseAndroidVersion(gradle) {
   const names = [...gradle.matchAll(/^\s*versionName = "([^"]+)"\s*$/gm)];
   const codes = [...gradle.matchAll(/^\s*versionCode = ([0-9]+)\s*$/gm)];
@@ -46,7 +51,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const result = checkAndroidVersion(tag);
     if (command === "version") console.log(result.versionName);
     else if (command === "code") console.log(result.versionCode);
+    else if (command === "channel") console.log(androidChannel(result.versionName));
     else if (command === "check") console.log(JSON.stringify(result));
-    else throw new Error("Usage: android-version.mjs check|version|code [android-vVERSION]");
+    else throw new Error("Usage: android-version.mjs check|version|code|channel [android-vVERSION]");
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

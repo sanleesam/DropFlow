@@ -43,7 +43,15 @@ def nodes():
             if attempt == 2:
                 raise
             time.sleep(.5)
-def tap(label):
+def tap(label, scroll=False):
+    if scroll:
+        for _ in range(5):
+            current = list(nodes())
+            if any(label in (n.get('text'), n.get('content-desc')) for n in current):
+                break
+            area = next(n for n in current if n.get('scrollable') == 'true')
+            a,b,c,d = map(int, re.findall(r'\d+', area.get('bounds')))
+            adb('shell', 'input', 'swipe', str((a+c)//2), str(b+(d-b)*4//5), str((a+c)//2), str(b+(d-b)//5), '300')
     for node in nodes():
         if label in (node.get('text'),node.get('content-desc')):
             a,b,c,d=map(int,re.findall(r'\d+',node.get('bounds')))
@@ -109,7 +117,7 @@ def run():
         for n,b in zip(names,bodies): assert adb('exec-out','cat','/sdcard/Download/DropFlow/'+n)==b
     print('PASS: request on Settings, two files including empty, bytes saved before final ACK',flush=True)
     # Decline from History.
-    tap('History')
+    tap('Transfers')
     with connect() as s:
         request(s,['declined.txt'],[b'no']); tap('Decline'); assert read(s)[0]==3
     print('PASS: decline from History',flush=True)
@@ -138,7 +146,8 @@ def run():
             request(second,['second.txt'],[b'second']); assert read(second)[0]==3
         tap('Decline'); assert read(first)[0]==3
     print('PASS: concurrent request rejected without replacing original prompt',flush=True)
-    tap('About')
+    tap('Settings')
+    tap('About DropFlow', scroll=True)
     with connect() as s:
         name = 'beta2-localcancel-' + uuid.uuid4().hex[:6] + '.txt'
         sid, _ = request(s, [name], [b'x' * 1048576])
@@ -150,7 +159,7 @@ def run():
         assert any(n.get('text', '').startswith('Receiving ·') for n in nodes())
         time.sleep(2)
         shot('progress-about')
-        tap('History')
+        tap('Transfers')
         assert any(n.get('text', '').startswith('Receiving ·') for n in nodes())
         tap('Cancel transfer')
         tag, _ = read(s)
@@ -159,7 +168,7 @@ def run():
         assert adb('shell', 'test', '!', '-e', '/sdcard/Download/DropFlow/' + name) == b''
     assert any(n.get('text') == 'Cancelled' for n in nodes())
     print('PASS: progress across About/History and local cancellation status/cleanup', flush=True)
-    tap('History'); shot('history-results')
+    tap('Transfers'); shot('history-results')
     for name in names:
         adb('shell', 'rm', '/sdcard/Download/DropFlow/' + name)
     print('RECEIVER CHECKS PASSED',flush=True)

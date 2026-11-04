@@ -17,10 +17,10 @@ private fun navigationIcon(screen: Screen): ImageVector = when (screen) {
     Screen.Home -> Icons.Default.Home
     Screen.Devices -> Icons.Default.Devices
     Screen.History -> Icons.Default.SwapVert
-    Screen.Settings, Screen.About -> Icons.Default.Settings
+    Screen.Settings, Screen.About, Screen.Updates -> Icons.Default.Settings
 }
 private fun isSelected(screen: Screen, route: String?) =
-    route == screen.route || (screen == Screen.Settings && route == Screen.About.route)
+    route == screen.route || (screen == Screen.Settings && route in listOf(Screen.About.route, Screen.Updates.route))
 
 @Composable
 fun BottomNavigationBar(currentRoute: String?, onNavigate: (Screen) -> Unit, modifier: Modifier = Modifier) {
