@@ -7,6 +7,19 @@ use tauri::{AppHandle, State};
 use super::receiver::TransferReceiver;
 use super::security::get_default_receive_dir;
 use super::sender::send_files_over_tcp;
+use tauri::Manager;
+
+pub(crate) fn configured_receive_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let selected = app.try_state::<crate::state_manager::AppStateContainer>()
+        .and_then(|container| container.state.lock().ok().map(|state| state.settings.receive_directory.clone()));
+    let Some(selected) = selected.filter(|path| !path.trim().is_empty()) else {
+        return get_default_receive_dir();
+    };
+    let path = std::path::PathBuf::from(selected);
+    if !path.is_absolute() { return Err("Receive directory must be an absolute path".into()); }
+    std::fs::create_dir_all(&path).map_err(|e| format!("Cannot create receive directory: {e}"))?;
+    path.canonicalize().map_err(|e| format!("Cannot access receive directory: {e}"))
+}
 
 pub struct AuthorizationResponse {
     pub accept: bool,
@@ -124,8 +137,8 @@ pub fn cancel_transfer(state: State<'_, TransferState>, session_id: String) -> R
 }
 
 #[tauri::command]
-pub fn get_receive_dir() -> Result<String, String> {
-    let dir = get_default_receive_dir()?;
+pub fn get_receive_dir(app: AppHandle) -> Result<String, String> {
+    let dir = configured_receive_dir(&app)?;
     Ok(dir.to_string_lossy().to_string())
 }
 
@@ -139,14 +152,15 @@ pub fn get_receiver_port(state: State<'_, TransferState>) -> Result<u16, String>
 }
 
 #[tauri::command]
-pub fn open_received_file(path: String) -> Result<(), String> {
+pub fn open_received_file(app: AppHandle, path: String) -> Result<(), String> {
     let target = std::path::Path::new(&path);
     if !target.exists() {
         return Err(format!("File does not exist: {path}"));
     }
 
-    let receive_dir = get_default_receive_dir()?;
-    if !target.starts_with(&receive_dir) {
+    let receive_dir = configured_receive_dir(&app)?.canonicalize().map_err(|e| e.to_string())?;
+    let canonical = target.canonicalize().map_err(|e| e.to_string())?;
+    if !canonical.starts_with(&receive_dir) {
         return Err(format!(
             "Security alert: path {:?} is outside receive directory {:?}",
             target, receive_dir

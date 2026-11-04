@@ -370,7 +370,11 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       addToast("That device is no longer nearby.", "error");
       return;
     }
-    const peerAddress = targetDevice.addresses[0]?.address || "127.0.0.1";
+    const peerAddress = (targetDevice.addresses.find((entry) => entry.address.includes(".")) || targetDevice.addresses[0])?.address;
+    if (!peerAddress) {
+      addToast("That device has no reachable network address. Search again.", "error");
+      return;
+    }
     const totalCount = files.length;
     const primaryName = files[0].name;
     const displayFileName = totalCount > 1 ? `${primaryName} (+${totalCount - 1} more)` : primaryName;
@@ -401,6 +405,9 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch (err) {
       console.error("[DropFlow] Send failed:", err);
       const message = friendlyTransferError(String(err));
+      // Keep the failed selection available for an explicit retry, preserving
+      // anything the user selected while this transfer was running.
+      setFiles((current) => [...files.filter((old) => !current.some((item) => item.path === old.path)), ...current]);
       setSessionStore((prev) => applyFailureEvent(prev, { sessionId, error: String(err) }));
       addToast(message, "error");
     }

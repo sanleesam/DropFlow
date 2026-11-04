@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{Shutdown, TcpStream};
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -41,30 +40,21 @@ pub fn send_files_over_tcp(
     let mut files_metadata = Vec::new();
     let mut total_size_bytes: u64 = 0;
 
-    for (idx, path_str) in file_paths.iter().enumerate() {
-        let path = Path::new(path_str);
-        if !path.exists() || !path.is_file() {
-            return Err(format!("Invalid file path: {path_str}"));
-        }
-
+    let expanded = super::selection::expand_selection(&file_paths)?;
+    for (idx, (path, filename)) in expanded.iter().enumerate() {
         let metadata = std::fs::metadata(path)
-            .map_err(|e| format!("Failed to read metadata for {path_str}: {e}"))?;
-
-        let filename = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("file")
-            .to_string();
+            .map_err(|e| format!("Failed to read metadata for {}: {e}", path.display()))?;
 
         let file_size = metadata.len();
-        total_size_bytes += file_size;
+        total_size_bytes = total_size_bytes.checked_add(file_size)
+            .ok_or_else(|| "Selected files are too large".to_string())?;
 
         files_metadata.push(FileMetadata {
             file_index: idx as u32,
-            relative_path: filename,
+            relative_path: filename.clone(),
             size_bytes: file_size,
             sha256_checksum: String::new(), // Populated dynamically during streaming
-            final_path: path_str.clone(),
+            final_path: path.to_string_lossy().into_owned(),
         });
     }
 
@@ -79,13 +69,15 @@ pub fn send_files_over_tcp(
         total_size_bytes,
         files: files_metadata.clone(),
     };
+    super::validation::validate_request(&transfer_meta)?;
 
-    let target_socket_addr = format!("{}:{}", peer_address, peer_port);
+    let target_socket_addr = std::net::SocketAddr::new(
+        peer_address.parse().map_err(|e| format!("Invalid peer IP address {peer_address}: {e}"))?,
+        peer_port,
+    );
 
     let mut stream = TcpStream::connect_timeout(
-        &target_socket_addr
-            .parse()
-            .map_err(|e| format!("Invalid peer socket address {target_socket_addr}: {e}"))?,
+        &target_socket_addr,
         Duration::from_secs(10),
     )
     .map_err(|e| format!("Failed to connect to peer at {target_socket_addr}: {e}"))?;
@@ -95,9 +87,16 @@ pub fn send_files_over_tcp(
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))
         .map_err(|e| format!("Failed to set stream timeout: {e}"))?;
+    stream.set_write_timeout(Some(Duration::from_secs(15)))
+        .map_err(|e| format!("Failed to set write timeout: {e}"))?;
 
     perform_outgoing_handshake(&mut stream)?;
     info!("[Sender] HANDSHAKE_COMPLETE");
+
+    // The recipient has 60 seconds to authorize. Do not apply the shorter
+    // streaming timeout while a person is still deciding on the prompt.
+    stream.set_read_timeout(Some(Duration::from_secs(75)))
+        .map_err(|e| format!("Failed to set authorization timeout: {e}"))?;
 
     // 1. Send TransferRequest metadata frame
     write_transfer_request(&mut stream, &transfer_meta)?;
@@ -156,6 +155,8 @@ pub fn send_files_over_tcp(
             .map_err(|e| format!("Failed to read peer response payload: {e}"))?;
     }
     info!("[Sender] ACCEPT_RECEIVED");
+    stream.set_read_timeout(Some(Duration::from_secs(15)))
+        .map_err(|e| format!("Failed to restore streaming timeout: {e}"))?;
 
     let start_time = Instant::now();
     let mut total_sent_bytes: u64 = 0;
@@ -164,7 +165,8 @@ pub fn send_files_over_tcp(
 
     // 3. Stream data for each file
     info!("[Sender] STREAMING {} files", total_files_count);
-    for (idx, path_str) in file_paths.iter().enumerate() {
+    for (idx, file_meta) in transfer_meta.files.iter().enumerate() {
+        let path_str = &file_meta.final_path;
         if cancel_flag.load(Ordering::Relaxed) {
             let _ = write_frame_header(&mut stream, FrameTag::Cancel, 0);
             let err_msg = "Transfer cancelled by user".to_string();
@@ -181,7 +183,6 @@ pub fn send_files_over_tcp(
         let mut file = File::open(path_str)
             .map_err(|e| format!("Failed to open file for reading {path_str}: {e}"))?;
 
-        let file_meta = &transfer_meta.files[idx];
 
         // 3a. Send FileHeader frame
         let file_header_payload = FileHeaderPayload {
@@ -344,7 +345,16 @@ pub fn send_files_over_tcp(
 
     if ack_len > 0 {
         let mut ack_buf = vec![0u8; ack_len as usize];
-        let _ = stream.read_exact(&mut ack_buf);
+        stream.read_exact(&mut ack_buf)
+            .map_err(|e| format!("Incomplete final acknowledgement: {e}"))?;
+        let status = serde_json::from_slice::<super::protocol::TransferAckPayload>(&ack_buf)
+            .map(|ack| ack.status)
+            .unwrap_or_else(|_| String::from_utf8_lossy(&ack_buf).into_owned());
+        if !status.eq_ignore_ascii_case("ACK") {
+            return Err("Invalid final acknowledgement".into());
+        }
+    } else {
+        return Err("Missing final acknowledgement".into());
     }
     info!("[Sender] ACK_RECEIVED");
 
