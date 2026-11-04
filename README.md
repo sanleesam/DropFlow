@@ -18,15 +18,15 @@ No unnecessary setup.
 
 ## Current Status
 
-🚧 Beta
+🚧 Desktop Beta · Android early development
 
-Desktop and Android are released **independently**, each with its own beta
-numbering (desktop continues its `0.1.0-beta.N` line; Android starts a fresh
-public beta cycle at `0.1.0-beta.1`). Both are part of DropFlow v0.1.0.
+Desktop and Android use independent Semantic Versions and maturity stages.
+Published versions are not renamed. See [the versioning policy](docs/VERSIONING.md).
 Current releases:
 
-- **Desktop**: `0.1.0-beta.15` (Windows, macOS)
-- **Android**: `0.1.0-beta.1`
+- **Desktop**: [`0.1.1-beta.19`](https://github.com/sanleesam/DropFlow/releases/tag/v0.1.1-beta.19) (Windows x64, macOS arm64)
+- **Android**: legacy `0.1.0-beta.1`; the next planned line is `0.2.0-alpha.1`,
+  reflecting its early maturity. That Android candidate is not published.
 
 See [CHANGELOG.md](CHANGELOG.md), [docs/RELEASE.md](docs/RELEASE.md) and [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
@@ -37,7 +37,7 @@ by different tag prefixes — never tag both platforms with the same ref:
 
 | Platform | Tag example | Workflow | Artifact |
 | --- | --- | --- | --- |
-| Desktop | `v0.1.0-beta.15` | `.github/workflows/release-beta.yml` | Signed installers + `latest.json` updater manifest |
+| Desktop | `v0.1.1-beta.19` | `.github/workflows/release-beta.yml` | Updater-signed bundles + `latest.json` manifest |
 | Android | `android-v0.1.0-beta.1` | `.github/workflows/release-android.yml` | Signed release APK |
 
 ### Completed
