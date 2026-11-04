@@ -60,7 +60,9 @@ fun DropFlowNavHost(navController: NavHostController, homeViewModel: HomeViewMod
                     topBar = {
                         Column {
                             TopAppBar(onRefresh = if (route == Screen.Home.route || route == Screen.Devices.route)
-                                homeViewModel::refreshDevices else null)
+                                homeViewModel::refreshDevices else null,
+                                onBack = if (route in listOf(Screen.About.route, Screen.Updates.route))
+                                    ({ navController.popBackStack(); Unit }) else null)
                             state.activeProgress?.let {
                                 ActiveTransferCard(it, homeViewModel::cancelActiveTransfer,
                                     Modifier.widthIn(max = 680.dp).align(Alignment.CenterHorizontally)
@@ -90,7 +92,9 @@ fun DropFlowNavHost(navController: NavHostController, homeViewModel: HomeViewMod
                             composable(Screen.Devices.route) { DevicesScreen(homeViewModel) }
                             composable(Screen.History.route) { HistoryScreen(historyViewModel) }
                             composable(Screen.Settings.route) {
-                                SettingsScreen(settingsViewModel, onAbout = { navigate(Screen.About) }, onUpdates = { navigate(Screen.Updates) })
+                                SettingsScreen(settingsViewModel,
+                                    onAbout = { navController.navigate(Screen.About.route) { launchSingleTop = true } },
+                                    onUpdates = { navController.navigate(Screen.Updates.route) { launchSingleTop = true } })
                             }
                             composable(Screen.About.route) { AboutScreen(aboutViewModel) }
                             composable(Screen.Updates.route) { UpdatesScreen(updatesViewModel) }
