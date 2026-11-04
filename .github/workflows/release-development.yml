@@ -29,6 +29,8 @@ on:
 
 jobs:
   publish-development:
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
     permissions:
       contents: write
 
@@ -64,33 +66,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Frontend Dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
         working-directory: ./apps/desktop
 
       - name: Sync Application Version with Development Build Number
+        id: version
         shell: bash
         run: |
-          DEV_VERSION="0.1.0-dev.${{ github.run_number }}"
-          echo "Updating project versions to $DEV_VERSION..."
-          node -e "
-            const fs = require('fs');
-            const ver = '$DEV_VERSION';
-
-            const pkgPath = 'apps/desktop/package.json';
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-            pkg.version = ver;
-            fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-
-            const confPath = 'apps/desktop/src-tauri/tauri.conf.json';
-            const conf = JSON.parse(fs.readFileSync(confPath, 'utf8'));
-            conf.version = ver;
-            fs.writeFileSync(confPath, JSON.stringify(conf, null, 2) + '\n');
-
-            const cargoPath = 'apps/desktop/src-tauri/Cargo.toml';
-            let cargo = fs.readFileSync(cargoPath, 'utf8');
-            cargo = cargo.replace(/^version = \".*?\"/m, 'version = \"' + ver + '\"');
-            fs.writeFileSync(cargoPath, cargo);
-          "
+          node --test scripts/desktop-version.test.mjs
+          DEV_VERSION=$(node scripts/desktop-version.mjs development "${{ github.run_number }}")
+          node scripts/desktop-version.mjs set "$DEV_VERSION"
+          echo "VERSION=$DEV_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build and Publish Development Release
         uses: tauri-apps/tauri-action@v0
@@ -98,7 +84,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          DROPFLOW_RELEASE_TAG: v0.1.0-dev.${{ github.run_number }}
+          DROPFLOW_RELEASE_TAG: v${{ steps.version.outputs.VERSION }}
         with:
           projectPath: ./apps/desktop
           args: ${{ matrix.args }}
@@ -107,7 +93,7 @@ jobs:
           releaseBody: |
             Frequent development builds, published automatically on every push to `main`.
 
-            Latest build: `0.1.0-dev.${{ github.run_number }}` (commit ${{ github.sha }}).
+            Latest build: `${{ steps.version.outputs.VERSION }}` (commit ${{ github.sha }}).
 
             These builds may contain unfinished or unstable changes. For curated
             milestone releases, switch to the **Beta** channel in Settings → About.
@@ -171,7 +157,7 @@ jobs:
       # are untouched fallbacks.
       - name: Merge Platform Manifests into One latest.json
         env:
-          TAG_REF: v0.1.0-dev.${{ github.run_number }}
+          TAG_REF: v${{ needs.publish-development.outputs.version }}
           REQUIRED_PLATFORMS: 'darwin-aarch64 windows-x86_64'
         run: |
           python3 - <<'EOF'
@@ -226,9 +212,10 @@ jobs:
         run: |
           gh release create development \
             --title "DropFlow Development Channel" \
-            --notes "Frequent development builds. Latest: 0.1.0-dev.${{ github.run_number }}." \
+            --notes "Frequent development builds. Latest: ${{ needs.publish-development.outputs.version }}." \
             --prerelease 2>/dev/null || true
           gh release upload development latest.json --clobber
+          gh release edit development --notes "$(python3 -c 'import json; print(json.load(open("latest.json")).get("notes", "Development build"))')"
 
       # The floating `development` release is overwritten every run; delete
       # installer assets from older runs so it does not grow without bound.
@@ -242,7 +229,7 @@ jobs:
       - name: Remove Stale Development Assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CURRENT_VERSION: 0.1.0-dev.${{ github.run_number }}
+          CURRENT_VERSION: ${{ needs.publish-development.outputs.version }}
         run: |
           python3 - <<'EOF'
           import json, os, subprocess

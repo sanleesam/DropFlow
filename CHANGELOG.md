@@ -19,6 +19,23 @@ their beta counters do not move in lockstep:
 
 Do not assume the two platforms share a version number.
 
+## Desktop — [0.1.1-beta.18] — 2026-11-04
+
+- Fix folder sending: recursively expand files and preserve nested relative
+  paths. Empty directories and symbolic links are not transferred.
+- Respect the configured receive directory and validate received headers,
+  session completion IDs, totals, path boundaries and final acknowledgements.
+- Save verified files before acknowledging completion; surface finalization
+  errors instead of reporting success when file promotion fails.
+- Allow the recipient's full approval period before applying streaming timeout.
+- Fix full SemVer comparison within updater channels, including patch/minor
+  transitions and normal-release upgrades; synchronize all desktop version
+  manifests and derive Development versions from the target core version.
+- Prevent file-browser rename from silently overwriting an existing file.
+- Preserve failed selections for manual retry and format IPv6 socket addresses
+  correctly. Show unavailable storage information instead of perpetual loading.
+- See `docs/VERSIONING.md` for migration and Android alpha versioning policy.
+
 ## Desktop — Development (after Beta 17)
 
 - Replaced the desktop Dock/app icon with the new silver/icy-blue file-transfer
