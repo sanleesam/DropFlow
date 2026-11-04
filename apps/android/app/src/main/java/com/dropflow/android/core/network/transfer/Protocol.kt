@@ -15,6 +15,8 @@ object Protocol {
 
     const val CONNECT_TIMEOUT_MS = 10_000
     const val READ_TIMEOUT_MS = 15_000
+    // The receiving app gives the user 60 seconds to decide.
+    const val APPROVAL_TIMEOUT_MS = 75_000
 
     const val MAX_METADATA_SIZE = 64 * 1024 // 64 KB
     const val DEFAULT_CHUNK_SIZE = 64 * 1024 // 64 KB

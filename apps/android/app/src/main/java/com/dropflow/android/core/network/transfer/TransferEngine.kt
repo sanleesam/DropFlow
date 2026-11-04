@@ -272,7 +272,8 @@ class TransferEngine(
                     socketOutputStream = socketOut,
                     requestPayload = requestPayload,
                     fileStreams = preparedFiles,
-                    progressTracker = tracker
+                    progressTracker = tracker,
+                    setReadTimeout = { connection.socket.soTimeout = it }
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "sendFiles: FileSender exception: ${e.message}", e)
