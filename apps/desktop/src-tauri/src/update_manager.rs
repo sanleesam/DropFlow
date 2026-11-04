@@ -72,10 +72,9 @@ fn release_line(version: &semver::Version) -> Option<ReleaseLine> {
 ///
 /// Rules:
 ///
-/// - Within one release line the build number decides: only a **strictly
-///   newer** build is offered (`dev.126 > dev.125`; equal and older builds are
-///   rejected). Build numbers are compared numerically, so `dev.100 >
-///   dev.99`.
+/// - Within one release line full SemVer decides: major/minor/patch precede
+///   the numeric prerelease counter. Equal and older versions are rejected.
+///   Thus `0.2.0-beta.1 > 0.1.0-beta.17` and `dev.100 > dev.99`.
 /// - Across release lines the switch itself is the explicit user decision,
 ///   and each floating manifest only ever advertises that line's latest
 ///   build, so the selected line's release is always offered (a Beta install
@@ -91,12 +90,13 @@ pub(crate) fn should_offer_update(
 ) -> bool {
     match (release_line(current), release_line(candidate)) {
         (Some(cur), Some(cand)) => match (cur, cand) {
-            (ReleaseLine::Development(a), ReleaseLine::Development(b)) => b > a,
-            (ReleaseLine::Beta(a), ReleaseLine::Beta(b)) => b > a,
+            (ReleaseLine::Development(_), ReleaseLine::Development(_))
+            | (ReleaseLine::Beta(_), ReleaseLine::Beta(_))
+            | (ReleaseLine::Stable, ReleaseLine::Stable) => candidate > current,
             (ReleaseLine::Beta(_), ReleaseLine::Development(_)) => true,
             (ReleaseLine::Development(_), ReleaseLine::Beta(_)) => true,
             (ReleaseLine::Stable, _) => false,
-            (_, ReleaseLine::Stable) => true,
+            (_, ReleaseLine::Stable) => candidate > current,
         },
         _ => candidate > current,
     }
@@ -425,6 +425,18 @@ mod tests {
         assert!(offers("0.1.0-beta.16", "0.1.0-beta.17"));
         assert!(!offers("0.1.0-beta.16", "0.1.0-beta.16"));
         assert!(!offers("0.1.0-beta.16", "0.1.0-beta.15"));
+    }
+
+    #[test]
+    fn semver_core_takes_precedence_over_prerelease_counter() {
+        assert!(offers("0.1.0-beta.17", "0.1.1-beta.1"));
+        assert!(offers("0.1.1-beta.18", "0.2.0-beta.1"));
+        assert!(!offers("0.2.0-beta.1", "0.1.1-beta.99"));
+        assert!(offers("0.1.0-dev.99", "0.2.0-dev.1"));
+        assert!(!offers("0.2.0-dev.1", "0.1.0-dev.999"));
+        assert!(offers("0.1.0", "0.1.1"));
+        assert!(!offers("0.2.0", "0.1.1"));
+        assert!(!offers("0.2.0-beta.1", "0.1.0"));
     }
 
     #[test]

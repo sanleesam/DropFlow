@@ -177,6 +177,7 @@ pub fn rename_path(path: String, new_name: String) -> Result<String, String> {
     let name = plain_name(&new_name)?;
     let file = inside_home(Path::new(&path))?;
     let dest = file.parent().ok_or_else(|| "No parent folder".to_string())?.join(name);
+    if dest.exists() { return Err("A file or folder with that name already exists".into()); }
     std::fs::rename(&file, &dest).map_err(|err| err.to_string())?;
     Ok(dest.to_string_lossy().to_string())
 }
@@ -199,6 +200,33 @@ pub fn create_folder(parent: String, name: String) -> Result<String, String> {
     let dest = dir.join(name);
     std::fs::create_dir(&dest).map_err(|err| err.to_string())?;
     Ok(dest.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn browser_operations_preserve_existing_files_and_enforce_boundaries() {
+        let root = home_dir().unwrap().join(format!(".dropflow-fs-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let root_s = root.to_string_lossy().into_owned();
+        let dir = create_folder(root_s.clone(), "nested".into()).unwrap();
+        let file = root.join("source.txt");
+        std::fs::write(&file, b"source").unwrap();
+        std::fs::write(root.join("existing.txt"), b"keep").unwrap();
+        std::fs::write(root.join(".hidden"), b"hidden").unwrap();
+        let list = list_directory(root_s.clone()).unwrap();
+        assert!(list[0].is_dir);
+        assert!(!list.iter().any(|entry| entry.name.starts_with('.')));
+        assert!(rename_path(file.to_string_lossy().into_owned(), "existing.txt".into()).is_err());
+        assert_eq!(std::fs::read(root.join("existing.txt")).unwrap(), b"keep");
+        let renamed = rename_path(file.to_string_lossy().into_owned(), "renamed.txt".into()).unwrap();
+        assert_eq!(std::fs::read(&renamed).unwrap(), b"source");
+        assert!(create_folder(root_s, "../escape".into()).is_err());
+        delete_path(renamed).unwrap();
+        delete_path(dir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 fn encode_base64(data: &[u8]) -> String {

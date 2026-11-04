@@ -1,5 +1,9 @@
 # Release Process
 
+The current policy and migration rationale are in [VERSIONING.md](VERSIONING.md).
+Desktop target: `0.1.1-beta.19`. Check it with
+`node scripts/desktop-version.mjs check` before creating a release tag.
+
 Desktop and Android are released **independently**. Each platform has its own
 version line, its own tag prefix and its own release workflow. Never tag both
 platforms with the same ref.
@@ -11,11 +15,12 @@ see [Desktop update channels](#desktop-update-channels).
 
 | Platform | Tag format | Example | Workflow | Produces |
 | --- | --- | --- | --- | --- |
-| Desktop | `v<version>-beta.N` | `v0.1.0-beta.15` | `release-beta.yml` | macOS/Windows installers + `latest.json` updater manifest |
+| Desktop | `v<version>-beta.N` | `v0.1.1-beta.19` | `release-beta.yml` | macOS/Windows installers + `latest.json` updater manifest |
+| Desktop Development | `v<version>-dev.N` | `v0.1.1-dev.10` | `release-development.yml` | macOS/Windows installers on the floating `development` release |
 | Android | `android-v<version>` | `android-v0.1.0-beta.1` | `release-android.yml` | Signed release APK on a GitHub prerelease |
 
-Both platforms share the product line (`DropFlow v0.1.0`) but their beta
-counters move independently. See the versioning policy in [CHANGELOG.md](../CHANGELOG.md).
+Desktop and Android core versions and prerelease maturity move independently.
+See [VERSIONING.md](VERSIONING.md); protocol compatibility is tracked separately.
 
 ## Desktop update channels
 
@@ -26,8 +31,8 @@ Each channel has its own manifest and version line.
 
 | Channel | Audience | Version line | Updater manifest |
 | --- | --- | --- | --- |
-| Beta | Curated, tested milestone releases | `0.1.0-beta.N` (tag `v0.1.0-beta.N`) | `releases/download/beta/latest.json` |
-| Development | Frequent experimental builds | `0.1.0-dev.<run number>` (no tag) | `releases/download/development/latest.json` |
+| Beta | Curated milestone prereleases | `X.Y.Z-beta.N` (tag `vX.Y.Z-beta.N`) | `releases/download/beta/latest.json` |
+| Development | Frequent experimental builds | `X.Y.Z-dev.N` (explicit tag or automatic run number) | `releases/download/development/latest.json` |
 
 Not every experimental change should become a Beta release: Development
 builds are published automatically from `main`, while a Beta release is cut
@@ -49,15 +54,17 @@ There is no Stable channel yet. The channel enum in
 `state_manager::UpdateChannel` and the settings schema leave room to add one
 later without a data migration.
 
-## Desktop Beta release (e.g. 0.1.0-beta.15)
+## Desktop Beta release
 
-1. Confirm `apps/desktop/src-tauri/Cargo.toml`, `tauri.conf.json` and
-   `apps/desktop/package.json` all carry the target version.
+1. Set the target with `node scripts/desktop-version.mjs set <version>`.
+   Run `node scripts/desktop-version.mjs check` to verify package.json,
+   tauri.conf.json, Cargo.toml and Cargo.lock agree.
 2. Run the desktop validation gate: `cargo check && cargo test` (in
    `apps/desktop/src-tauri`) and `pnpm tsc --noEmit && pnpm build` (in
    `apps/desktop`).
-3. Commit and tag: `git tag v0.1.0-beta.15 && git push origin v0.1.0-beta.15`.
-4. `release-beta.yml` syncs the version from the tag, builds the macOS (aarch64)
+3. Commit, then tag that exact version, for example `v0.1.1-beta.19`.
+   Never move/reuse an already published version tag.
+4. `release-beta.yml` verifies that the tag matches all manifests, builds the macOS (aarch64)
    and Windows (x86_64) bundles via `tauri-action`, publishes the release with
    updater artifacts, and republishes `latest.json` to the floating `beta` tag
    the built-in updater polls.
@@ -69,15 +76,21 @@ later without a data migration.
 
 ## Desktop Development channel (automated)
 
-`release-development.yml` runs on every push to `main` (and manually via
-workflow_dispatch). **No git tags are created.**
+`release-development.yml` runs on pushes to `main`, explicit `v*-dev.*` tags,
+and manually via workflow_dispatch. The workflow does not create version tags.
+To publish an exact build number, commit the validated desktop change, create
+`v0.1.1-dev.10` at that commit and push that tag. Avoid pushing the same commit to
+`main` at the same time: that would start a second automatically numbered build.
 
 - Builds the same macOS/Windows matrix and verifies each platform's updater
   manifest, using the same per-platform artifact protection as the Beta
   workflow.
-- Versions the build `0.1.0-dev.<run number>`, synced into `package.json`,
-  `tauri.conf.json` and `Cargo.toml` at build time, so the Beta counter stays
+- Uses the exact Development tag or derives `<target-core>-dev.<run number>` for
+  branch/manual runs, synced into `package.json`,
+  `tauri.conf.json`, `Cargo.toml` and `Cargo.lock` at build time, so the Beta counter stays
   reserved for milestone releases.
+- Runs version-resolver tests, frontend regression checks/build and locked Rust
+  tests before publishing; one canonical version feeds both platform manifests.
 - Publishes installers and the merged `latest.json` to the floating
   `development` release and deletes installer assets from older runs so the
   release does not grow without bound.

@@ -1,11 +1,12 @@
 {
   "name": "dropflow-desktop",
   "private": true,
-  "version": "0.1.0-beta.17",
+  "version": "0.1.1-beta.19",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node ../../scripts/desktop-version.mjs check && tsc && vite build",
+    "test:version": "node --test ../../scripts/desktop-version.test.mjs",
     "test:ui": "node scripts/test-ui.mjs",
     "preview": "vite preview",
     "tauri": "tauri"

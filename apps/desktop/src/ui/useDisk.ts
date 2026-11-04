@@ -6,8 +6,8 @@ export interface DiskUsage {
   freeBytes: number;
 }
 
-export function useDiskUsage(): DiskUsage | null {
-  const [disk, setDisk] = useState<DiskUsage | null>(null);
+export function useDiskUsage(): DiskUsage | null | undefined {
+  const [disk, setDisk] = useState<DiskUsage | null | undefined>(undefined);
   useEffect(() => {
     invoke<DiskUsage>("get_disk_usage", { path: "" }).then(setDisk).catch(() => setDisk(null));
   }, []);

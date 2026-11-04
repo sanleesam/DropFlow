@@ -6,18 +6,30 @@ All notable changes to DropFlow are documented here. The format follows
 
 ## Versioning policy
 
-Desktop and Android are released **independently** and use **independent beta
-numbering**. Both platforms are part of the DropFlow v0.1.0 product line, but
-their beta counters do not move in lockstep:
+Desktop and Android use independent Semantic Versions and maturity stages.
+See [the current policy](docs/VERSIONING.md). Published versions are not renamed;
+Android's numeric `versionCode` only increases, including when moving from the
+legacy beta label to the next alpha product version.
 
-- **Desktop** (Tauri): `0.1.0-beta.N` — continues its existing beta line
-  (released as GitHub tags, e.g. `v0.1.0-beta.15`, and distributed through the
-  built-in updater).
-- **Android** (APK): `0.1.0-beta.1`, `0.1.0-beta.2`, … — its own public beta
-  cycle, starting fresh at `beta.1`. The Android `versionCode` increases
-  monotonically across all releases so in-place installs always upgrade.
+## Desktop — [0.1.1-beta.19] — 2026-11-04
 
-Do not assume the two platforms share a version number.
+- Fix folder sending: recursively expand files and preserve nested relative
+  paths. Empty directories and symbolic links are not transferred.
+- Respect the configured receive directory and validate received headers,
+  session completion IDs, totals, path boundaries and final acknowledgements.
+- Save verified files before acknowledging completion; surface finalization
+  errors instead of reporting success when file promotion fails.
+- Allow the recipient's full approval period before applying streaming timeout.
+- Fix full SemVer comparison within updater channels, including patch/minor
+  transitions and normal-release upgrades; synchronize all desktop version
+  manifests and derive Development versions from the target core version.
+- Prevent file-browser rename from silently overwriting an existing file.
+- Preserve failed selections for manual retry and format IPv6 socket addresses
+  correctly. Show unavailable storage information instead of perpetual loading.
+- See `docs/VERSIONING.md` for migration and Android alpha versioning policy.
+- Integrate the already-published Development 8 discovery recovery fixes into
+  main so the Beta release does not regress them. The cancelled beta.18 tag is
+  retained unchanged and has no completed release.
 
 ## Desktop — Development (after Beta 17)
 
@@ -25,6 +37,21 @@ Do not assume the two platforms share a version number.
   mark, including transparent macOS ICNS, Windows ICO and desktop PNG sizes.
 - Reused the transparent mark in the sidebar, About panel and browser favicon.
 - Beta 17 and mobile icons are unchanged.
+
+## Desktop — [0.1.0-dev.8] — 2026-10-27
+
+- Repair Search again/Refresh so it rebuilds discovery sockets, refreshes the
+  advertisement and removes stale peers before resolving the network again.
+- Add one bounded startup recovery attempt and recover an empty browser when
+  returning to the app; upgrade mDNS discovery to 0.21.6 for published recovery
+  fixes around multicast joins, sleep, unresolved services and event pressure.
+- Remove competing rename advertisements that could publish an invalid device
+  type or reveal a hidden device. Preserve current visibility during recovery.
+- Honor requested diagnostic log levels in release builds and include the macOS
+  local-network purpose description in the application bundle.
+- Support explicit Development tags and run regression checks before publishing.
+- See [the discovery audit](docs/DEV8_DISCOVERY_AUDIT.md) for live Mac/Windows
+  evidence, the unproven original trigger, and remaining transport/settings issues.
 
 ## Desktop — [0.1.0-beta.17] — 2026-10-16
 
