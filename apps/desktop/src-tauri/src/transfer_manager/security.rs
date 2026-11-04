@@ -95,7 +95,17 @@ pub fn get_default_receive_dir() -> Result<PathBuf, String> {
 
 /// Verifies that a target file path remains strictly inside the base receive directory.
 pub fn verify_safe_target_path(base_dir: &Path, rel_path: &Path) -> Result<PathBuf, String> {
+    if rel_path.components().any(|part| !matches!(part, Component::Normal(_))) {
+        return Err("Target must be a normalized relative path".into());
+    }
     let target = base_dir.join(rel_path);
+    let mut ancestor = base_dir.to_path_buf();
+    for part in rel_path.components() {
+        ancestor.push(part.as_os_str());
+        if fs::symlink_metadata(&ancestor).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err(format!("Symbolic links are not allowed inside the receive path: {}", ancestor.display()));
+        }
+    }
 
     // Ensure target starts with base_dir prefix
     if !target.starts_with(base_dir) {
@@ -190,6 +200,18 @@ mod tests {
         let safe_rel = PathBuf::from("docs/report.pdf");
         let target = verify_safe_target_path(&base, &safe_rel).unwrap();
         assert_eq!(target, base.join("docs/report.pdf"));
+        assert!(verify_safe_target_path(&base, Path::new("../escape")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_receive_symlink_escape() {
+        let root = std::env::temp_dir().join(format!("dropflow-safe-path-{}", std::process::id()));
+        fs::create_dir_all(root.join("receive")).unwrap();
+        fs::create_dir_all(root.join("outside")).unwrap();
+        std::os::unix::fs::symlink(root.join("outside"), root.join("receive/link")).unwrap();
+        assert!(verify_safe_target_path(&root.join("receive"), Path::new("link/file.txt")).is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

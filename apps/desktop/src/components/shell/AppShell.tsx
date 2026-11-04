@@ -89,7 +89,7 @@ export const AppShell: React.FC = () => {
       : 0;
   const storageLine = disk
     ? `${formatBytes(disk.totalBytes - disk.freeBytes)} of ${formatBytes(disk.totalBytes)} used`
-    : "Checking this disk";
+    : disk === undefined ? "Checking this disk" : "Storage info unavailable";
 
   return (
     <div className="df-shell">

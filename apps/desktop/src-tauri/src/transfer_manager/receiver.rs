@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use log::{error, info, warn};
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
@@ -18,7 +18,7 @@ use super::protocol::{
     TransferAckPayload, DEFAULT_CHUNK_SIZE,
 };
 use super::security::{
-    get_default_receive_dir, get_session_part_file_path, resolve_collision_path,
+    get_session_part_file_path, resolve_collision_path,
     sanitize_relative_path, verify_safe_target_path,
 };
 
@@ -171,6 +171,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
 
     // 1. Read TransferRequest metadata frame
     let metadata = read_transfer_request(stream)?;
+    super::validation::validate_request(&metadata)?;
     info!("[Receiver] REQUEST_RECEIVED from '{}' ({} files, {} bytes)",
         metadata.sender_name, metadata.total_files, metadata.total_size_bytes
     );
@@ -281,7 +282,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     write_response_frame(stream, FrameTag::TransferAccept, "ACCEPTED")?;
     info!("[Receiver] ACCEPT_SENT");
 
-    let receive_dir = get_default_receive_dir()?;
+    let receive_dir = super::engine::configured_receive_dir(app)?;
 
     crate::state_manager::update_incomplete_session(
         app,
@@ -318,7 +319,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     let mut received_files_meta: Vec<FileMetadata> = Vec::new();
 
     info!("[Receiver] STREAMING {} files", metadata.total_files);
-    for _file_idx in 0..metadata.total_files {
+    for file_idx in 0..metadata.total_files {
         // Read FileHeader frame
         let file_header = match read_file_header(stream) {
             Ok(h) => h,
@@ -327,6 +328,10 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
                 return Err(format!("Failed to read FileHeader: {e}"));
             }
         };
+        if let Err(error) = super::validation::validate_header(&metadata, file_idx as usize, &file_header) {
+            cleanup_files(&created_part_files);
+            return Err(error);
+        }
 
         let safe_rel_path = match sanitize_relative_path(&file_header.relative_path) {
             Ok(p) => p,
@@ -346,6 +351,10 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
 
         let collision_resolved_path = resolve_collision_path(&final_target_path);
         let part_file_path = get_session_part_file_path(&final_target_path, &metadata.session_id);
+        if fs::symlink_metadata(&part_file_path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            cleanup_files(&created_part_files);
+            return Err("Partial-file path must not be a symbolic link".into());
+        }
 
         if let Some(parent) = part_file_path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
@@ -600,6 +609,10 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
         }
     }
     info!("[Receiver] FILE_COMPLETE");
+    if comp_payload != metadata.session_id.as_bytes() {
+        cleanup_files(&created_part_files);
+        return Err("TransferComplete session ID mismatch".into());
+    }
 
     // 4. Verify total session byte count match
     if total_received_bytes != metadata.total_size_bytes {
@@ -618,25 +631,21 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
         return Err(err_msg);
     }
 
-    // 5. Send TransferAck response
-    if let Err(e) = write_response_frame(stream, FrameTag::TransferAck, "ACK") {
-        cleanup_files(&created_part_files);
-        return Err(format!("Failed to send TransferAck: {e}"));
-    }
-    info!("[Receiver] ACK_SENT");
-    info!("[Receiver] CONNECTION_CLOSED");
-
-    // The whole session (all files, checksums, byte counts, completion ack) has
-    // verified cleanly — only now promote every .dropflow-part file to its final
-    // destination so a failed session never leaves partial files in Downloads.
+    // Acknowledge only after every verified file has been saved successfully.
     for (part_path, final_path) in &final_dest_paths {
+        if final_path.exists() {
+            cleanup_files(&created_part_files);
+            return Err(format!("Destination appeared during transfer: {}", final_path.display()));
+        }
         if let Err(e) = fs::rename(part_path, final_path) {
-            warn!(
-                "[Receiver] Error renaming {:?} to {:?}: {e}",
-                part_path, final_path
-            );
+            cleanup_files(&created_part_files);
+            return Err(format!("Failed to save {}: {e}", final_path.display()));
         }
     }
+    write_response_frame(stream, FrameTag::TransferAck, "ACK")
+        .map_err(|e| format!("Files saved, but failed to send TransferAck: {e}"))?;
+    info!("[Receiver] ACK_SENT");
+    info!("[Receiver] CONNECTION_CLOSED");
 
     crate::state_manager::remove_incomplete_session(app, &metadata.session_id);
 
