@@ -18,15 +18,15 @@ No unnecessary setup.
 
 ## Current Status
 
-🚧 Desktop Beta · Android early development
+🚧 Desktop Beta · Android Alpha development
 
-Desktop and Android use independent Semantic Versions and maturity stages.
-Published versions are not renamed. See [the versioning policy](docs/VERSIONING.md).
+Desktop and Android have independent Semantic Versions and maturity stages.
+Published versions are never renamed. See [the versioning policy](docs/VERSIONING.md).
 Current releases:
 
 - **Desktop**: [`0.1.1-beta.19`](https://github.com/sanleesam/DropFlow/releases/tag/v0.1.1-beta.19) (Windows x64, macOS arm64)
-- **Android**: legacy `0.1.0-beta.1`; the next planned line is `0.2.0-alpha.1`,
-  reflecting its early maturity. That Android candidate is not published.
+- **Android**: published legacy `0.1.0-beta.1`; the next, **unreleased** source target
+  is `0.2.0-alpha.1` (install number 18). See [current Android readiness](docs/ANDROID_ALPHA1.md).
 
 See [CHANGELOG.md](CHANGELOG.md), [docs/RELEASE.md](docs/RELEASE.md) and [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
@@ -37,21 +37,20 @@ by different tag prefixes — never tag both platforms with the same ref:
 
 | Platform | Tag example | Workflow | Artifact |
 | --- | --- | --- | --- |
-| Desktop | `v0.1.1-beta.19` | `.github/workflows/release-beta.yml` | Updater-signed bundles + `latest.json` manifest |
-| Android | `android-v0.1.0-beta.1` | `.github/workflows/release-android.yml` | Signed release APK |
+| Desktop Beta | `v0.1.1-beta.19` | `.github/workflows/release-beta.yml` | Updater-signed bundles + `latest.json` |
+| Android | `android-v0.2.0-alpha.1` | `.github/workflows/release-android.yml` | Permanently signed APK + Android-only updater manifest |
 
 ### Completed
 
 - ✅ Device discovery (mDNS)
 - ✅ Custom TCP transfer engine (DFP/1)
-- ✅ Transfer history
-- ✅ Persistent application state
+- ✅ Desktop persistent history/state; Android session history and saved preferences
 - ✅ Native desktop interface
 - ✅ Smooth view transitions
-- ✅ Resumable file transfers
+- ✅ Desktop resume support (Android SAF resume is not implemented)
 - ✅ Sleep prevention during active transfers
 - ✅ Android app with discovery, send and receive
-- ✅ Built-in updater
+- ✅ Desktop built-in updater; Android verified update flow implemented, publication/upgrade acceptance pending
 
 ### Troubleshooting discovery
 
@@ -80,7 +79,7 @@ Discovery uses mDNS on UDP port 5353. If a device never appears:
 
 ### Mobile
 
-- ✅ Android (Beta)
+- 🚧 Android (Alpha development; older public APK used a Beta label)
 
 ---
 
@@ -188,3 +187,18 @@ Current priorities are:
 ## Project Goal
 
 Build a fast, reliable and maintainable peer-to-peer file transfer application that provides a seamless experience across macOS, Windows and Android while keeping every transfer completely local.
+
+## License and contributions
+
+DropFlow's original code and documentation are open source under
+[Apache-2.0](LICENSE). You may use, modify and redistribute that code, including
+commercially, subject to the license's notice and other requirements. There is
+no warranty. Contributors keep copyright in their work.
+
+Third-party components retain their own terms, including GSAP's Standard
+License. The existing desktop illustration pack has unresolved provenance and
+is excluded from this license grant. See [NOTICE](NOTICE) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for scope, attribution and branding
+details. We do not claim that all bundled artwork/dependencies are Apache-2.0.
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes.

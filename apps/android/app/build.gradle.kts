@@ -6,8 +6,8 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// Optional release signing. Create a `keystore.properties` file (gitignored) at
-// the repo root with storeFile / storePassword / keyAlias / keyPassword to sign
+// Optional release signing. Create `apps/android/keystore.properties` (gitignored)
+// with storeFile / storePassword / keyAlias / keyPassword to sign
 // release builds locally; CI injects the same file from secrets. Without it,
 // release builds stay unsigned.
 val keystoreProperties = Properties().apply {
@@ -18,18 +18,30 @@ val keystoreProperties = Properties().apply {
 }
 val hasReleaseSigning = keystoreProperties.getProperty("storeFile") != null
 
+// Ship the project's license/notice files with every APK, not only in Git.
+val licenseAssets = layout.buildDirectory.dir("generated/licenseAssets")
+val generateLicenseAssets by tasks.registering(Sync::class) {
+    from(rootProject.projectDir.resolve("../..")) {
+        include("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")
+        into("licenses")
+    }
+    into(licenseAssets)
+}
+
 android {
     namespace = "com.dropflow.android"
+    sourceSets.getByName("main").assets.srcDir(licenseAssets)
     compileSdk = 34
 
     defaultConfig {
         applicationId = "com.dropflow.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 17
-        versionName = "0.1.0-beta.1"
+        versionCode = 18
+        versionName = "0.2.0-alpha.1"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = providers.gradleProperty("dropflowInteropRunner")
+            .orElse("androidx.test.runner.AndroidJUnitRunner").get()
         vectorDrawables {
             useSupportLibrary = true
         }
@@ -84,6 +96,8 @@ android {
     }
 }
 
+tasks.named("preBuild").configure { dependsOn(generateLicenseAssets) }
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -102,4 +116,5 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     debugImplementation(libs.androidx.ui.tooling)
+    testImplementation("junit:junit:4.13.2")
 }

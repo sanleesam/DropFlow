@@ -1,3 +1,11 @@
+## Android Beta 2 preparation — 2026-10-19
+
+Android is now `0.1.0-beta.2` / versionCode 18 on
+`codex/android-beta2-titanium`. See [ANDROID_BETA2.md](ANDROID_BETA2.md) for the
+current redesign, fixed Beta 1 issues, reproducible checks and release gates.
+The older Beta 1 notes below are historical; no Android release has been
+published from this preparation pass. Desktop source/version is unchanged.
+
 ## Completed (Beta Sprint — 0.1.0-beta.15)
 
 > **Superseded by the Beta 1 preparation pass:** the follow-up beta-preparation

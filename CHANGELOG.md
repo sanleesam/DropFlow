@@ -136,6 +136,63 @@ First desktop milestone intended for real users on Windows and macOS.
 
 - DFP/1 protocol unchanged; desktop remains the reference implementation.
 
+## Android — [0.2.0-alpha.1] — Unreleased
+
+The earlier, never-published `0.1.0-beta.2` candidate is superseded by the Alpha
+line. Published Beta 1 is not renamed. VersionCode 18 remains above its public 17.
+
+- Unified Home/Devices/Transfers/Settings navigation, larger-window rail,
+  adaptive device search/grid and desktop-style Send files/recent activity.
+- Correct release-derived Alpha labels; About and Updates live in Settings.
+- Separate 75-second outgoing approval wait and 15-second streaming timeout.
+- Manual Android channel updates with bounded private-cache downloads, progress,
+  cancellation, size/SHA-256 checking, APK identity/signing preflight and an
+  Android-controlled installation confirmation flow.
+- Independent Alpha/Beta/Stable update manifests, version/install ordering and
+  original-certificate gates in Android release CI. No Android release published.
+- Current evidence and limits: [ANDROID_ALPHA1.md](docs/ANDROID_ALPHA1.md).
+
+### Preserved from the prior candidate
+
+### Changed
+
+- Complete native Compose redesign of Home, History, Settings, About, incoming
+  prompts and live progress using desktop Titanium + Icy Blue design tokens,
+  reflective panel rims, layered graphite surfaces and restrained motion.
+- Shared silver/blue desktop mark in Android branding and adaptive launcher icon.
+- Global incoming prompts, live transfer progress and result messages on every
+  page; scrollable screens and bounded long names keep controls reachable.
+- Explicit device-name save, meaningful download behavior descriptions, and a
+  persisted Reduce animations setting. Removed ineffective overwrite, auto-open
+  and alternate-accent controls from the UI; existing stored preferences remain.
+- History and trust are clearly described as applying to the current app session.
+- Higher contrast primary buttons, labeled switches and dark result messages;
+  old result messages do not replay after screen rotation.
+- The prior target was `0.1.0-beta.2`; current Android source targets `0.2.0-alpha.1`, versionCode `18`.
+
+### Fixed
+
+- Receiver validates file counts, totals, file headers and SHA-256 completion
+  checksums against the accepted manifest before publishing output.
+- Final success acknowledgment now follows successful storage publication;
+  failed publication cleans up already published targets and temporary rows.
+- A concurrent incoming request no longer replaces an unanswered prompt.
+- Incoming connection lifecycle updates reach the app's session state.
+- Device rescan clears stale selection; asynchronous device and history events
+  update state atomically. Outgoing start uses an atomic duplicate-send guard.
+- Android storage API-level annotation now permits the full lint gate to pass.
+- Release CI requires the persistent signing key instead of generating a fresh
+  ephemeral key, runs tests/lint, and uses version-specific release notes.
+
+### Earlier candidate validation (2026-10-19)
+
+- Debug and unsigned release APK builds, Android lint and 14 regression tests pass.
+- Emulator DFP/1 checks pass for multi-file receipt (including empty files),
+  cross-page prompts, decline, invalid metadata, changed file headers, checksum
+  failure, sender cancellation and concurrent requests.
+- Physical Android ↔ macOS/Windows transfers, Android 8/9 storage, and signed
+  Beta 1 → Beta 2 installation remain release gates. No release was published.
+
 ## Android — [0.1.0-beta.1]
 
 First public Android beta cycle (versionCode 17). Desktop and Android are

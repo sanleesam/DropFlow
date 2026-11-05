@@ -7,5 +7,6 @@ data class SettingsUiState(
     val askBeforeOverwrite: Boolean = true,
     val autoOpenCompleted: Boolean = false,
     val accentColor: String = "blue",
+    val reduceMotion: Boolean = false,
     val downloadDirectory: String = "/storage/emulated/0/Download/DropFlow"
 )

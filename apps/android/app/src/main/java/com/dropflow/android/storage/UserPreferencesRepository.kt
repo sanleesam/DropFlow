@@ -20,7 +20,9 @@ data class UserPreferences(
     val autoAcceptTrustedDevices: Boolean,
     val askBeforeOverwrite: Boolean,
     val autoOpenCompleted: Boolean,
-    val accentColor: String
+    val accentColor: String,
+    val reduceMotion: Boolean = false,
+    val updateChannel: String = "alpha"
 )
 
 class UserPreferencesRepository(private val context: Context) {
@@ -33,6 +35,8 @@ class UserPreferencesRepository(private val context: Context) {
         val ASK_BEFORE_OVERWRITE = booleanPreferencesKey("ask_before_overwrite")
         val AUTO_OPEN_COMPLETED = booleanPreferencesKey("auto_open_completed")
         val ACCENT_COLOR = stringPreferencesKey("accent_color")
+        val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
+        val UPDATE_CHANNEL = stringPreferencesKey("android_update_channel")
     }
 
     val userPreferencesFlow: Flow<UserPreferences> = context.dataStore.data.map { preferences ->
@@ -48,7 +52,10 @@ class UserPreferencesRepository(private val context: Context) {
             autoAcceptTrustedDevices = preferences[PreferencesKeys.AUTO_ACCEPT_TRUSTED] ?: true,
             askBeforeOverwrite = preferences[PreferencesKeys.ASK_BEFORE_OVERWRITE] ?: true,
             autoOpenCompleted = preferences[PreferencesKeys.AUTO_OPEN_COMPLETED] ?: false,
-            accentColor = preferences[PreferencesKeys.ACCENT_COLOR] ?: "blue"
+            accentColor = preferences[PreferencesKeys.ACCENT_COLOR] ?: "blue",
+            reduceMotion = preferences[PreferencesKeys.REDUCE_MOTION] ?: false,
+            updateChannel = preferences[PreferencesKeys.UPDATE_CHANNEL]
+                ?: com.dropflow.android.core.update.AndroidUpdateChannel.forVersion(com.dropflow.android.BuildConfig.VERSION_NAME).id
         )
     }
 
@@ -66,8 +73,10 @@ class UserPreferencesRepository(private val context: Context) {
     }
 
     suspend fun updateDeviceName(name: String) {
+        val cleaned = name.trim().take(60)
+        if (cleaned.isBlank()) return
         context.dataStore.edit { preferences ->
-            preferences[PreferencesKeys.DEVICE_NAME] = name
+            preferences[PreferencesKeys.DEVICE_NAME] = cleaned
         }
     }
 
@@ -99,5 +108,14 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.ACCENT_COLOR] = color
         }
+    }
+
+    suspend fun updateReduceMotion(value: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.REDUCE_MOTION] = value }
+    }
+
+    suspend fun updateChannel(value: String) {
+        require(com.dropflow.android.core.update.AndroidUpdateChannel.entries.any { it.id == value })
+        context.dataStore.edit { it[PreferencesKeys.UPDATE_CHANNEL] = value }
     }
 }

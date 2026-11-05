@@ -10,28 +10,36 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.dropflow.android.ui.theme.SurfaceGlass
 import com.dropflow.android.ui.theme.SurfaceGlassBorder
+import com.dropflow.android.ui.theme.IcyBlue
 
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 16.dp,
+    cornerRadius: Dp = 14.dp,
     borderColor: Color = SurfaceGlassBorder,
     backgroundColor: Color = SurfaceGlass,
     content: @Composable BoxScope.() -> Unit
 ) {
     val shape = RoundedCornerShape(cornerRadius)
     Surface(
-        modifier = modifier
-            .clip(shape)
-            .background(backgroundColor),
+        modifier = modifier,
         shape = shape,
         color = backgroundColor,
-        border = BorderStroke(1.dp, borderColor)
+        shadowElevation = 4.dp,
+        border = BorderStroke(1.dp, Brush.linearGradient(listOf(
+            if (borderColor == SurfaceGlassBorder) IcyBlue.copy(alpha = 0.30f) else borderColor,
+            borderColor.copy(alpha = 0.45f),
+            Color.White.copy(alpha = 0.035f),
+            borderColor.copy(alpha = 0.70f)
+        )))
     ) {
-        Box(content = content)
+        Box(modifier = Modifier.background(Brush.linearGradient(listOf(
+            Color(0x0DD9EAFF), Color.Transparent, Color.Transparent
+        ))), content = content)
     }
 }

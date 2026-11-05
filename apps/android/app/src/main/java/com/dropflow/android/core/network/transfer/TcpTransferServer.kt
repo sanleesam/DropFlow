@@ -28,6 +28,7 @@ class TcpTransferServer(
     private val context: Context,
     private val onRequestReceived: (TransferRequestPayload, (Boolean, String?) -> Unit) -> Unit,
     private val onIncomingConnection: (TransferConnection) -> Unit,
+    private val onSessionStateChanged: (TransferSession) -> Unit,
     private val onProgressUpdated: (TransferProgressPayload?) -> Unit,
     private val onTransferFinished: (TransferRequestPayload, Boolean, String?) -> Unit
 ) {
@@ -81,6 +82,7 @@ class TcpTransferServer(
                     socket = clientSocket,
                     session = session,
                     onSessionStateChanged = { updatedSession ->
+                        onSessionStateChanged(updatedSession)
                         if (updatedSession.state == SessionState.DISCONNECTED || updatedSession.state == SessionState.FAILED) {
                             activeConnectionsMap.remove(updatedSession.sessionId)
                         }

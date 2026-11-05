@@ -9,6 +9,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.navigation.compose.rememberNavController
 import com.dropflow.android.core.network.transfer.StorageManager
@@ -18,6 +20,7 @@ import com.dropflow.android.ui.home.HomeViewModel
 import com.dropflow.android.ui.navigation.DropFlowNavHost
 import com.dropflow.android.ui.settings.SettingsViewModel
 import com.dropflow.android.ui.theme.DropFlowTheme
+import com.dropflow.android.ui.updates.UpdatesViewModel
 
 class MainActivity : ComponentActivity() {
 
@@ -42,6 +45,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private val aboutViewModel: AboutViewModel by viewModels()
+    private val updatesViewModel: UpdatesViewModel by viewModels {
+        UpdatesViewModel.factory(applicationContext, (application as DropFlowApplication).userPreferencesRepository)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,14 +63,16 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            DropFlowTheme {
+            val preferences by settingsViewModel.uiState.collectAsState()
+            DropFlowTheme(reduceMotion = preferences.reduceMotion) {
                 val navController = rememberNavController()
                 DropFlowNavHost(
                     navController = navController,
                     homeViewModel = homeViewModel,
                     historyViewModel = historyViewModel,
                     settingsViewModel = settingsViewModel,
-                    aboutViewModel = aboutViewModel
+                    aboutViewModel = aboutViewModel,
+                    updatesViewModel = updatesViewModel
                 )
             }
         }

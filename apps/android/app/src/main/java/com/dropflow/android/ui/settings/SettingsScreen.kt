@@ -1,401 +1,121 @@
 package com.dropflow.android.ui.settings
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Badge
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Router
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.dropflow.android.ui.components.GlassCard
-import com.dropflow.android.ui.theme.BackgroundDark
-import com.dropflow.android.ui.theme.BlueAccentPrimary
-import com.dropflow.android.ui.theme.EmeraldAccentPrimary
-import com.dropflow.android.ui.theme.RoseAccentPrimary
-import com.dropflow.android.ui.theme.SurfaceGlassBorder
-import com.dropflow.android.ui.theme.TextPrimary
-import com.dropflow.android.ui.theme.TextSecondary
-import com.dropflow.android.ui.theme.VioletAccentPrimary
-import com.dropflow.android.ui.theme.getAccentColor
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import com.dropflow.android.ui.components.*
+import com.dropflow.android.ui.theme.*
 
 @Composable
-fun SettingsScreen(
-    viewModel: SettingsViewModel,
-    modifier: Modifier = Modifier
-) {
-    val uiState by viewModel.uiState.collectAsState()
-    val activeAccentColor = getAccentColor(uiState.accentColor)
-
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .background(BackgroundDark)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, onUpdates: () -> Unit, modifier: Modifier = Modifier) {
+    val state by viewModel.uiState.collectAsState()
+    var draft by rememberSaveable(state.deviceName) { mutableStateOf(state.deviceName) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val canSave = draft.trim().isNotEmpty() && draft.trim() != state.deviceName
+    val save = { if (canSave) { viewModel.updateDeviceName(draft); keyboard?.hide() }; Unit }
+    LazyColumn(modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        item { PageIntro("PREFERENCES", "Settings", "Make DropFlow fit the way you work.") }
         item {
-            Text(
-                text = "Preferences",
-                color = TextPrimary,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Manage how DropFlow works on this device.",
-                color = TextSecondary,
-                fontSize = 12.sp
-            )
+            SettingsGroup(Icons.Default.Badge, "Device identity") {
+                Text("This is how you appear on nearby devices.", color = TextSecondary, fontSize = 13.sp)
+                OutlinedTextField(value = draft, onValueChange = { if (it.length <= 60) draft = it },
+                    label = { Text("Device name") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { save() }),
+                    supportingText = { if (draft.isBlank()) Text("Enter a name to save.") }, isError = draft.isBlank())
+                PrimaryAction("Save name", Icons.Default.Check, save, enabled = canSave)
+            }
         }
-
-        // Section 1: Device identity
         item {
-            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Badge,
-                            contentDescription = "General",
-                            tint = activeAccentColor
-                        )
-                        Text(
-                            text = "This Device",
-                            color = TextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "The name other devices will see when they look for you.",
-                        color = TextSecondary,
-                        fontSize = 11.sp
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = uiState.deviceName,
-                        onValueChange = { viewModel.updateDeviceName(it) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = activeAccentColor,
-                            unfocusedBorderColor = SurfaceGlassBorder
-                        ),
-                        singleLine = true
-                    )
+            SettingsGroup(Icons.Default.Shield, "Receiving files") {
+                SettingSwitch("Ask before receiving", "Review each incoming transfer before it starts.",
+                    state.requireConfirmation, viewModel::updateRequireConfirmation)
+                HorizontalDivider(color = SurfaceGlassBorder)
+                SettingSwitch("Auto-accept trusted devices", "Trust applies during this app session.",
+                    state.autoAcceptTrustedDevices, viewModel::updateAutoAcceptTrusted,
+                    enabled = state.requireConfirmation)
+            }
+        }
+        item {
+            SettingsGroup(Icons.Default.FolderOpen, "Downloads") {
+                StatusPill("Downloads / DropFlow")
+                Text("Received files appear here after verification. Files with the same name are saved as separate copies.",
+                    color = TextSecondary, fontSize = 13.sp, lineHeight = 20.sp)
+            }
+        }
+        item {
+            GlassCard(Modifier.fillMaxWidth()) {
+                TextButton(onClick = onUpdates, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                    Icon(Icons.Default.SystemUpdate, null, tint = IcyBlue)
+                    Spacer(Modifier.width(12.dp))
+                    Text("Updates", modifier = Modifier.weight(1f), color = TextPrimary)
+                    Icon(Icons.Default.ChevronRight, null, tint = TextMuted)
                 }
             }
         }
-
-        // Section 2: Transfers & Storage
         item {
-            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Folder,
-                            contentDescription = "Transfers",
-                            tint = activeAccentColor
-                        )
-                        Text(
-                            text = "Transfers & Downloads",
-                            color = TextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "Default Receive Directory",
-                            color = TextPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(BackgroundDark)
-                                .padding(10.dp)
-                        ) {
-                            Text(
-                                text = uiState.downloadDirectory,
-                                color = TextSecondary,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Normal
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Ask before overwrite",
-                                color = TextPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "Prompt if incoming file already exists",
-                                color = TextSecondary,
-                                fontSize = 11.sp
-                            )
-                        }
-                        Switch(
-                            checked = uiState.askBeforeOverwrite,
-                            onCheckedChange = { viewModel.updateAskBeforeOverwrite(it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = TextPrimary, checkedTrackColor = activeAccentColor)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Auto-open completed transfers",
-                                color = TextPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "Open target file immediately after verification",
-                                color = TextSecondary,
-                                fontSize = 11.sp
-                            )
-                        }
-                        Switch(
-                            checked = uiState.autoOpenCompleted,
-                            onCheckedChange = { viewModel.updateAutoOpenCompleted(it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = TextPrimary, checkedTrackColor = activeAccentColor)
-                        )
-                    }
+            SettingsGroup(Icons.Default.Palette, "Appearance") {
+                SettingSwitch("Reduce animations", "Keep discovery calm and still.", state.reduceMotion, viewModel::updateReduceMotion)
+            }
+        }
+        item {
+            GlassCard(Modifier.fillMaxWidth()) {
+                TextButton(onClick = onAbout, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                    Icon(Icons.Default.Info, null, tint = IcyBlue)
+                    Spacer(Modifier.width(12.dp))
+                    Text("About DropFlow", modifier = Modifier.weight(1f), color = TextPrimary)
+                    Icon(Icons.Default.ChevronRight, null, tint = TextMuted)
                 }
             }
         }
-
-        // Section 3: Network (friendly overview)
         item {
-            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Router,
-                            contentDescription = "Network",
-                            tint = activeAccentColor
-                        )
-                        Text(
-                            text = "Network",
-                            color = TextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Transfers happen directly between your devices over Wi-Fi.",
-                        color = TextSecondary,
-                        fontSize = 11.sp
-                    )
-                    Text(
-                        text = "Files never touch a server.",
-                        color = TextSecondary,
-                        fontSize = 11.sp
-                    )
-                }
-            }
+            Text("Keep DropFlow open while sharing. Devices must be connected to the same Wi-Fi network.",
+                color = TextMuted, fontSize = 12.sp, lineHeight = 19.sp)
         }
+    }
+}
 
-        // Section 4: Security & Authorization
-        item {
-            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Security,
-                            contentDescription = "Security",
-                            tint = activeAccentColor
-                        )
-                        Text(
-                            text = "Security & Authorization",
-                            color = TextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Require confirmation",
-                                color = TextPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "Ask before accepting files from other devices",
-                                color = TextSecondary,
-                                fontSize = 11.sp
-                            )
-                        }
-                        Switch(
-                            checked = uiState.requireConfirmation,
-                            onCheckedChange = { viewModel.updateRequireConfirmation(it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = TextPrimary, checkedTrackColor = activeAccentColor)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Auto accept trusted devices",
-                                color = TextPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "Skip the confirmation for devices you have trusted",
-                                color = TextSecondary,
-                                fontSize = 11.sp
-                            )
-                        }
-                        Switch(
-                            checked = uiState.autoAcceptTrustedDevices,
-                            onCheckedChange = { viewModel.updateAutoAcceptTrusted(it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = TextPrimary, checkedTrackColor = activeAccentColor)
-                        )
-                    }
-                }
+@Composable
+private fun SettingsGroup(icon: ImageVector, title: String, content: @Composable ColumnScope.() -> Unit) {
+    GlassCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(icon, null, tint = IcyBlue, modifier = Modifier.size(20.dp))
+                Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
+            content()
         }
+    }
+}
 
-        // Section 5: Appearance
-        item {
-            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Palette,
-                            contentDescription = "Appearance",
-                            tint = activeAccentColor
-                        )
-                        Text(
-                            text = "Appearance",
-                            color = TextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    Text(
-                        text = "Accent Color",
-                        color = TextSecondary,
-                        fontSize = 11.sp
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        val accentOptions = listOf(
-                            "blue" to BlueAccentPrimary,
-                            "emerald" to EmeraldAccentPrimary,
-                            "violet" to VioletAccentPrimary,
-                            "rose" to RoseAccentPrimary
-                        )
-
-                        accentOptions.forEach { (name, color) ->
-                            val selected = uiState.accentColor.equals(name, ignoreCase = true)
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(color)
-                                    .border(
-                                        width = if (selected) 3.dp else 0.dp,
-                                        color = if (selected) TextPrimary else Color.Transparent,
-                                        shape = CircleShape
-                                    )
-                                    .clickable { viewModel.updateAccentColor(name) }
-                            )
-                        }
-                    }
-                }
-            }
+@Composable
+private fun SettingSwitch(title: String, description: String, checked: Boolean,
+    onChange: (Boolean) -> Unit, enabled: Boolean = true) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(description, color = TextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
         }
+        Switch(checked, onCheckedChange = onChange, enabled = enabled,
+            modifier = Modifier.minimumInteractiveComponentSize().semantics { contentDescription = title },
+            colors = SwitchDefaults.colors(checkedThumbColor = BackgroundDark, checkedTrackColor = IcyBlue))
     }
 }

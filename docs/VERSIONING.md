@@ -59,7 +59,11 @@ by the next unreleased `0.2.0-alpha.1`, not by renaming published `0.1.0-beta.1`
 An incremented Android `versionCode` is mandatory for every shipped APK, and the
 original signing key is required for in-place upgrades. UI parity with desktop
 does not imply equivalent maturity, release channel or protocol support.
-Android version changes and release gates are a separate phase after desktop.
+Android's current unreleased source target is `0.2.0-alpha.1` (versionCode 18).
+`node scripts/android-version.mjs check` verifies its source/tag/upgrade ordering
+against the inspected published baseline. The original certificate is enforced
+by release CI; Alpha/Beta/Stable Android manifests remain separate from desktop.
+See `ANDROID_ALPHA1.md` and `ANDROID_UPDATES.md` for implementation and open gates.
 
 ## Release gates
 

@@ -1,113 +1,47 @@
 package com.dropflow.android.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.NorthEast
-import androidx.compose.material.icons.filled.SouthWest
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.dropflow.android.core.model.TransferDirection
-import com.dropflow.android.core.model.TransferItem
-import com.dropflow.android.core.model.TransferStatus
-import com.dropflow.android.ui.theme.BlueAccentPrimary
-import com.dropflow.android.ui.theme.StatusFailed
-import com.dropflow.android.ui.theme.StatusOnline
-import com.dropflow.android.ui.theme.TextPrimary
-import com.dropflow.android.ui.theme.TextSecondary
+import com.dropflow.android.core.model.*
+import com.dropflow.android.ui.theme.*
 
 @Composable
-fun TransferCard(
-    transfer: TransferItem,
-    modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null
-) {
-    GlassCard(
-        modifier = modifier.fillMaxWidth(),
-        content = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    val isReceive = transfer.direction == TransferDirection.RECEIVE
-                    val directionIcon = if (isReceive) Icons.Default.SouthWest else Icons.Default.NorthEast
-                    val iconTint = if (isReceive) StatusOnline else BlueAccentPrimary
-
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(iconTint.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = directionIcon,
-                            contentDescription = if (isReceive) "Received" else "Sent",
-                            tint = iconTint,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    Column {
-                        Text(
-                            text = transfer.fileName,
-                            color = TextPrimary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp
-                        )
-                        Text(
-                            text = "${if (isReceive) "Received from" else "Sent to"} ${transfer.deviceName} • ${transfer.timestamp}",
-                            color = TextSecondary,
-                            fontSize = 11.sp
-                        )
-                    }
+fun TransferCard(transfer: TransferItem, modifier: Modifier = Modifier) {
+    val receive = transfer.direction == TransferDirection.RECEIVE
+    val (color, status) = when (transfer.status) {
+        TransferStatus.COMPLETED -> StatusOnline to "Completed"
+        TransferStatus.FAILED -> StatusFailed to "Failed"
+        TransferStatus.CANCELLED -> TextMuted to "Cancelled"
+        TransferStatus.IN_PROGRESS -> IcyBlue to "In progress"
+    }
+    GlassCard(modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                IconTile(if (receive) Icons.Default.SouthWest else Icons.Default.NorthEast,
+                    tint = if (receive) StatusOnline else IcyBlue)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(transfer.fileName, color = TextPrimary, fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("${if (receive) "From" else "To"} ${transfer.deviceName}", color = TextSecondary,
+                        fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = transfer.size,
-                        color = TextPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        text = when (transfer.status) {
-                            TransferStatus.COMPLETED -> "Completed"
-                            TransferStatus.IN_PROGRESS -> "Transferring..."
-                            TransferStatus.FAILED -> "Failed"
-                            TransferStatus.CANCELLED -> "Cancelled"
-                        },
-                        color = when (transfer.status) {
-                            TransferStatus.COMPLETED -> StatusOnline
-                            TransferStatus.IN_PROGRESS -> BlueAccentPrimary
-                            TransferStatus.FAILED -> StatusFailed
-                            TransferStatus.CANCELLED -> TextSecondary
-                        },
-                        fontSize = 10.sp
-                    )
-                }
+                Text(transfer.size, color = TextSecondary, fontSize = 12.sp)
             }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(transfer.timestamp, color = TextMuted, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                StatusPill(status, color)
+            }
+            transfer.error?.let { Text(it, color = StatusFailed, fontSize = 12.sp, lineHeight = 18.sp) }
         }
-    )
+    }
 }

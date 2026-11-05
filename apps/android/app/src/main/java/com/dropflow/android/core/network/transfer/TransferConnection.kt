@@ -140,6 +140,7 @@ class TransferConnection(
                     when (header.tag) {
                         FrameTag.TRANSFER_REQUEST -> {
                             val requestPayload = TransferRequestPayload.fromJsonString(String(payloadBytes, StandardCharsets.UTF_8))
+                            ReceiveValidation.request(requestPayload)
                             transferSessionId = requestPayload.sessionId
                             Log.d(TAG, "Parsed TRANSFER_REQUEST from '${requestPayload.senderName}' for file '${requestPayload.primaryFileName}'")
                             val requestFinished = CompletableDeferred<Unit>()
@@ -173,7 +174,7 @@ class TransferConnection(
                                                 onTransferFinished?.invoke(requestPayload, true, null)
                                                 updateState(SessionState.DISCONNECTED)
                                             } else {
-                                                val error = "File transfer failed"
+                                                val error = fileReceiver.failureReason ?: "File transfer failed"
                                                 onTransferFinished?.invoke(requestPayload, false, error)
                                                 updateState(SessionState.FAILED, error)
                                             }

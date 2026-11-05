@@ -1,6 +1,6 @@
 name: Release Android
 
-# Android Beta releases are tagged independently from desktop releases:
+# Android releases are tagged independently from desktop releases:
 #   Desktop: `v0.1.0-beta.15`        -> handled by release-beta.yml (desktop)
 #   Android: `android-v0.1.0-beta.1` -> handled by this workflow
 # The `android-` prefix guarantees this workflow never fires for desktop tags
@@ -10,9 +10,19 @@ on:
   push:
     tags:
       - 'android-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing unpublished android-vVERSION tag to build; never moves the tag'
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-android
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
@@ -21,6 +31,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -28,23 +40,27 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Verify Tag Matches Android versionName
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify Android Release Version
         id: verify-tag
         env:
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
-          EXPECTED_VERSION="${TAG_NAME#android-v}"
-          DECLARED_VERSION=$(grep -o 'versionName = "[^"]*"' apps/android/app/build.gradle.kts | cut -d '"' -f2)
-
-          echo "Tag version:     $EXPECTED_VERSION"
-          echo "versionName:     $DECLARED_VERSION"
-
-          if [ "$EXPECTED_VERSION" != "$DECLARED_VERSION" ]; then
-            echo "::error::Tag ${TAG_NAME} does not match versionName ${DECLARED_VERSION} in apps/android/app/build.gradle.kts"
-            exit 1
+          node --test scripts/android-version.test.mjs scripts/android-updater-manifest.test.mjs
+          node scripts/android-version.mjs check "$TAG_NAME"
+          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          VERSION=$(node scripts/android-version.mjs version)
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "CHANNEL=$(node scripts/android-version.mjs channel)" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "PRERELEASE=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "PRERELEASE=false" >> "$GITHUB_OUTPUT"
           fi
-
-          echo "VERSION=$EXPECTED_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Configure Release Signing
         id: configure-signing
@@ -65,23 +81,14 @@ jobs:
               printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
               printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
             } > keystore.properties
-            echo "SIGNED_WITH_EPHEMERAL_KEY=false" >> "$GITHUB_OUTPUT"
           else
-            echo "No signing secrets configured; generating an ephemeral keystore."
-            keytool -genkeypair -v \
-              -keystore release.keystore \
-              -alias dropflow-beta \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass dropflow-beta -keypass dropflow-beta \
-              -dname "CN=DropFlow Beta, O=DropFlow, C=US"
-            {
-              printf 'storeFile=release.keystore\n'
-              printf 'storePassword=dropflow-beta\n'
-              printf 'keyAlias=dropflow-beta\n'
-              printf 'keyPassword=dropflow-beta\n'
-            } > keystore.properties
-            echo "SIGNED_WITH_EPHEMERAL_KEY=true" >> "$GITHUB_OUTPUT"
+            echo "::error::All four permanent Android signing secrets are required. Never generate a replacement key in CI."
+            exit 1
           fi
+
+      - name: Validate Android
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug --no-daemon
+        working-directory: ./apps/android
 
       - name: Build Release APK
         run: ./gradlew :app:assembleRelease --no-daemon
@@ -93,30 +100,83 @@ jobs:
           ls -la "$APK_DIR"
           cp "$APK_DIR/app-release.apk" "DropFlow-android-${{ steps.verify-tag.outputs.VERSION }}.apk"
 
+      - name: Verify APK Version and Permanent Signing Certificate
+        env:
+          VERSION: ${{ steps.verify-tag.outputs.VERSION }}
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          # Match the project's known build-tools version, not whichever preview
+          # tool happens to be newest on the hosted runner image.
+          SIGNER="$SDK_ROOT/build-tools/34.0.0/apksigner"
+          test -x "$SIGNER"
+          AAPT="$(dirname "$SIGNER")/aapt"
+          APK="DropFlow-android-${VERSION}.apk"
+          EXPECTED_CERT=$(node -p 'require("./apps/android/signing-policy.json").signingCertificateSha256')
+          SIGNATURE_REPORT=$("$SIGNER" verify --verbose --print-certs "$APK")
+          printf '%s\n' "$SIGNATURE_REPORT"
+          ACTUAL_CERT=$(printf '%s\n' "$SIGNATURE_REPORT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          test "$ACTUAL_CERT" = "$EXPECTED_CERT" || { echo "::error::APK does not use the published Android signing key"; exit 1; }
+          BADGING=$("$AAPT" dump badging "$APK")
+          ACTUAL_CODE=$(printf '%s' "$BADGING" | sed -n "s/^package: .*versionCode='\([^']*\)'.*/\1/p")
+          ACTUAL_VERSION=$(printf '%s' "$BADGING" | sed -n "s/^package: .*versionName='\([^']*\)'.*/\1/p")
+          ACTUAL_PACKAGE=$(printf '%s' "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+          test "$ACTUAL_PACKAGE" = "com.dropflow.android"
+          test "$ACTUAL_CODE" = "$(node scripts/android-version.mjs code)"
+          test "$ACTUAL_VERSION" = "$VERSION"
+          for NOTICE_FILE in LICENSE NOTICE THIRD_PARTY_NOTICES.md; do
+            unzip -p "$APK" "assets/licenses/$NOTICE_FILE" | cmp - "$NOTICE_FILE"
+          done
+
+      - name: Generate Android Updater Manifest
+        env:
+          VERSION: ${{ steps.verify-tag.outputs.VERSION }}
+          TAG_NAME: ${{ steps.verify-tag.outputs.TAG_NAME }}
+        run: node scripts/android-updater-manifest.mjs create "DropFlow-android-${VERSION}.apk" "$TAG_NAME" > latest.json
+
       - name: Create GitHub Release and Upload APK
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ steps.verify-tag.outputs.TAG_NAME }}
           VERSION: ${{ steps.verify-tag.outputs.VERSION }}
+          PRERELEASE: ${{ steps.verify-tag.outputs.PRERELEASE }}
         run: |
           NOTES_FILE=$(mktemp)
           {
             echo "DropFlow for Android ${VERSION}"
             echo ""
-            echo "First public Android beta build."
+            RELEASE_NOTES="docs/releases/android-${VERSION}.md"
+            if [ -f "$RELEASE_NOTES" ]; then
+              cat "$RELEASE_NOTES"
+            else
+              echo "See CHANGELOG.md for the changes in this Android release."
+            fi
             echo ""
             echo "### Install"
             echo "- Download the APK below and open it on your device (Android 8.0+)."
             echo "- You may need to allow installing apps from this source."
-            if [ "${{ steps.configure-signing.outputs.SIGNED_WITH_EPHEMERAL_KEY }}" = "true" ]; then
-              echo ""
-              echo "> **Note:** This build is signed with an ephemeral CI key. If a previous"
-              echo "> DropFlow build is installed, uninstall it before installing this one."
-            fi
           } > "$NOTES_FILE"
 
+          FLAGS=()
+          if [ "$PRERELEASE" = "true" ]; then FLAGS+=(--prerelease); fi
           gh release create "$TAG_NAME" \
             --title "DropFlow Android ${VERSION}" \
             --notes-file "$NOTES_FILE" \
-            --prerelease \
-            "DropFlow-android-${VERSION}.apk"
+            "${FLAGS[@]}" \
+            "DropFlow-android-${VERSION}.apk" latest.json
+
+      - name: Publish Android Update Channel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANNEL: ${{ steps.verify-tag.outputs.CHANNEL }}
+          VERSION: ${{ steps.verify-tag.outputs.VERSION }}
+        run: |
+          DECISION=$(node scripts/android-updater-manifest.mjs should-publish latest.json)
+          if [ "$DECISION" = "skip" ]; then
+            echo "Android channel already contains this or a newer release."
+            exit 0
+          fi
+          CHANNEL_TAG="android-${CHANNEL}"
+          gh release create "$CHANNEL_TAG" --title "DropFlow Android ${CHANNEL} channel" \
+            --notes "Android ${CHANNEL} updates. Latest: ${VERSION}." --prerelease 2>/dev/null || true
+          gh release upload "$CHANNEL_TAG" latest.json --clobber
+          gh release edit "$CHANNEL_TAG" --notes "Android ${CHANNEL} updates. Latest: ${VERSION}."

@@ -14,6 +14,8 @@ class FileReceiver(
     context: android.content.Context,
     private val storageManager: StorageManager = StorageManager(context)
 ) {
+    var failureReason: String? = null
+        private set
 
     suspend fun receiveTransferSession(
         inputStream: InputStream,
@@ -26,6 +28,7 @@ class FileReceiver(
         val completedTargets = mutableListOf<Pair<WritableTarget, Long>>() // target -> bytesWritten
 
         try {
+            ReceiveValidation.request(requestPayload)
             for (i in 0 until requestPayload.totalFiles) {
                 val header = FrameUtils.readHeader(inputStream)
                 if (header.tag != FrameTag.FILE_HEADER) {
@@ -34,9 +37,7 @@ class FileReceiver(
 
                 val headerPayloadBytes = FrameUtils.readPayload(inputStream, header.payloadLength)
                 val fileHeader = FileHeaderPayload.fromJsonString(String(headerPayloadBytes, StandardCharsets.UTF_8))
-                if (fileHeader.fileIndex != i || fileHeader.sizeBytes < 0L) {
-                    throw IllegalStateException("Invalid FILE_HEADER for index $i")
-                }
+                ReceiveValidation.header(requestPayload, i, fileHeader)
                 Log.d(TAG, "Receiving file ${i + 1}/${requestPayload.totalFiles}: '${fileHeader.relativePath}' (${fileHeader.sizeBytes} bytes)")
 
                 progressTracker.startFile(i, fileHeader.relativePath, fileHeader.sizeBytes)
@@ -92,10 +93,7 @@ class FileReceiver(
                 val computedChecksum = messageDigest.digest().joinToString("") { "%02x".format(it) }
                 Log.d(TAG, "File '${fileHeader.relativePath}' completed. Computed SHA-256: $computedChecksum, Sender SHA-256: ${fileComp.sha256Checksum}")
 
-                if (fileComp.sha256Checksum.isNotEmpty() && !computedChecksum.equals(fileComp.sha256Checksum, ignoreCase = true)) {
-                    Log.e(TAG, "SHA-256 checksum mismatch for '${fileHeader.relativePath}'. Deleting corrupted file.")
-                    throw IllegalStateException("SHA-256 checksum verification failed")
-                }
+                ReceiveValidation.checksum(fileHeader.sha256Checksum, fileComp.sha256Checksum, computedChecksum)
 
                 // File verified — remember it for finalization once the whole
                 // session completes, matching the desktop receiver semantics.
@@ -112,17 +110,18 @@ class FileReceiver(
             if (completedSessionId.isNotBlank() && completedSessionId != requestPayload.sessionId) {
                 throw IllegalStateException("TRANSFER_COMPLETE session ID mismatch")
             }
-            FrameUtils.writeTransferAck(outputStream, TransferAckPayload(status = "ACK"))
-
             // Session fully verified — publish every file now. This keeps failed
             // sessions from leaving partial output in the Downloads folder.
             completedTargets.forEach { (target, bytesWritten) ->
                 storageManager.completePendingFile(target, bytesWritten)
             }
+            // A sender may report success only after durable output has been published.
+            FrameUtils.writeTransferAck(outputStream, TransferAckPayload(status = "ACK"))
             completedTargets.clear()
 
             true
         } catch (e: Exception) {
+            failureReason = e.message ?: "File transfer failed"
             activeTargets.forEach { target ->
                 storageManager.cleanupTarget(target)
             }

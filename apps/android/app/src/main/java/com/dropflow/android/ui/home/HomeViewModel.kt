@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class HomeViewModel(
@@ -52,10 +53,10 @@ class HomeViewModel(
 
             userPreferencesRepository.userPreferencesFlow.collectLatest { prefs ->
                 latestPreferences = prefs
-                _uiState.value = _uiState.value.copy(
+                _uiState.update { current -> current.copy(
                     localDeviceName = prefs.deviceName,
                     localUuid = prefs.deviceUuid.ifEmpty { stableUuid }
-                )
+                ) }
 
                 if (discoveryEngine.localUuid.isEmpty()) {
                     discoveryEngine.initialize(stableUuid, prefs.deviceName)
@@ -79,40 +80,41 @@ class HomeViewModel(
 
         viewModelScope.launch {
             transferEngine.serverStatus.collectLatest { status ->
-                _uiState.value = _uiState.value.copy(serverStatus = status)
+                _uiState.update { current -> current.copy(serverStatus = status) }
             }
         }
 
         viewModelScope.launch {
             transferEngine.activeSessions.collectLatest { sessions ->
-                _uiState.value = _uiState.value.copy(activeSessions = sessions)
+                _uiState.update { current -> current.copy(activeSessions = sessions) }
             }
         }
 
         viewModelScope.launch {
             transferEngine.pendingTransferRequest.collectLatest { request ->
-                _uiState.value = _uiState.value.copy(pendingTransferRequest = request)
+                _uiState.update { current -> current.copy(pendingTransferRequest = request) }
             }
         }
 
         viewModelScope.launch {
             transferEngine.activeProgress.collectLatest { progress ->
-                _uiState.value = _uiState.value.copy(activeProgress = progress)
+                _uiState.update { current -> current.copy(activeProgress = progress) }
             }
         }
 
         viewModelScope.launch {
             transferEngine.outgoingTransferActive.collectLatest { active ->
-                _uiState.value = _uiState.value.copy(outgoingTransferActive = active)
+                _uiState.update { current -> current.copy(outgoingTransferActive = active) }
             }
         }
 
         viewModelScope.launch {
             transferEngine.lastTransferResult.collectLatest { result ->
-                _uiState.value = _uiState.value.copy(
+                _uiState.update { current -> current.copy(
                     transferResultMessage = result?.message,
+                    transferResultId = result?.sessionId,
                     isTransferResultError = result?.isError == true
-                )
+                ) }
             }
         }
     }
@@ -142,10 +144,9 @@ class HomeViewModel(
     }
 
     fun selectDevice(deviceId: String) {
-        val current = _uiState.value.selectedDeviceId
-        _uiState.value = _uiState.value.copy(
-            selectedDeviceId = if (current == deviceId) null else deviceId
-        )
+        _uiState.update { current -> current.copy(
+            selectedDeviceId = if (current.selectedDeviceId == deviceId) null else deviceId
+        ) }
     }
 
     fun sendFiles(uris: List<Uri>) {
@@ -169,7 +170,7 @@ class HomeViewModel(
     }
 
     fun refreshDevices() {
-        _uiState.value = _uiState.value.copy(isSearching = true, discoveredDevices = emptyList())
+        _uiState.update { current -> current.copy(isSearching = true, discoveredDevices = emptyList(), selectedDeviceId = null, errorMessage = null) }
         discoveryEngine.restartBrowsing()
     }
 
@@ -180,47 +181,41 @@ class HomeViewModel(
 
     override fun onDiscoveryStarted() {
         android.util.Log.d("DropFlowHomeVM", "[UI State Update] Discovery started")
-        _uiState.value = _uiState.value.copy(isSearching = true, errorMessage = null)
+        _uiState.update { current -> current.copy(isSearching = true, errorMessage = null) }
     }
 
     override fun onDiscoveryStopped() {
         android.util.Log.d("DropFlowHomeVM", "[UI State Update] Discovery stopped")
-        _uiState.value = _uiState.value.copy(isSearching = false)
+        _uiState.update { current -> current.copy(isSearching = false) }
     }
 
     override fun onDeviceFound(device: Device) {
-        val currentList = _uiState.value.discoveredDevices.toMutableList()
-        val existingIndex = currentList.indexOfFirst { it.id == device.id }
-        if (existingIndex >= 0) {
-            currentList[existingIndex] = device
-        } else {
-            currentList.add(device)
+        _uiState.update { current ->
+            val devices = current.discoveredDevices.toMutableList()
+            val index = devices.indexOfFirst { it.id == device.id }
+            if (index >= 0) devices[index] = device else devices.add(device)
+            current.copy(discoveredDevices = devices)
         }
-        android.util.Log.d("DropFlowHomeVM", "[UI State Update] Device updated/added: ${device.name} (UUID=${device.id}). Active count: ${currentList.size}")
-        _uiState.value = _uiState.value.copy(discoveredDevices = currentList)
     }
 
     override fun onDeviceLost(deviceId: String) {
-        val currentList = _uiState.value.discoveredDevices.filterNot { it.id == deviceId }
-        val updatedSelected = if (_uiState.value.selectedDeviceId == deviceId) null else _uiState.value.selectedDeviceId
-        android.util.Log.d("DropFlowHomeVM", "[UI State Update] Device lost: UUID=$deviceId. Active count: ${currentList.size}")
-        _uiState.value = _uiState.value.copy(
-            discoveredDevices = currentList,
-            selectedDeviceId = updatedSelected
-        )
+        _uiState.update { current -> current.copy(
+            discoveredDevices = current.discoveredDevices.filterNot { it.id == deviceId },
+            selectedDeviceId = current.selectedDeviceId.takeUnless { it == deviceId }
+        ) }
     }
 
     override fun onAllDevicesCleared() {
         android.util.Log.d("DropFlowHomeVM", "[UI State Update] All devices cleared. Active count: 0")
-        _uiState.value = _uiState.value.copy(
+        _uiState.update { current -> current.copy(
             discoveredDevices = emptyList(),
             selectedDeviceId = null
-        )
+        ) }
     }
 
     override fun onError(message: String) {
         android.util.Log.d("DropFlowHomeVM", "[UI State Update] Discovery error: $message")
-        _uiState.value = _uiState.value.copy(errorMessage = message, isSearching = false)
+        _uiState.update { current -> current.copy(errorMessage = message, isSearching = false) }
     }
 
     companion object {

@@ -25,7 +25,8 @@ class FileSender {
         socketOutputStream: OutputStream,
         requestPayload: TransferRequestPayload,
         fileStreams: List<Triple<InputStream, Long, String>>, // (stream, size, displayName)
-        progressTracker: TransferProgressTracker
+        progressTracker: TransferProgressTracker,
+        setReadTimeout: (Int) -> Unit = {}
     ): String? = withContext(Dispatchers.IO) {
         Log.d(TAG, "Starting FileSender (streams) for session ${requestPayload.sessionId} (${fileStreams.size} files)")
 
@@ -34,16 +35,14 @@ class FileSender {
             FrameUtils.writeTransferRequest(socketOutputStream, requestPayload)
 
             // 2. Read TransferAccept frame
-            val acceptHeader = FrameUtils.readHeader(socketInputStream)
+            val acceptHeader = readAuthorizationResponse(socketInputStream, setReadTimeout)
             if (acceptHeader.tag == FrameTag.TRANSFER_REJECT) {
-                FrameUtils.readPayload(socketInputStream, acceptHeader.payloadLength)
                 return@withContext "Transfer declined by recipient"
             }
             if (acceptHeader.tag != FrameTag.TRANSFER_ACCEPT) {
                 Log.e(TAG, "Peer responded to transfer request with frame tag 0x${String.format("%02X", acceptHeader.tag.code)}")
                 return@withContext "Unexpected response from recipient (0x${String.format("%02X", acceptHeader.tag.code)})"
             }
-            FrameUtils.readPayload(socketInputStream, acceptHeader.payloadLength)
 
             val buffer = ByteArray(Protocol.DEFAULT_CHUNK_SIZE)
 

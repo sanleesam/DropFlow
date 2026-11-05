@@ -28,7 +28,8 @@ class SettingsViewModel(
                     autoAcceptTrustedDevices = prefs.autoAcceptTrustedDevices,
                     askBeforeOverwrite = prefs.askBeforeOverwrite,
                     autoOpenCompleted = prefs.autoOpenCompleted,
-                    accentColor = prefs.accentColor
+                    accentColor = prefs.accentColor,
+                    reduceMotion = prefs.reduceMotion
                 )
             }
         }
@@ -68,6 +69,10 @@ class SettingsViewModel(
         viewModelScope.launch {
             userPreferencesRepository.updateAccentColor(color)
         }
+    }
+
+    fun updateReduceMotion(value: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.updateReduceMotion(value) }
     }
 
     companion object {

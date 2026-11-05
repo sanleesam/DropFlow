@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.pow
 
 private const val TAG = "DropFlowTransferEngine"
@@ -58,6 +59,7 @@ class TransferEngine(
     val lastTransferResult: StateFlow<TransferResult?> = _lastTransferResult.asStateFlow()
 
     private val requestCallbacks = ConcurrentHashMap<String, (Boolean, String?) -> Unit>()
+    private val incomingTransferActive = AtomicBoolean(false)
 
     /**
      * Incoming-transfer authorization policy, mirroring the desktop receiver:
@@ -94,10 +96,12 @@ class TransferEngine(
         onIncomingConnection = { connection ->
             registerConnection(connection)
         },
+        onSessionStateChanged = { session -> updateSessionState(session) },
         onProgressUpdated = { progress ->
             _activeProgress.value = progress
         },
         onTransferFinished = { request, success, error ->
+            incomingTransferActive.set(false)
             recordIncomingTransfer(request, success, error)
         }
     )
@@ -141,13 +145,12 @@ class TransferEngine(
             Log.w(TAG, "sendFiles called with empty URI list — ignoring")
             return
         }
-        if (_outgoingTransferActive.value) {
+        if (!_outgoingTransferActive.compareAndSet(false, true)) {
             Log.w(TAG, "sendFiles called while outgoing transfer already active — ignoring")
             return
         }
 
         scope.launch {
-            _outgoingTransferActive.value = true
             val sessionId = "tx-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}"
             _lastTransferResult.value = null
             Log.d(TAG, "sendFiles: starting session $sessionId to ${device.name} (${device.addresses.firstOrNull()?.address}:${device.port})")
@@ -269,7 +272,8 @@ class TransferEngine(
                     socketOutputStream = socketOut,
                     requestPayload = requestPayload,
                     fileStreams = preparedFiles,
-                    progressTracker = tracker
+                    progressTracker = tracker,
+                    setReadTimeout = { connection.socket.soTimeout = it }
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "sendFiles: FileSender exception: ${e.message}", e)
@@ -331,6 +335,13 @@ class TransferEngine(
         request: TransferRequestPayload,
         callback: (Boolean, String?) -> Unit
     ) {
+        // The UI and progress stream represent one incoming session at a time.
+        // Reject a second request instead of overwriting an unanswered prompt.
+        if (!incomingTransferActive.compareAndSet(false, true)) {
+            callback(false, "Another incoming transfer is in progress")
+            return
+        }
+        _lastTransferResult.value = null
         val policy = authorizationPolicy
         val isTrusted = policy.trustedDeviceIds.contains(request.senderId)
         val shouldAutoAccept = !policy.requireConfirmation || (isTrusted && policy.autoAcceptTrustedDevices)
@@ -369,6 +380,7 @@ class TransferEngine(
     fun declinePendingTransfer(sessionId: String, reason: String = "User declined transfer") {
         Log.d(TAG, "Declining transfer request $sessionId (reason: $reason)")
         val callback = requestCallbacks.remove(sessionId)
+        if (callback != null) incomingTransferActive.set(false)
         callback?.invoke(false, reason)
 
         if (_pendingTransferRequest.value?.sessionId == sessionId) {
@@ -423,7 +435,12 @@ class TransferEngine(
     }
 
     private fun recordIncomingTransfer(request: TransferRequestPayload, success: Boolean, error: String?) {
-        val status = if (success) TransferStatus.COMPLETED else TransferStatus.FAILED
+        val cancelled = cancelledSessionIds.remove(request.sessionId) || error == "Transfer cancelled by sender"
+        val status = when {
+            success -> TransferStatus.COMPLETED
+            cancelled -> TransferStatus.CANCELLED
+            else -> TransferStatus.FAILED
+        }
         val item = createTransferItem(
             sessionId = request.sessionId,
             deviceName = request.senderName,
@@ -431,9 +448,14 @@ class TransferEngine(
             files = request.files,
             totalSizeBytes = request.totalSizeBytes,
             status = status,
-            error = error
+            error = if (cancelled) null else error
         )
         notifyTransferResult(item)
+        _lastTransferResult.value = TransferResult(request.sessionId, when {
+            success -> "Received ${request.totalFiles} ${if (request.totalFiles == 1) "file" else "files"} from ${request.senderName}"
+            cancelled -> "Transfer cancelled"
+            else -> error ?: "Could not receive files"
+        }, !success && !cancelled)
     }
 
     private fun recordOutgoingTransfer(
