@@ -1,4 +1,4 @@
-# Android 0.2.0-alpha.1 preparation — 2026-11-04
+# Android 0.2.0-alpha.1 preparation — updated 2026-11-05
 
 Source target: `0.2.0-alpha.1`, versionCode 18. **Not published.** The actual
 published Beta 1 APK was inspected: versionCode 17, package `com.dropflow.android`,
@@ -23,7 +23,7 @@ Those public facts are recorded in `apps/android/release-baseline.json`.
   preflight and a user-confirmed Android installer handoff. Checks are manual;
   there are no silent background checks or automatic installs.
 - Android's release workflow checks SemVer/install-number ordering, requires the
-  original signing certificate, generates versioned APK/JSON assets and publishes
+  permanent signing certificate, generates versioned APK/JSON assets and publishes
   a separate Android channel only after successful validation. Older runs cannot
   move a channel backwards. See [ANDROID_UPDATES.md](ANDROID_UPDATES.md).
 
@@ -36,9 +36,16 @@ language and respects the saved reduced-motion preference.
 - 21 Android JVM tests passed, including approval/streaming timeout phases,
   version labels, receiver integrity and updater ordering/URL/hash/length policy.
 - Type-specific version and manifest tests plus desktop version/workflow tests:
-  16 Node tests passed. Workflow YAML parses; versionName/tag/code checks pass.
+  17 Node tests passed, including the explicit signing-migration guard. Workflow
+  YAML parses; versionName/tag/code checks pass.
 - Android lint, debug APK, unsigned release APK and test APK builds passed.
   An unsigned local release APK is not an installable signed release.
+- After permanent-key configuration on 2026-11-05, the signed release build,
+  unit tests and lint passed. `apksigner` verified the APK signature; its signer
+  matches `signing-policy.json`, and embedded identity is `com.dropflow.android`,
+  version `0.2.0-alpha.1`, install number 18. The Apache license and scope/notice
+  files are bundled inside the APK. This is artifact validation, not a claim of
+  a completed physical-phone installation.
 - Real emulator receiver regression checks passed: incoming prompt on Settings,
   two files including an empty file, decline on Transfers, malformed manifest,
   substituted header, checksum cleanup, sender cancel, concurrent requests and
@@ -76,19 +83,31 @@ The UI/receiver scripts are restricted to an emulator. Test-only instrumentation
 is not packaged into release APKs. Current screenshots are under
 `/private/tmp/dropflow-alpha1-qa`; these are disposable local evidence, not repo assets.
 
-## Required before Android publication
+## Signing migration and experimental release decision
 
-1. Recover/configure the original signing key and verify an actual Beta 1 →
-   Alpha 1 in-place upgrade. The public certificate fingerprint is not a private
-   signing key. CI refuses a different signer; it never generates a replacement.
-2. Verify physical Android↔Mac/Windows discovery and transfer behavior. Emulator
+The original successful Beta 1 workflow logs explicitly report an ephemeral
+keystore, and the public release notes warn that its APK requires reinstalling.
+On 2026-11-05 the maintainer approved a fresh permanent identity and a one-time
+reinstall migration. A new 4096-bit RSA/PKCS12 key was created outside the
+repository, with private local backups and CI secret configuration. The public
+fingerprint is pinned in `apps/android/signing-policy.json`. The historical Beta
+1 baseline is preserved unchanged. No user's installed app was uninstalled.
+
+An explicitly experimental Alpha may be published after automated checks and
+signed-artifact verification; remaining device-level checks below must be
+disclosed, not represented as passed. This replaces the earlier impossible
+original-key recovery requirement; it is not an assertion of production readiness.
+
+## Remaining device-level acceptance
+
+1. Verify physical Android↔Mac/Windows discovery and transfer behavior. Emulator
    address fixtures do not prove ordinary LAN discovery. No physical device was
    attached during this run.
-3. Verify a real published, same-key update end to end, including interrupted
+2. Verify a real published, same-key update end to end, including interrupted
    download recovery, channel changes and the OS installation approval flow.
    Alpha/Beta/Stable manifests are created on the first successful Android release
    for each channel; no Android release/channel was published by this work.
-4. Android 8/9 storage/installer acceptance and larger-screen/font/motion coverage
+3. Android 8/9 storage/installer acceptance and larger-screen/font/motion coverage
    still need device-level acceptance. Background receiving, notifications,
    persisted history/trust and seekable SAF resume remain unimplemented.
 

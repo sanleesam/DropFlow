@@ -109,13 +109,16 @@ Promotion to Beta is a maintainer decision: tag a coherent milestone as
    and `node --test scripts/android-version.test.mjs scripts/android-updater-manifest.test.mjs`.
 2. Run `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease` in
    `apps/android`. A local release APK is unsigned unless release signing is configured.
-   Complete the physical-device and upgrade checks in
-   [Android Alpha 1 preparation](ANDROID_ALPHA1.md) before publishing.
-3. Only after the gates pass, commit and tag the matching version, for example
-   `android-v0.2.0-alpha.1`. Do not publish this candidate while its gates remain open.
+   Review the physical-device and upgrade limitations in
+   [Android Alpha 1 preparation](ANDROID_ALPHA1.md). The maintainer approved an
+   explicitly experimental Alpha and the one-time reinstall migration; this is
+   not permission to call untested hardware paths verified or promote to Stable.
+3. After automated checks and signed-artifact verification pass, commit and tag
+   the matching experimental version, for example `android-v0.2.0-alpha.1`.
+   Preserve the known limitations and reinstall notice in the release notes.
 4. `release-android.yml` verifies the tag matches `versionName`, builds
    `assembleRelease`, renames the APK to `DropFlow-android-<version>.apk`, and
-   verifies its actual version and original certificate, and generates a size/SHA-256
+   verifies its actual version and permanent certificate, and generates a size/SHA-256
    Android updater manifest. Versioned assets precede the serialized channel update.
    Prerelease versions are marked prerelease; normal versions are not. Android releases
    never touch desktop updater manifests. See [ANDROID_UPDATES.md](ANDROID_UPDATES.md).
@@ -123,6 +126,12 @@ Promotion to Beta is a maintainer decision: tag a coherent milestone as
 ## Android signing
 
 Release APKs must be signed or they cannot be installed. Two options:
+
+`apps/android/signing-policy.json` pins the permanent identity introduced in
+Alpha 1. Beta 1 used an ephemeral key and requires a one-time uninstall/reinstall;
+do not overwrite its historical fingerprint in `release-baseline.json` to hide
+the migration. Never generate disposable CI keys. Keep encrypted offline backups
+of the keystore and credentials; GitHub secrets cannot be downloaded for recovery.
 
 - **CI (recommended)**: add these repository secrets once; every release is
   signed with the same key so users can upgrade in place:

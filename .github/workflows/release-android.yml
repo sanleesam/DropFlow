@@ -73,7 +73,7 @@ jobs:
               printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
             } > keystore.properties
           else
-            echo "::error::All four Android signing secrets are required. Reuse the Beta 1 signing key so users can upgrade."
+            echo "::error::All four permanent Android signing secrets are required. Never generate a replacement key in CI."
             exit 1
           fi
 
@@ -91,7 +91,7 @@ jobs:
           ls -la "$APK_DIR"
           cp "$APK_DIR/app-release.apk" "DropFlow-android-${{ steps.verify-tag.outputs.VERSION }}.apk"
 
-      - name: Verify APK Version and Original Signing Certificate
+      - name: Verify APK Version and Permanent Signing Certificate
         env:
           VERSION: ${{ steps.verify-tag.outputs.VERSION }}
         run: |
@@ -99,14 +99,19 @@ jobs:
           SIGNER=$(ls -1 "$SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -n 1)
           AAPT="$(dirname "$SIGNER")/aapt"
           APK="DropFlow-android-${VERSION}.apk"
-          EXPECTED_CERT=$(node -p 'require("./apps/android/release-baseline.json").signingCertificateSha256')
+          EXPECTED_CERT=$(node -p 'require("./apps/android/signing-policy.json").signingCertificateSha256')
           ACTUAL_CERT=$("$SIGNER" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
           test "$ACTUAL_CERT" = "$EXPECTED_CERT" || { echo "::error::APK does not use the published Android signing key"; exit 1; }
           BADGING=$("$AAPT" dump badging "$APK")
           ACTUAL_CODE=$(printf '%s' "$BADGING" | sed -n "s/^package: .*versionCode='\([^']*\)'.*/\1/p")
           ACTUAL_VERSION=$(printf '%s' "$BADGING" | sed -n "s/^package: .*versionName='\([^']*\)'.*/\1/p")
+          ACTUAL_PACKAGE=$(printf '%s' "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+          test "$ACTUAL_PACKAGE" = "com.dropflow.android"
           test "$ACTUAL_CODE" = "$(node scripts/android-version.mjs code)"
           test "$ACTUAL_VERSION" = "$VERSION"
+          for NOTICE_FILE in LICENSE NOTICE THIRD_PARTY_NOTICES.md; do
+            unzip -p "$APK" "assets/licenses/$NOTICE_FILE" | cmp - "$NOTICE_FILE"
+          done
 
       - name: Generate Android Updater Manifest
         run: node scripts/android-updater-manifest.mjs create "DropFlow-android-${{ steps.verify-tag.outputs.VERSION }}.apk" "${{ github.ref_name }}" > latest.json

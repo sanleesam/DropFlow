@@ -42,7 +42,23 @@ export function validateAndroidRelease(metadata, baseline, tag) {
 export function checkAndroidVersion(tag, base = root) {
   const metadata = parseAndroidVersion(readFileSync(resolve(base, "apps/android/app/build.gradle.kts"), "utf8"));
   const baseline = JSON.parse(readFileSync(resolve(base, "apps/android/release-baseline.json"), "utf8"));
+  const signing = JSON.parse(readFileSync(resolve(base, "apps/android/signing-policy.json"), "utf8"));
+  validateSigningPolicy(signing, baseline, metadata);
   return validateAndroidRelease(metadata, baseline, tag);
+}
+
+export function validateSigningPolicy(signing, baseline, metadata) {
+  if (!/^[a-f0-9]{64}$/.test(signing.signingCertificateSha256)) throw new Error("Missing permanent Android signing certificate");
+  if (compareVersions(metadata.versionName, signing.firstVersion) < 0) throw new Error("Source version predates the signing identity");
+  if (baseline.signingCertificateSha256 !== signing.signingCertificateSha256) {
+    const migration = signing.migration;
+    if (!migration || migration.fromVersion !== baseline.versionName ||
+        migration.fromCertificateSha256 !== baseline.signingCertificateSha256 ||
+        migration.requiresReinstall !== true || !migration.reason?.trim()) {
+      throw new Error("Signing identity differs from the baseline without an explicit reinstall migration");
+    }
+  }
+  return signing;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

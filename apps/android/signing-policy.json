@@ -1,0 +1,10 @@
+{
+  "signingCertificateSha256": "3628d15f4bf1ddac50438bad0ec33c2dc8e37b427f38575f0d63c4c40a08d627",
+  "firstVersion": "0.2.0-alpha.1",
+  "migration": {
+    "fromVersion": "0.1.0-beta.1",
+    "fromCertificateSha256": "f364ad7616f35c03d3b7982b912c95964054252a5dee833986a8ccb362dbd8cd",
+    "requiresReinstall": true,
+    "reason": "The legacy Beta 1 workflow used an ephemeral CI signing key. The maintainer approved a one-time reinstall migration to a permanent signing identity."
+  }
+}
