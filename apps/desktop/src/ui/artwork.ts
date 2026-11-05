@@ -1,32 +1,3 @@
-import laptop from "../assets/pack/laptop.png";
-import phone from "../assets/pack/phone.png";
-import desktop from "../assets/pack/desktop.png";
-import tablet from "../assets/pack/tablet.png";
-import folder from "../assets/pack/file-folder.png";
-import image from "../assets/pack/file-image.png";
-import pdf from "../assets/pack/file-pdf.png";
-import video from "../assets/pack/file-video.png";
-import zip from "../assets/pack/file-zip.png";
-import sheet from "../assets/pack/file-sheet.png";
-import doc from "../assets/pack/file-doc.png";
-import chart from "../assets/pack/file-chart.png";
-import audio from "../assets/pack/file-audio.png";
-
-const DEVICE_ART: Record<string, string> = {
-  laptop,
-  phone,
-  desktop,
-  tablet,
-};
-
-export function deviceArt(type: string | undefined): string {
-  const value = (type || "").toLowerCase();
-  if (value.includes("tablet") || value.includes("ipad")) return DEVICE_ART.tablet;
-  if (value.includes("phone") || value.includes("android") || value.includes("mobile")) return DEVICE_ART.phone;
-  if (value.includes("laptop") || value.includes("book") || value.includes("macbook")) return DEVICE_ART.laptop;
-  return DEVICE_ART.desktop;
-}
-
 export function deviceKindLabel(type: string | undefined): string {
   const value = (type || "").toLowerCase();
   if (value.includes("tablet")) return "Tablet";
@@ -34,19 +5,6 @@ export function deviceKindLabel(type: string | undefined): string {
   if (value.includes("laptop") || value.includes("book")) return "Laptop";
   if (value.includes("desktop") || value.includes("pc")) return "Desktop";
   return "Device";
-}
-
-export function fileArt(name: string): string {
-  const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "heic", "avif", "bmp"].includes(ext)) return image;
-  if (ext === "pdf") return pdf;
-  if (["mp4", "mov", "mkv", "avi", "webm", "m4v"].includes(ext)) return video;
-  if (["zip", "rar", "7z", "tar", "gz", "bz2"].includes(ext)) return zip;
-  if (["xls", "xlsx", "csv", "numbers", "ods"].includes(ext)) return sheet;
-  if (["ppt", "pptx", "key", "odp"].includes(ext)) return chart;
-  if (["mp3", "wav", "flac", "aac", "m4a", "ogg"].includes(ext)) return audio;
-  if (!ext || name.endsWith("/") || name.endsWith("\\")) return folder;
-  return doc;
 }
 
 export function fileKindLabel(name: string): string {
@@ -65,6 +23,7 @@ export function greeting(date = new Date()): string {
 export function friendlyTransferError(raw: string | undefined): string {
   const text = (raw || "").toLowerCase();
   if (!text) return "The transfer didn't finish.";
+  if (text.includes("busy") || text.includes("transfer limit")) return "The other device is busy. Try again shortly.";
   if (text.includes("cancel")) return "This transfer was cancelled.";
   if (text.includes("declin") || text.includes("reject")) return "The other device declined this transfer.";
   if (text.includes("timeout") || text.includes("timed out")) return "The other device didn't respond in time.";

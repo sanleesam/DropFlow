@@ -21,12 +21,12 @@ replace them, and Apache-2.0 does not grant rights to third-party trademarks.
 
 ## Artwork and branding
 
-The existing desktop device/file illustrations in
-`apps/desktop/src/assets/pack/` have no recorded upstream source or license.
-They are **excluded from the Apache-2.0 grant**. Their redistribution permission
-has not been verified; do not assume the public repository grants permission to
-reuse them. Record the source and applicable license or replace these assets
-with cleared artwork before claiming a fully cleared desktop distribution.
+The unused legacy device/file PNG pack was removed from the current source tree
+and desktop build in the safety patch after Beta 19. The active UI uses original
+vector device artwork and Lucide icons; its appearance is unchanged by removal.
+Older immutable tags may still contain that pack. Its provenance remains
+unverified and it is not relicensed by Apache-2.0; no reuse permission for those
+historical assets should be inferred from their presence in Git history.
 
 The current DropFlow logo was supplied by the maintainer and prepared for use
 in the app. No independent audit of external artwork ownership has been made.
