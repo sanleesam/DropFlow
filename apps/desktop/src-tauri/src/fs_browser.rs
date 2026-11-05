@@ -55,6 +55,20 @@ fn plain_name(name: &str) -> Result<&str, String> {
     Ok(name)
 }
 
+/// Resolve the parent for boundary checking, but never follow the selected leaf.
+/// This also permits removing a dangling symlink without touching its target.
+fn mutation_path(path: &Path) -> Result<PathBuf, String> {
+    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err("Use an absolute path without parent traversal".into());
+    }
+    let parent = path.parent().ok_or("Cannot change a filesystem root")?;
+    let parent = inside_home(parent)?;
+    let leaf = path.file_name().ok_or("Cannot change a filesystem root")?;
+    let target = parent.join(leaf);
+    std::fs::symlink_metadata(&target).map_err(|err| err.to_string())?;
+    Ok(target)
+}
+
 fn local_ipv4() -> String {
     let socket = match std::net::UdpSocket::bind("0.0.0.0:0") {
         Ok(socket) => socket,
@@ -175,17 +189,23 @@ pub fn read_image_preview(path: String) -> Result<String, String> {
 #[tauri::command]
 pub fn rename_path(path: String, new_name: String) -> Result<String, String> {
     let name = plain_name(&new_name)?;
-    let file = inside_home(Path::new(&path))?;
+    let file = mutation_path(Path::new(&path))?;
     let dest = file.parent().ok_or_else(|| "No parent folder".to_string())?.join(name);
-    if dest.exists() { return Err("A file or folder with that name already exists".into()); }
-    std::fs::rename(&file, &dest).map_err(|err| err.to_string())?;
+    crate::safe_fs::rename_noreplace(&file, &dest).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::AlreadyExists { "A file or folder with that name already exists".into() }
+        else { err.to_string() }
+    })?;
     Ok(dest.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 pub fn delete_path(path: String) -> Result<(), String> {
-    let file = inside_home(Path::new(&path))?;
-    let meta = std::fs::metadata(&file).map_err(|err| err.to_string())?;
+    let file = mutation_path(Path::new(&path))?;
+    let meta = std::fs::symlink_metadata(&file).map_err(|err| err.to_string())?;
+    #[cfg(windows)]
+    if meta.file_type().is_symlink() && std::os::windows::fs::FileTypeExt::is_symlink_dir(&meta.file_type()) {
+        return std::fs::remove_dir(&file).map_err(|err| err.to_string());
+    }
     if meta.is_dir() {
         std::fs::remove_dir(&file).map_err(|_| "That folder isn't empty".to_string())
     } else {
@@ -205,6 +225,24 @@ pub fn create_folder(parent: String, name: String) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn deleting_and_renaming_links_never_changes_the_target() {
+        let root=home_dir().unwrap().join(format!(".dropflow-link-test-{}",uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let target=root.join("original.txt");std::fs::write(&target,b"keep me").unwrap();
+        let link=root.join("shortcut.txt");std::os::unix::fs::symlink(&target,&link).unwrap();
+        let renamed=rename_path(link.to_string_lossy().into_owned(),"renamed-link.txt".into()).unwrap();
+        assert!(std::fs::symlink_metadata(&renamed).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&target).unwrap(),b"keep me");
+        delete_path(renamed).unwrap();assert!(target.exists());
+        std::os::unix::fs::symlink(root.join("missing"),&link).unwrap();
+        delete_path(link.to_string_lossy().into_owned()).unwrap();
+        assert!(std::fs::symlink_metadata(link).is_err());
+        assert_eq!(std::fs::read(target).unwrap(),b"keep me");
+        assert!(mutation_path(&root.join("../escape")).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn browser_operations_preserve_existing_files_and_enforce_boundaries() {
         let root = home_dir().unwrap().join(format!(".dropflow-fs-test-{}", uuid::Uuid::new_v4()));

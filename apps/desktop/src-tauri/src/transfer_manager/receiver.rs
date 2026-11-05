@@ -18,7 +18,7 @@ use super::protocol::{
     TransferAckPayload, DEFAULT_CHUNK_SIZE,
 };
 use super::security::{
-    get_session_part_file_path, resolve_collision_path,
+    get_session_part_file_path, publish_received_file,
     sanitize_relative_path, verify_safe_target_path,
 };
 
@@ -349,7 +349,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
             }
         };
 
-        let collision_resolved_path = resolve_collision_path(&final_target_path);
+        let collision_resolved_path = final_target_path.clone();
         let part_file_path = get_session_part_file_path(&final_target_path, &metadata.session_id);
         if fs::symlink_metadata(&part_file_path).is_ok_and(|meta| meta.file_type().is_symlink()) {
             cleanup_files(&created_part_files);
@@ -632,15 +632,12 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     }
 
     // Acknowledge only after every verified file has been saved successfully.
-    for (part_path, final_path) in &final_dest_paths {
-        if final_path.exists() {
-            cleanup_files(&created_part_files);
-            return Err(format!("Destination appeared during transfer: {}", final_path.display()));
-        }
-        if let Err(e) = fs::rename(part_path, final_path) {
-            cleanup_files(&created_part_files);
-            return Err(format!("Failed to save {}: {e}", final_path.display()));
-        }
+    for ((part_path, final_path), file) in final_dest_paths.iter().zip(received_files_meta.iter_mut()) {
+        // Recheck ancestors before publishing; never follow a destination link.
+        let relative = final_path.strip_prefix(&receive_dir).map_err(|e| e.to_string())?;
+        verify_safe_target_path(&receive_dir, relative)?;
+        let saved_path = publish_received_file(part_path, final_path)?;
+        file.final_path = saved_path.to_string_lossy().into_owned();
     }
     write_response_frame(stream, FrameTag::TransferAck, "ACK")
         .map_err(|e| format!("Files saved, but failed to send TransferAck: {e}"))?;

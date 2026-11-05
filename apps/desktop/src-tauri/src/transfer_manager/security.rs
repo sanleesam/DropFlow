@@ -145,6 +145,21 @@ pub fn resolve_collision_path(target_path: &Path) -> PathBuf {
     }
 }
 
+/// Publish with an atomic no-replace move; concurrent receives retry a new name.
+pub fn publish_received_file(part: &Path, target: &Path) -> Result<PathBuf, String> {
+    let mut candidate = target.to_path_buf();
+    for _ in 0..10_000 {
+        match crate::safe_fs::rename_noreplace(part, &candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                candidate = resolve_collision_path(target);
+            }
+            Err(error) => return Err(format!("Failed to save {}: {error}", candidate.display())),
+        }
+    }
+    Err("Too many destination collisions; try a different folder".into())
+}
+
 /// Appends `.dropflow-part` to target file path for temporary partial writes.
 pub fn get_part_file_path(target_path: &Path) -> PathBuf {
     let mut os_string = target_path.as_os_str().to_os_string();
@@ -167,6 +182,24 @@ pub fn get_session_part_file_path(target_path: &Path, session_id: &str) -> PathB
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_receives_keep_both_files_and_existing_content() {
+        use std::sync::{Arc, Barrier};
+        let root=std::env::temp_dir().join(format!("dropflow-publish-{}",uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let target=root.join("same.txt"); fs::write(&target,b"existing").unwrap();
+        let gate=Arc::new(Barrier::new(2));
+        let handles:Vec<_>=[b"first".to_vec(),b"second".to_vec()].into_iter().enumerate().map(|(i,bytes)| {
+            let part=root.join(format!("{i}.part")); fs::write(&part,&bytes).unwrap();
+            let target=target.clone();let gate=gate.clone();
+            std::thread::spawn(move|| { gate.wait(); let dest=publish_received_file(&part,&target).unwrap(); assert_eq!(fs::read(&dest).unwrap(),bytes); dest })
+        }).collect();
+        let results:Vec<_>=handles.into_iter().map(|h|h.join().unwrap()).collect();
+        assert_ne!(results[0],results[1]); assert_eq!(fs::read(target).unwrap(),b"existing");
+        assert_eq!(fs::read_dir(&root).unwrap().count(),3);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn test_sanitize_filename_basic() {

@@ -8,6 +8,7 @@ use super::receiver::TransferReceiver;
 use super::security::get_default_receive_dir;
 use super::sender::send_files_over_tcp;
 use tauri::Manager;
+use tauri_plugin_opener::OpenerExt;
 
 pub(crate) fn configured_receive_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let selected = app.try_state::<crate::state_manager::AppStateContainer>()
@@ -167,30 +168,6 @@ pub fn open_received_file(app: AppHandle, path: String) -> Result<(), String> {
         ));
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to launch file on macOS: {e}"))?;
-        Ok(())
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &path])
-            .spawn()
-            .map_err(|e| format!("Failed to launch file on Windows: {e}"))?;
-        Ok(())
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to launch file on Linux: {e}"))?;
-        Ok(())
-    }
+    app.opener().open_path(canonical.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| format!("Failed to open received item: {e}"))
 }
