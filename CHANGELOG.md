@@ -136,7 +136,12 @@ First desktop milestone intended for real users on Windows and macOS.
 
 - DFP/1 protocol unchanged; desktop remains the reference implementation.
 
-## Android — [0.2.0-alpha.1] — Unreleased
+## Android — [0.2.0-alpha.2] — Unreleased
+
+- Reserved next source target after publishing Alpha 1; no second Alpha release
+  is published yet. Install number 19 is above the verified Alpha 1 baseline.
+
+## Android — [0.2.0-alpha.1] — 2026-11-05
 
 The earlier, never-published `0.1.0-beta.2` candidate is superseded by the Alpha
 line. Published Beta 1 is not renamed. VersionCode 18 remains above its public 17.
@@ -149,7 +154,11 @@ line. Published Beta 1 is not renamed. VersionCode 18 remains above its public 1
   cancellation, size/SHA-256 checking, APK identity/signing preflight and an
   Android-controlled installation confirmation flow.
 - Independent Alpha/Beta/Stable update manifests, version/install ordering and
-  original-certificate gates in Android release CI. No Android release published.
+  permanent-certificate gates in Android release CI. Alpha APK and channel published.
+- Permanent signing identity with an explicitly documented, one-time reinstall
+  from legacy Beta 1; future releases retain the new key.
+- Apache-2.0 for original project code, third-party scope/attribution notices,
+  and license files embedded in the Android APK.
 - Current evidence and limits: [ANDROID_ALPHA1.md](docs/ANDROID_ALPHA1.md).
 
 ### Preserved from the prior candidate
@@ -168,7 +177,7 @@ line. Published Beta 1 is not renamed. VersionCode 18 remains above its public 1
 - History and trust are clearly described as applying to the current app session.
 - Higher contrast primary buttons, labeled switches and dark result messages;
   old result messages do not replay after screen rotation.
-- The prior target was `0.1.0-beta.2`; current Android source targets `0.2.0-alpha.1`, versionCode `18`.
+- The prior target was `0.1.0-beta.2`; this released Alpha is `0.2.0-alpha.1`, versionCode `18`.
 
 ### Fixed
 

@@ -12,8 +12,11 @@ p.add_argument('--serial', default='emulator-5554')
 p.add_argument('--artifacts', type=Path, default=Path('/tmp/dropflow-alpha1-ui'))
 p.add_argument('--allow-network-error', action='store_true', help='Also validate explicit DNS/timeout error UI; report availability as unverified for this run')
 p.add_argument('--release', action='store_true', help='Expect the signed release identity rather than a debug build')
-p.add_argument('--expect-published', action='store_true', help='Require the installed Alpha release to match a published channel manifest')
+p.add_argument('--expect-published', action='store_true', help='Require a populated Alpha channel with no newer update')
+p.add_argument('--expected-version', help='Installed version to validate; defaults to the Gradle source target')
 args = p.parse_args()
+expected_version = args.expected_version or re.search(r'versionName = "([^"]+)"',
+    (Path(__file__).resolve().parents[1] / 'apps/android/app/build.gradle.kts').read_text()).group(1)
 if not args.serial.startswith('emulator-'):
     p.error('Emulator only; never change a physical device for this check.')
 adb_path = Path(os.environ.get('ANDROID_HOME', str(Path.home() / 'Library/Android/sdk'))) / 'platform-tools/adb'
@@ -74,7 +77,7 @@ else:
 tap('Back to Settings'); assert visible('Updates')
 tap('About DropFlow', seek=True)
 expected_label = 'Alpha' if args.release else 'Alpha · Debug build'
-assert visible('0.2.0-alpha.1') and any(n.get('text') == expected_label for n in nodes()); shot('about')
+assert visible(expected_version) and any(n.get('text') == expected_label for n in nodes()); shot('about')
 print('PASS: About reports the actual Alpha version and ' + ('release' if args.release else 'debug') + ' identity', flush=True)
 tap('Back to Settings'); assert visible('About DropFlow')
 print('PASS: Updates/About preserve the Settings back stack', flush=True)

@@ -1,9 +1,11 @@
 # Android 0.2.0-alpha.1 preparation — updated 2026-11-05
 
-Source target: `0.2.0-alpha.1`, versionCode 18. **Not published.** The actual
+Released: `0.2.0-alpha.1`, versionCode 18, on 2026-11-05. The actual
 published Beta 1 APK was inspected: versionCode 17, package `com.dropflow.android`,
 certificate SHA-256 `f364ad7616f35c03d3b7982b912c95964054252a5dee833986a8ccb362dbd8cd`.
-Those public facts are recorded in `apps/android/release-baseline.json`.
+The legacy certificate is preserved in `apps/android/signing-policy.json`'s
+migration record. `release-baseline.json` now records the verified public Alpha
+1 artifact. The next unreleased source target is Alpha 2, versionCode 19.
 
 ## Implemented
 
@@ -73,7 +75,8 @@ language and respects the saved reduced-motion preference.
   Exact bytes and SHA-256 matched. A test-only peer fixture supplied the address;
   this is not proof of physical LAN discovery or a new Mac↔Android app-to-app test.
 
-Reproduce builds from the repository root:
+Reproduce Alpha 1 builds from a checkout of the immutable
+`android-v0.2.0-alpha.1` tag (current main intentionally targets the next Alpha):
 
 ```sh
 node --test scripts/*version.test.mjs scripts/android-updater-manifest.test.mjs scripts/release-workflow.test.mjs
@@ -110,6 +113,30 @@ tested toolchain), prints the public certificate report and supports manually
 retrying the existing unpublished tag without moving it. This does not weaken
 the expected-certificate comparison or create a different signing key.
 
+## Published artifact verification
+
+- [Recovery workflow run 42008230594](https://github.com/sanleesam/DropFlow/actions/runs/42008230594)
+  passed all gates and published [Android Alpha 1](https://github.com/sanleesam/DropFlow/releases/tag/android-v0.2.0-alpha.1).
+  It built the original tag at `c7c9062ca8c8ade7795a3c1d0b9807819c920d23`;
+  the tag was not moved. Main's workflow-only tooling correction drove the retry.
+- Downloaded public APK: 11,523,434 bytes; SHA-256
+  `8cf23177d3e4a0dae681bfd0c697d8deaa42772bbd1d1c816eeb6c3dc2f2f5c6`.
+- `apksigner` verified its signature and the pinned permanent certificate.
+  Package/version/code match `com.dropflow.android`, `0.2.0-alpha.1`, 18.
+- The public versioned manifest and floating `android-alpha/latest.json` match
+  exactly, including the immutable APK URL, size and hash. Embedded LICENSE,
+  NOTICE and THIRD_PARTY_NOTICES.md match the source files byte-for-byte.
+- The downloaded CI APK installed over the same-version, same-key local release
+  in the emulator. The live Alpha check reported `No newer Alpha update`; Home,
+  Devices, Transfers, Settings, About and back navigation passed with the release
+  identity. This is not a newer-version upgrade or physical-device installation.
+
+Recheck the public Alpha 1 APK UI from current main with:
+
+```sh
+ANDROID_HOME="$HOME/Library/Android/sdk" python3 scripts/android-ui-smoke.py --release --expect-published --expected-version 0.2.0-alpha.1
+```
+
 ## Remaining device-level acceptance
 
 1. Verify physical Android↔Mac/Windows discovery and transfer behavior. Emulator
@@ -118,7 +145,8 @@ the expected-certificate comparison or create a different signing key.
 2. Verify a real published, same-key update end to end, including interrupted
    download recovery, channel changes and the OS installation approval flow.
    Alpha/Beta/Stable manifests are created on the first successful Android release
-   for each channel; no Android release/channel was published by this work.
+   for each channel; Alpha is now published. Beta/Stable are not populated by
+   this Alpha publication.
 3. Android 8/9 storage/installer acceptance and larger-screen/font/motion coverage
    still need device-level acceptance. Background receiving, notifications,
    persisted history/trust and seekable SAF resume remain unimplemented.

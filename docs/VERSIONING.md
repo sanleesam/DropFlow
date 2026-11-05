@@ -36,7 +36,7 @@ The checker fails builds if they drift. Tagged Beta builds must match the
 committed target; CI no longer silently changes the target to match a wrong tag.
 Development CI derives, for example, `0.1.1-dev.8` from that same core version.
 
-The next desktop fix release is `0.1.1-beta.19`. Keeping the counter above 17 is intentional:
+The published desktop fix release is `0.1.1-beta.19`. Keeping the counter above 17 is intentional:
 legacy Beta 17 updaters compare only beta counters. Starting at beta.1 would
 strand those installs despite the newer core version. The new updater compares
 full SemVer within each channel, including future core-version transitions.
@@ -54,15 +54,19 @@ publication workflows or separate updater endpoints have been implemented.
 
 ## Android
 
-Android is versioned independently; its early-alpha status should be represented
-by the next unreleased `0.2.0-alpha.1`, not by renaming published `0.1.0-beta.1`.
+Android is versioned independently; its early-alpha status is represented by
+published `0.2.0-alpha.1`, not by renaming published `0.1.0-beta.1`.
 An incremented Android `versionCode` is mandatory for every shipped APK, and the
 original signing key is required for in-place upgrades. UI parity with desktop
 does not imply equivalent maturity, release channel or protocol support.
-Android's current unreleased source target is `0.2.0-alpha.1` (versionCode 18).
+Android's current unreleased source target is `0.2.0-alpha.2` (versionCode 19),
+above the verified public Alpha 1 baseline (versionCode 18).
 `node scripts/android-version.mjs check` verifies its source/tag/upgrade ordering
-against the inspected published baseline. The original certificate is enforced
-by release CI; Alpha/Beta/Stable Android manifests remain separate from desktop.
+against the inspected published baseline. Legacy Beta 1 used an ephemeral key;
+the maintainer approved a permanent-key migration with a one-time reinstall for
+Alpha 1. The old fingerprint remains in `signing-policy.json`'s migration record.
+Release CI enforces the permanent certificate for subsequent releases;
+Alpha/Beta/Stable Android manifests remain separate from desktop.
 See `ANDROID_ALPHA1.md` and `ANDROID_UPDATES.md` for implementation and open gates.
 
 ## Release gates

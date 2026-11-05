@@ -25,8 +25,11 @@ Published versions are never renamed. See [the versioning policy](docs/VERSIONIN
 Current releases:
 
 - **Desktop**: [`0.1.1-beta.19`](https://github.com/sanleesam/DropFlow/releases/tag/v0.1.1-beta.19) (Windows x64, macOS arm64)
-- **Android**: published legacy `0.1.0-beta.1`; the next, **unreleased** source target
-  is `0.2.0-alpha.1` (install number 18). See [current Android readiness](docs/ANDROID_ALPHA1.md).
+- **Android**: [`0.2.0-alpha.1`](https://github.com/sanleesam/DropFlow/releases/tag/android-v0.2.0-alpha.1)
+  (install number 18), an experimental preview. Legacy Beta 1 users must back up
+  files and reinstall once because its temporary signing key was replaced.
+  The next **unreleased** source target is `0.2.0-alpha.2` (install number 19).
+  See [Android verification and limitations](docs/ANDROID_ALPHA1.md).
 
 See [CHANGELOG.md](CHANGELOG.md), [docs/RELEASE.md](docs/RELEASE.md) and [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
