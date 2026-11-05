@@ -13,3 +13,15 @@ test("Development stages versioned installers before updating the channel", () =
   assert.match(workflow, /does not reference this versioned release/);
   assert.doesNotMatch(workflow, /Remove Stale Development Assets/);
 });
+
+test("Android pins certificate tooling and retries an existing immutable tag", () => {
+  const android = readFileSync(new URL("../.github/workflows/release-android.yml", import.meta.url), "utf8");
+  assert.ok(android.includes('SIGNER="$SDK_ROOT/build-tools/34.0.0/apksigner"'));
+  assert.doesNotMatch(android, /build-tools\/\*\/apksigner/);
+  assert.match(android, /workflow_dispatch:/);
+  assert.ok(android.includes('ref: ${{ inputs.tag || github.ref }}'));
+  assert.ok(android.includes('node scripts/android-version.mjs check "$TAG_NAME"'));
+  assert.ok(android.includes('TAG_NAME: ${{ steps.verify-tag.outputs.TAG_NAME }}'));
+  assert.doesNotMatch(android, /git (?:tag.*--force|push.*--force)/);
+  assert.ok(android.includes('require("./apps/android/signing-policy.json").signingCertificateSha256'));
+});

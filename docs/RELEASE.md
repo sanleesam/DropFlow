@@ -123,6 +123,12 @@ Promotion to Beta is a maintainer decision: tag a coherent milestone as
    Prerelease versions are marked prerelease; normal versions are not. Android releases
    never touch desktop updater manifests. See [ANDROID_UPDATES.md](ANDROID_UPDATES.md).
 
+If infrastructure/tooling fails before publication, the Android workflow can be
+run manually with the existing unpublished `android-vVERSION` tag. It checks out
+that exact tag and revalidates the embedded version and permanent certificate;
+do not move the tag or overwrite a published version. Build-tools 34 is pinned
+for signature reporting rather than selecting the runner's newest preview tool.
+
 ## Android signing
 
 Release APKs must be signed or they cannot be installed. Two options:

@@ -36,7 +36,8 @@ language and respects the saved reduced-motion preference.
 - 21 Android JVM tests passed, including approval/streaming timeout phases,
   version labels, receiver integrity and updater ordering/URL/hash/length policy.
 - Type-specific version and manifest tests plus desktop version/workflow tests:
-  17 Node tests passed, including the explicit signing-migration guard. Workflow
+  18 Node tests passed, including the explicit signing-migration and immutable
+  retry guards. Workflow
   YAML parses; versionName/tag/code checks pass.
 - Android lint, debug APK, unsigned release APK and test APK builds passed.
   An unsigned local release APK is not an installable signed release.
@@ -46,6 +47,9 @@ language and respects the saved reduced-motion preference.
   version `0.2.0-alpha.1`, install number 18. The Apache license and scope/notice
   files are bundled inside the APK. This is artifact validation, not a claim of
   a completed physical-phone installation.
+- The signed release APK also installed and passed emulator navigation and
+  updater-unpublished-state checks, including the plain `Alpha` release label
+  (not `Debug build`). No OS installer permission was enabled automatically.
 - Real emulator receiver regression checks passed: incoming prompt on Settings,
   two files including an empty file, decline on Transfers, malformed manifest,
   substituted header, checksum cleanup, sender cancel, concurrent requests and
@@ -97,6 +101,14 @@ An explicitly experimental Alpha may be published after automated checks and
 signed-artifact verification; remaining device-level checks below must be
 disclosed, not represented as passed. This replaces the earlier impossible
 original-key recovery requirement; it is not an assertion of production readiness.
+
+The first CI attempt stopped before publication at the certificate guard. The
+cause was independently reproduced: build-tools 37 prints `V2 Signer:` whereas
+the old parser expected `Signer #1`. Both tools report the same permanent
+certificate. Release verification now pins build-tools 34 (matching the project's
+tested toolchain), prints the public certificate report and supports manually
+retrying the existing unpublished tag without moving it. This does not weaken
+the expected-certificate comparison or create a different signing key.
 
 ## Remaining device-level acceptance
 

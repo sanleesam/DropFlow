@@ -10,6 +10,12 @@ on:
   push:
     tags:
       - 'android-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing unpublished android-vVERSION tag to build; never moves the tag'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -25,6 +31,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -40,10 +48,11 @@ jobs:
       - name: Verify Android Release Version
         id: verify-tag
         env:
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
           node --test scripts/android-version.test.mjs scripts/android-updater-manifest.test.mjs
           node scripts/android-version.mjs check "$TAG_NAME"
+          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_OUTPUT"
           VERSION=$(node scripts/android-version.mjs version)
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           echo "CHANNEL=$(node scripts/android-version.mjs channel)" >> "$GITHUB_OUTPUT"
@@ -96,11 +105,16 @@ jobs:
           VERSION: ${{ steps.verify-tag.outputs.VERSION }}
         run: |
           SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
-          SIGNER=$(ls -1 "$SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -n 1)
+          # Match the project's known build-tools version, not whichever preview
+          # tool happens to be newest on the hosted runner image.
+          SIGNER="$SDK_ROOT/build-tools/34.0.0/apksigner"
+          test -x "$SIGNER"
           AAPT="$(dirname "$SIGNER")/aapt"
           APK="DropFlow-android-${VERSION}.apk"
           EXPECTED_CERT=$(node -p 'require("./apps/android/signing-policy.json").signingCertificateSha256')
-          ACTUAL_CERT=$("$SIGNER" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          SIGNATURE_REPORT=$("$SIGNER" verify --verbose --print-certs "$APK")
+          printf '%s\n' "$SIGNATURE_REPORT"
+          ACTUAL_CERT=$(printf '%s\n' "$SIGNATURE_REPORT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
           test "$ACTUAL_CERT" = "$EXPECTED_CERT" || { echo "::error::APK does not use the published Android signing key"; exit 1; }
           BADGING=$("$AAPT" dump badging "$APK")
           ACTUAL_CODE=$(printf '%s' "$BADGING" | sed -n "s/^package: .*versionCode='\([^']*\)'.*/\1/p")
@@ -114,12 +128,15 @@ jobs:
           done
 
       - name: Generate Android Updater Manifest
-        run: node scripts/android-updater-manifest.mjs create "DropFlow-android-${{ steps.verify-tag.outputs.VERSION }}.apk" "${{ github.ref_name }}" > latest.json
+        env:
+          VERSION: ${{ steps.verify-tag.outputs.VERSION }}
+          TAG_NAME: ${{ steps.verify-tag.outputs.TAG_NAME }}
+        run: node scripts/android-updater-manifest.mjs create "DropFlow-android-${VERSION}.apk" "$TAG_NAME" > latest.json
 
       - name: Create GitHub Release and Upload APK
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ steps.verify-tag.outputs.TAG_NAME }}
           VERSION: ${{ steps.verify-tag.outputs.VERSION }}
           PRERELEASE: ${{ steps.verify-tag.outputs.PRERELEASE }}
         run: |
