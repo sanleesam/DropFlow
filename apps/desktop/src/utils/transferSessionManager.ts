@@ -12,6 +12,8 @@ export interface FileMetadataPayload {
 
 export interface ProgressPayload {
   sessionId: string;
+  direction?: "send" | "receive";
+  deviceName?: string;
   currentFileIndex?: number;
   currentFileName?: string;
   currentFileBytes?: number;
@@ -180,6 +182,7 @@ export function applyProgressEvent(
   if (!sessionId) return store;
 
   const existing = store.activeTransfers[sessionId];
+  if (store.completedSessionIds.has(sessionId) || existing?.status === "Failed" || existing?.status === "Cancelled") return store;
   const pct = payload.percentage ?? 0;
   const roundedProgress = Math.min(100, Math.max(0, Math.round(pct)));
 
@@ -209,15 +212,15 @@ export function applyProgressEvent(
   const remainingSecs = speedBytes > 0 ? remainingBytes / speedBytes : -1;
   const timeStr = formatHumanEta(remainingSecs, speedBytes);
 
-  const direction = existing?.direction ?? "receive";
+  const direction = existing?.direction ?? payload.direction ?? "receive";
   const updatedSession: ActiveTransferSession = {
     id: sessionId,
-    deviceName: existing?.deviceName ?? "Peer Device",
+    deviceName: existing?.deviceName ?? payload.deviceName ?? "Peer Device",
     fileName: existing?.fileName ?? label,
     totalFiles: fileCount,
     direction,
     progress: roundedProgress,
-    status: roundedProgress >= 100 ? "Completed" : direction === "receive" ? "Receiving..." : "Sending...",
+    status: roundedProgress >= 100 ? "Finishing..." : direction === "receive" ? "Receiving..." : "Sending...",
     speed: speedStr,
     timeRemaining: timeStr,
     bytesInfo: bytesStr,
@@ -378,9 +381,11 @@ export function applyFailureEvent(
 ): SessionStateStore {
   const { sessionId, error } = payload;
   if (!sessionId) return store;
+  if (store.completedSessionIds.has(sessionId)) return store;
 
   const active = store.activeTransfers[sessionId];
   if (!active) return store;
+  if (active.status === "Cancelled") return store;
 
   const isCancelled = error ? /cancell?ed/i.test(error) : false;
 
@@ -396,6 +401,12 @@ export function applyFailureEvent(
       ...store.activeTransfers,
       [sessionId]: updatedActive,
     },
+    recentTransfers: isCancelled ? store.recentTransfers : [{
+      id: sessionId, fileName: active.fileName, deviceName: active.deviceName,
+      size: "Incomplete", timestamp: "Just now", timestampMs: Date.now(),
+      status: "failed" as const, direction: active.direction, totalFiles: active.totalFiles,
+      files: active.completedFiles, receiveDir: active.receiveDir, error: updatedActive.error,
+    }, ...store.recentTransfers.filter((item) => item.id !== sessionId)].slice(0, MAX_HISTORY_CAPACITY),
   };
 }
 

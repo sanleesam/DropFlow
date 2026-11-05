@@ -49,7 +49,7 @@ fn inside_home(path: &Path) -> Result<PathBuf, String> {
 
 fn plain_name(name: &str) -> Result<&str, String> {
     let name = name.trim();
-    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
+    if name.is_empty() || crate::transfer_manager::security::sanitize_filename(name) != name {
         return Err("Use a plain file name".into());
     }
     Ok(name)

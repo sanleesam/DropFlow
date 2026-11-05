@@ -125,7 +125,12 @@ export const FilesPage: React.FC = () => {
     invoke<FolderRoots>("get_user_folders")
       .then((next) => {
         setRoots(next);
-        const start = settings.receiveDirectory || next.desktop || next.home;
+        // The browser is home-scoped; external receive folders open in the OS.
+        const normalized = (path: string) => path.replace(/\\/g, "/").replace(/\/$/, "");
+        const home = normalized(next.home);
+        const receive = normalized(settings.receiveDirectory);
+        const inHome = receive === home || receive.startsWith(home + "/");
+        const start = settings.receiveDirectory && inHome ? settings.receiveDirectory : next.downloads || next.home;
         setCwd(start);
       })
       .catch(() =>

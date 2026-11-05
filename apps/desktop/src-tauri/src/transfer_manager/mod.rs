@@ -8,3 +8,4 @@ pub use engine::{cancel_transfer, get_receive_dir, get_receiver_port, send_files
 pub use receiver::TransferReceiver;
 mod selection;
 mod validation;
+mod lifecycle;

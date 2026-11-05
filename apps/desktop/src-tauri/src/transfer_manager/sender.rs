@@ -83,6 +83,7 @@ pub fn send_files_over_tcp(
     .map_err(|e| format!("Failed to connect to peer at {target_socket_addr}: {e}"))?;
 
     info!("[Sender] CONNECTED to {target_socket_addr}");
+    let _cancellation = super::lifecycle::SocketCancellation::watch(&stream,cancel_flag.clone())?;
 
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))
@@ -132,9 +133,13 @@ pub fn send_files_over_tcp(
     let (resp_tag, resp_len) = read_frame_header(&mut stream)
         .map_err(|e| format!("Failed to read peer acceptance response header: {e}"))?;
 
+    let mut resp_payload = vec![0u8; resp_len as usize];
+    stream.read_exact(&mut resp_payload).map_err(|e|format!("Failed to read peer response: {e}"))?;
     if resp_tag != FrameTag::TransferAccept {
         let err_msg = if resp_tag == FrameTag::TransferReject {
-            "Transfer declined by recipient".to_string()
+            if String::from_utf8_lossy(&resp_payload).to_lowercase().contains("busy") {
+                "The other device is busy. Try again shortly.".to_string()
+            } else { "Transfer declined by recipient".to_string() }
         } else {
             format!("Peer rejected transfer with frame tag {:?}", resp_tag)
         };
@@ -148,12 +153,6 @@ pub fn send_files_over_tcp(
         return Err(err_msg);
     }
 
-    let mut resp_payload = vec![0u8; resp_len as usize];
-    if resp_len > 0 {
-        stream
-            .read_exact(&mut resp_payload)
-            .map_err(|e| format!("Failed to read peer response payload: {e}"))?;
-    }
     info!("[Sender] ACCEPT_RECEIVED");
     stream.set_read_timeout(Some(Duration::from_secs(15)))
         .map_err(|e| format!("Failed to restore streaming timeout: {e}"))?;
@@ -283,6 +282,8 @@ pub fn send_files_over_tcp(
                     "transfer-progress",
                     TransferProgressPayload {
                         session_id: session_id.clone(),
+                        direction: "send".into(),
+                        device_name: peer_address.into(),
                         current_file_index: idx as u32,
                         current_file_name: file_meta.relative_path.clone(),
                         current_file_bytes: file_bytes_sent,

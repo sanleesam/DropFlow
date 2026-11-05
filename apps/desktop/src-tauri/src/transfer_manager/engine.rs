@@ -78,23 +78,24 @@ pub async fn send_files(
     local_device_name: String,
     file_paths: Vec<String>,
 ) -> Result<String, String> {
-    let cancel_flag = Arc::new(AtomicBool::new(false));
-
     let target_session_id = session_id.unwrap_or_else(|| format!("tx-{}", uuid::Uuid::new_v4()));
-    {
+    let limit = app.state::<crate::state_manager::AppStateContainer>().state.lock()
+        .map_err(|e|e.to_string())?.settings.max_concurrent_transfers as usize;
+    let cancel_flag = {
         let mut cancellations = state
             .active_cancellations
             .lock()
             .map_err(|e| e.to_string())?;
-        cancellations.insert(target_session_id.clone(), Arc::clone(&cancel_flag));
-    }
+        super::lifecycle::register_session(&mut cancellations, &target_session_id, limit)?
+    };
 
     let cancel_flag_clone = Arc::clone(&cancel_flag);
     let session_id_param = target_session_id.clone();
+    let transfer_app = app.clone();
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         send_files_over_tcp(
-            &app,
+            &transfer_app,
             &peer_address,
             peer_port,
             &local_uuid,
@@ -104,8 +105,7 @@ pub async fn send_files(
             Some(session_id_param),
         )
     })
-    .await
-    .map_err(|e| format!("Transfer task failed to join: {e}"))?;
+    .await;
 
     {
         let mut cancellations = state
@@ -115,6 +115,11 @@ pub async fn send_files(
         cancellations.remove(&target_session_id);
     }
 
+    let result=result.map_err(|e| format!("Transfer task failed to join: {e}"))?;
+    if result.is_err() {
+        crate::state_manager::remove_incomplete_session(&app, &target_session_id);
+        if cancel_flag.load(Ordering::Relaxed) { return Err("Transfer cancelled by user".into()); }
+    }
     result
 }
 
@@ -124,17 +129,9 @@ pub fn cancel_transfer(state: State<'_, TransferState>, session_id: String) -> R
         .active_cancellations
         .lock()
         .map_err(|e| e.to_string())?;
-    if let Some(flag) = cancellations.get(&session_id) {
-        flag.store(true, Ordering::Relaxed);
-        info!("[Engine] Cancel requested for session {session_id}");
-        Ok(())
-    } else {
-        // If exact session_id is not mapped, set all active cancellations to true
-        for flag in cancellations.values() {
-            flag.store(true, Ordering::Relaxed);
-        }
-        Ok(())
-    }
+    super::lifecycle::cancel_session(&cancellations, &session_id);
+    info!("[Engine] Cancel requested for session {session_id}");
+    Ok(())
 }
 
 #[tauri::command]

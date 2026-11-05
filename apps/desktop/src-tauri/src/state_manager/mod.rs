@@ -135,7 +135,7 @@ impl Default for UserSettings {
             ask_before_overwrite: true,
             auto_open_completed: false,
             require_confirmation: true,
-            auto_accept_trusted_devices: true,
+            auto_accept_trusted_devices: false,
             update_channel: UpdateChannel::Beta,
         }
     }
@@ -228,6 +228,15 @@ pub fn load_or_create_state_at_path(path: &PathBuf) -> AppStateSchema {
 
                         // Migrate legacy trusted device platform entries
                         let mut state_modified = false;
+                        if parsed.settings.auto_accept_trusted_devices {
+                            parsed.settings.auto_accept_trusted_devices = false;
+                            state_modified = true;
+                        }
+                        let limit = parsed.settings.max_concurrent_transfers.clamp(1, 8);
+                        if limit != parsed.settings.max_concurrent_transfers {
+                            parsed.settings.max_concurrent_transfers = limit;
+                            state_modified = true;
+                        }
                         for device in &mut parsed.trusted_devices {
                             if device.platform == "Desktop/Mobile" || device.platform.is_empty() {
                                 device.platform = "Desktop".to_string();
@@ -311,8 +320,11 @@ pub fn get_app_state(container: State<'_, AppStateContainer>) -> Result<AppState
 pub fn save_settings(
     app: AppHandle,
     container: State<'_, AppStateContainer>,
-    settings: UserSettings,
+    mut settings: UserSettings,
 ) -> Result<(), String> {
+    // A DFP/1 peer name/UUID is not authenticated. Retain records, never bypass approval.
+    settings.auto_accept_trusted_devices = false;
+    settings.max_concurrent_transfers = settings.max_concurrent_transfers.clamp(1, 8);
     let mut state = container.state.lock().map_err(|e| e.to_string())?;
     let old_channel = state.settings.update_channel;
     state.settings = settings.clone();

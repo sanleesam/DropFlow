@@ -172,7 +172,7 @@ export const AppShell: React.FC = () => {
         </div>
       </div>
       {incoming && (
-        <IncomingTransferModal request={incoming} onClose={closeIncoming} />
+        <IncomingTransferModal key={incoming.sessionId} request={incoming} onClose={closeIncoming} />
       )}
     </div>
   );

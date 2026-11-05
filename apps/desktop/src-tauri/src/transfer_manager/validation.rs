@@ -3,7 +3,7 @@ use super::protocol::{FileHeaderPayload, TransferMetadata};
 use super::security::sanitize_relative_path;
 
 pub fn validate_request(meta: &TransferMetadata) -> Result<(), String> {
-    if meta.session_id.is_empty() || meta.total_files == 0 || meta.total_files as usize != meta.files.len() {
+    if meta.session_id.is_empty() || meta.session_id.len() > 128 || meta.total_files == 0 || meta.total_files as usize != meta.files.len() {
         return Err("Invalid transfer session or file count".into());
     }
     let mut total = 0u64;

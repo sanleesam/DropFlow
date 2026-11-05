@@ -26,7 +26,7 @@ function assertTrue(condition: boolean, message: string) {
 }
 
 export function runLifecycleTests() {
-  console.log("Running Transfer Session Lifecycle Tests (10 Scenarios)...");
+  console.log("Running Transfer Session Lifecycle Tests (21 Scenarios)...");
 
   // ── Scenario 1: create → progress → complete ────────────────────────────────
   {
@@ -135,7 +135,10 @@ export function runLifecycleTests() {
     store = applyFailureEvent(store, { sessionId: "tx-6", error: "Connection reset by peer" });
     assertTrue(store.activeTransfers["tx-6"].status === "Failed", "S6: Status set to Failed");
     assertTrue(store.activeTransfers["tx-6"].error === "Connection reset by peer", "S6: Error message preserved");
-    assertEqual(store.recentTransfers.length, 0, "S6: No recent transfer added on failure");
+    assertEqual(store.recentTransfers.length, 1, "S6: Failed transfer is retained in history");
+    assertEqual(store.recentTransfers[0].status,"failed","S6: Failed tab has a terminal record");
+    store=applyFailureEvent(store,{sessionId:"tx-6",error:"Connection reset by peer"});
+    assertEqual(store.recentTransfers.length,1,"S6: Duplicate error does not duplicate history");
   }
 
   // ── Scenario 7: cancellation ────────────────────────────────────────────────
@@ -392,6 +395,28 @@ export function runLifecycleTests() {
     assertEqual(store.recentTransfers.length, 0, "S18: Recent transfers cleared completely");
   }
 
+  // 19: byte progress is not a verified/saved final acknowledgement.
+  {
+    let store=createInitialSessionStore();
+    store=applyProgressEvent(store,{sessionId:"rx-finalizing",deviceName:"Peer",direction:"receive",percentage:100});
+    assertEqual(store.activeTransfers["rx-finalizing"].status,"Finishing...","100% is still finishing");
+    assertEqual(store.recentTransfers.length,0,"No success before final acknowledgement");
+    store=applyFailureEvent(store,{sessionId:"rx-finalizing",error:"Disk full"});
+    assertEqual(store.activeTransfers["rx-finalizing"].status,"Failed","Finalization error remains visible");
+  }
+  // 20: buffered progress cannot resurrect a failed/cancelled operation.
+  for (const error of ["Connection reset","Transfer cancelled by user"]) {
+    let store=startSendSession(createInitialSessionStore(),"terminal","Peer","a",1);
+    store=applyFailureEvent(store,{sessionId:"terminal",error});
+    const after=applyProgressEvent(store,{sessionId:"terminal",percentage:80});
+    assertTrue(after===store,"Late progress leaves terminal state unchanged");
+  }
+  // 21: a stale error cannot undo a verified completion.
+  {
+    const store=applyCompletionEvent(createInitialSessionStore(),{sessionId:"verified",fileName:"a"});
+    assertTrue(applyFailureEvent(store,{sessionId:"verified",error:"late"})===store,"Verified completion is terminal");
+    assertTrue(applyProgressEvent(store,{sessionId:"verified",percentage:50})===store,"Completed progress is terminal");
+  }
   console.log("All Transfer Session Lifecycle & Path Propagation Tests PASSED cleanly! ✓");
 }
 
