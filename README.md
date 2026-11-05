@@ -38,7 +38,7 @@ by different tag prefixes — never tag both platforms with the same ref:
 | Platform | Tag example | Workflow | Artifact |
 | --- | --- | --- | --- |
 | Desktop Beta | `v0.1.1-beta.19` | `.github/workflows/release-beta.yml` | Updater-signed bundles + `latest.json` |
-| Android | `android-v0.2.0-alpha.1` | `.github/workflows/release-android.yml` | Same-key signed APK + Android-only updater manifest |
+| Android | `android-v0.2.0-alpha.1` | `.github/workflows/release-android.yml` | Permanently signed APK + Android-only updater manifest |
 
 ### Completed
 
@@ -187,3 +187,18 @@ Current priorities are:
 ## Project Goal
 
 Build a fast, reliable and maintainable peer-to-peer file transfer application that provides a seamless experience across macOS, Windows and Android while keeping every transfer completely local.
+
+## License and contributions
+
+DropFlow's original code and documentation are open source under
+[Apache-2.0](LICENSE). You may use, modify and redistribute that code, including
+commercially, subject to the license's notice and other requirements. There is
+no warranty. Contributors keep copyright in their work.
+
+Third-party components retain their own terms, including GSAP's Standard
+License. The existing desktop illustration pack has unresolved provenance and
+is excluded from this license grant. See [NOTICE](NOTICE) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for scope, attribution and branding
+details. We do not claim that all bundled artwork/dependencies are Apache-2.0.
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes.

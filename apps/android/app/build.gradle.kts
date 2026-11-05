@@ -18,8 +18,19 @@ val keystoreProperties = Properties().apply {
 }
 val hasReleaseSigning = keystoreProperties.getProperty("storeFile") != null
 
+// Ship the project's license/notice files with every APK, not only in Git.
+val licenseAssets = layout.buildDirectory.dir("generated/licenseAssets")
+val generateLicenseAssets by tasks.registering(Sync::class) {
+    from(rootProject.projectDir.resolve("../..")) {
+        include("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")
+        into("licenses")
+    }
+    into(licenseAssets)
+}
+
 android {
     namespace = "com.dropflow.android"
+    sourceSets.getByName("main").assets.srcDir(licenseAssets)
     compileSdk = 34
 
     defaultConfig {
@@ -84,6 +95,8 @@ android {
         }
     }
 }
+
+tasks.named("preBuild").configure { dependsOn(generateLicenseAssets) }
 
 dependencies {
     implementation(libs.androidx.core.ktx)
