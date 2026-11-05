@@ -149,6 +149,17 @@ impl std::ops::Deref for PartialFiles { type Target=Vec<PathBuf>; fn deref(&self
 impl std::ops::DerefMut for PartialFiles { fn deref_mut(&mut self)->&mut Self::Target { &mut self.0 } }
 impl Drop for PartialFiles { fn drop(&mut self) { cleanup_files(&self.0); } }
 
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+    #[test] fn partial_files_are_cleaned_when_any_error_unwinds_the_session() {
+        let root=std::env::temp_dir().join(format!("dropflow-cleanup-{}",uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();let part=root.join("test.dropflow-part");fs::write(&part,b"partial").unwrap();
+        { let _files=PartialFiles(vec![part.clone()]); }
+        assert!(!part.exists());fs::remove_dir(root).unwrap();
+    }
+}
+
 struct CancellationGuard<'a> {
     app: &'a AppHandle,
     session_id: String,

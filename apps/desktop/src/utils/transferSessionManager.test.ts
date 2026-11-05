@@ -341,8 +341,9 @@ export function runLifecycleTests() {
     assertEqual(store.activeTransfers["tx-c1"].status, "Sending...", "S15: Session 1 remains active sending");
     assertEqual(store.activeTransfers["tx-c2"].status, "Completed", "S15: Session 2 completed");
     assertEqual(store.activeTransfers["tx-c3"].status, "Failed", "S15: Session 3 failed with timeout");
-    assertEqual(store.recentTransfers.length, 1, "S15: Only completed session added to recent transfers");
-    assertEqual(store.recentTransfers[0].id, "tx-c2", "S15: Correct session in recent transfers");
+    assertEqual(store.recentTransfers.length, 2, "S15: Completed and failed sessions retained");
+    assertEqual(store.recentTransfers[0].id, "tx-c3", "S15: Latest failure is visible");
+    assertEqual(store.recentTransfers[1].id, "tx-c2", "S15: Completed session is preserved");
   }
 
   // ── Scenario 16: Human-Friendly ETA Formatting ────────────────────────────

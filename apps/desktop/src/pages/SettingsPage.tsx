@@ -185,6 +185,13 @@ export function SettingsPage() {
                     </span>
                   }
                 >
+                  <div style={{display: "flex", gap: 8}}>
+                  <button type="button" className="df-btn df-btn-soft df-btn-sm"
+                    onClick={() => invoke<string>("get_receive_dir")
+                      .then((path) => invoke("open_received_file", {path}))
+                      .catch(() => addToast("Couldn't open the receive folder.", "error"))}>
+                    <FolderOpen size={14} /> Open
+                  </button>
                   <button
                     type="button"
                     className="df-btn df-btn-soft df-btn-sm"
@@ -193,6 +200,7 @@ export function SettingsPage() {
                     <FolderOpen size={14} />
                     Change
                   </button>
+                  </div>
                 </SettingRow>
                 <SettingRow
                   title="Open received folder"

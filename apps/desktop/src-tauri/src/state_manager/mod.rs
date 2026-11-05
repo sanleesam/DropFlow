@@ -481,6 +481,26 @@ mod tests {
     }
 
     #[test]
+    fn legacy_trust_migration_preserves_records_but_never_bypasses_approval() {
+        let dir=create_test_temp_dir();let path=dir.join("state.json");
+        let mut original=load_or_create_state_at_path(&path);
+        original.settings.auto_accept_trusted_devices=true;
+        original.settings.max_concurrent_transfers=999;
+        original.trusted_devices.push(TrustedDeviceSchema {
+            device_id:"remembered".into(),device_name:"Peer".into(),first_seen:"Test".into(),last_seen:"Test".into(),public_key:None,platform:"Desktop".into(),
+        });
+        save_state_atomic_at_path(&path,&original).unwrap();
+        let migrated=load_or_create_state_at_path(&path);
+        assert!(!migrated.settings.auto_accept_trusted_devices);
+        assert!(migrated.settings.require_confirmation);
+        assert_eq!(migrated.settings.max_concurrent_transfers,8);
+        assert_eq!(migrated.trusted_devices,original.trusted_devices);
+        assert_eq!(migrated.device_uuid,original.device_uuid);
+        assert!(!load_or_create_state_at_path(&path).settings.auto_accept_trusted_devices);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn test_load_nonexistent_creates_default_and_persists() {
         let dir = create_test_temp_dir();
         let state_path = dir.join("state.json");
