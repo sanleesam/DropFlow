@@ -25,3 +25,12 @@ test("Android pins certificate tooling and retries an existing immutable tag", (
   assert.doesNotMatch(android, /git (?:tag.*--force|push.*--force)/);
   assert.ok(android.includes('require("./apps/android/signing-policy.json").signingCertificateSha256'));
 });
+
+test("Beta stays draft until both platforms pass and the merged manifest exists", () => {
+  const beta=readFileSync(new URL("../.github/workflows/release-beta.yml",import.meta.url),"utf8");
+  assert.match(beta,/releaseDraft: true/);
+  assert.match(beta,/needs: publish-beta/);
+  assert.ok(beta.includes('codesign --verify --deep --strict'));
+  assert.ok(beta.indexOf('gh release edit "${{ github.ref_name }}" --draft=false') > beta.indexOf('gh release upload "${{ github.ref_name }}" latest.json'));
+  assert.ok(beta.indexOf('gh release upload beta latest.json') > beta.indexOf('--draft=false'));
+});

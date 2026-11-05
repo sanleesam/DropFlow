@@ -11,6 +11,10 @@ on:
     tags:
       - 'v*-beta.*'
 
+concurrency:
+  group: release-beta
+  cancel-in-progress: false
+
 jobs:
   publish-beta:
     if: startsWith(github.ref_name, 'v')
@@ -77,6 +81,8 @@ jobs:
           projectPath: ./apps/desktop
           args: ${{ matrix.args }}
           tagName: ${{ github.ref_name }}
+          releaseCommitish: ${{ github.sha }}
+          releaseDraft: true
           releaseName: 'DropFlow ${{ github.ref_name }}'
           releaseBody: |
             DropFlow beta release ${{ github.ref_name }}
@@ -85,6 +91,14 @@ jobs:
           prerelease: true
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+
+      - name: Verify macOS App Bundle Signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP="apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/DropFlow.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --display --verbose=2 "$APP"
 
       # tauri-action writes its latest.json for THIS platform to the workspace
       # root. Sanity-check our own platform entry, then publish it as a uniquely
@@ -261,6 +275,10 @@ jobs:
           print("\n".join(lines))
           EOF
 
+          VERSIONED_NOTES="docs/releases/desktop-${GITHUB_REF_NAME#v}.md"
+          if [ -f "$VERSIONED_NOTES" ]; then
+            cp "$VERSIONED_NOTES" /tmp/beta-notes.md
+          fi
           if [ -f /tmp/beta-notes.md ]; then
             gh release edit "${{ github.ref_name }}" --notes-file /tmp/beta-notes.md
           fi
@@ -270,6 +288,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ github.ref_name }}" latest.json --clobber
+          gh release edit "${{ github.ref_name }}" --draft=false
 
       - name: Publish Merged Manifest to Beta Channel Floating Tag
         env:

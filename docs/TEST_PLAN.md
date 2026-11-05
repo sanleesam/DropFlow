@@ -1,11 +1,14 @@
-# DropFlow Beta 1 — Manual Test Plan
+# DropFlow — Physical-device acceptance plan
 
 Run every case on real hardware: **Android phone**, **Windows PC**, **MacBook**.
 All devices must be on the same Wi-Fi network (no guest network, no AP
 isolation, no VPN). Builds under test (versioned independently per platform):
 
-- Desktop: `0.1.0-beta.15`
-- Android: `0.1.0-beta.1`
+- Desktop candidate: `0.1.2-beta.20`
+- Android published preview: `0.2.0-alpha.1`
+
+Blank cells remain unverified. Current automated/native-loopback evidence is in
+`DESKTOP_0.1.2_VALIDATION.md`; it does not fill the physical-device matrix below.
 
 Legend per cell: **P** = pass, **F** = fail (note the log file:
 `<app data>/logs/dropflow.log` on desktop), **S** = skipped.
@@ -63,7 +66,7 @@ Android → macOS, macOS → Android, Windows → macOS, macOS → Windows.
 | 3.1 | Incoming prompt appears; Accept starts transfer ≤ 2 s | |
 | 3.2 | Decline: sender shows "declined" (Android) / failure toast (desktop); no partial files on receiver | |
 | 3.3 | Ignore prompt 60 s: request times out on both sides | |
-| 3.4 | "Trust device" + Accept: next transfer from that device auto-accepts (same app session) | |
+| 3.4 | Desktop: remember a device + Accept; the next transfer still requires approval. A matching name/ID must not bypass confirmation. | |
 | 3.5 | Android Settings → "Require confirmation" off: all incoming transfers auto-accept | |
 
 ## 4. Cancellation and failures
@@ -74,7 +77,7 @@ Android → macOS, macOS → Android, Windows → macOS, macOS → Windows.
 | 4.2 | Cancel from receiver mid-transfer: sender shows failure; no partial files | |
 | 4.3 | Sender goes offline mid-transfer (airplane mode): receiver fails cleanly ≤ 20 s | |
 | 4.4 | Network interruption (Wi-Fi drop 10 s) mid-transfer: session fails with clear error, retry works | |
-| 4.5 | Slow accept (> 15 s on desktop prompt): sender times out with clear message (known limitation) | |
+| 4.5 | Slow accept (20–50 s): sender waits successfully. Ignoring the desktop prompt rejects after 60 s; sender wait is bounded at 75 s. | |
 | 4.6 | Concurrent: send A→B while B receives from C (desktop) or queue behaves sanely (Android serializes) | |
 
 ## 5. History and state
@@ -93,10 +96,9 @@ Android → macOS, macOS → Android, Windows → macOS, macOS → Windows.
 Desktop: `<app data>/logs/dropflow.log` — attach to bug reports. Android:
 `adb logcat -s DropFlow*` — attach to bug reports.
 
-## Known limitations going into Beta 2
+## Current known limitations
 
-- Slow accept: a desktop user taking > 15 s to accept fails the sender's wait
-  (matches the reference implementation; bump the desktop authorization read
-  timeout in Beta 2).
+- Authenticated pairing/encrypted transfers and a user-facing resume workflow
+  are not implemented. Desktop remembered-device auto-accept is disabled.
 - Android history and trusted devices are session-scoped (persistence planned).
 - Android notifications are not wired yet (planned).
