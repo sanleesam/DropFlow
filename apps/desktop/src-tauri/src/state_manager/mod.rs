@@ -135,7 +135,7 @@ impl Default for UserSettings {
             ask_before_overwrite: true,
             auto_open_completed: false,
             require_confirmation: true,
-            auto_accept_trusted_devices: true,
+            auto_accept_trusted_devices: false,
             update_channel: UpdateChannel::Beta,
         }
     }
@@ -228,6 +228,15 @@ pub fn load_or_create_state_at_path(path: &PathBuf) -> AppStateSchema {
 
                         // Migrate legacy trusted device platform entries
                         let mut state_modified = false;
+                        if parsed.settings.auto_accept_trusted_devices {
+                            parsed.settings.auto_accept_trusted_devices = false;
+                            state_modified = true;
+                        }
+                        let limit = parsed.settings.max_concurrent_transfers.clamp(1, 8);
+                        if limit != parsed.settings.max_concurrent_transfers {
+                            parsed.settings.max_concurrent_transfers = limit;
+                            state_modified = true;
+                        }
                         for device in &mut parsed.trusted_devices {
                             if device.platform == "Desktop/Mobile" || device.platform.is_empty() {
                                 device.platform = "Desktop".to_string();
@@ -311,8 +320,11 @@ pub fn get_app_state(container: State<'_, AppStateContainer>) -> Result<AppState
 pub fn save_settings(
     app: AppHandle,
     container: State<'_, AppStateContainer>,
-    settings: UserSettings,
+    mut settings: UserSettings,
 ) -> Result<(), String> {
+    // A DFP/1 peer name/UUID is not authenticated. Retain records, never bypass approval.
+    settings.auto_accept_trusted_devices = false;
+    settings.max_concurrent_transfers = settings.max_concurrent_transfers.clamp(1, 8);
     let mut state = container.state.lock().map_err(|e| e.to_string())?;
     let old_channel = state.settings.update_channel;
     state.settings = settings.clone();
@@ -466,6 +478,26 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("dropflow_test_{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn legacy_trust_migration_preserves_records_but_never_bypasses_approval() {
+        let dir=create_test_temp_dir();let path=dir.join("state.json");
+        let mut original=load_or_create_state_at_path(&path);
+        original.settings.auto_accept_trusted_devices=true;
+        original.settings.max_concurrent_transfers=999;
+        original.trusted_devices.push(TrustedDeviceSchema {
+            device_id:"remembered".into(),device_name:"Peer".into(),first_seen:"Test".into(),last_seen:"Test".into(),public_key:None,platform:"Desktop".into(),
+        });
+        save_state_atomic_at_path(&path,&original).unwrap();
+        let migrated=load_or_create_state_at_path(&path);
+        assert!(!migrated.settings.auto_accept_trusted_devices);
+        assert!(migrated.settings.require_confirmation);
+        assert_eq!(migrated.settings.max_concurrent_transfers,8);
+        assert_eq!(migrated.trusted_devices,original.trusted_devices);
+        assert_eq!(migrated.device_uuid,original.device_uuid);
+        assert!(!load_or_create_state_at_path(&path).settings.auto_accept_trusted_devices);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

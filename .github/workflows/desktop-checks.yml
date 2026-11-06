@@ -1,0 +1,42 @@
+name: Desktop Checks
+
+on:
+  pull_request:
+    paths:
+      - 'apps/desktop/**'
+      - 'scripts/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Frontend and version checks
+        working-directory: apps/desktop
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test:ui
+          pnpm build
+      - name: Release tooling regression checks
+        run: node --test scripts/desktop-version.test.mjs scripts/resolve-development-version.test.mjs scripts/release-workflow.test.mjs
+      - name: Rust regressions including cancellation
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib

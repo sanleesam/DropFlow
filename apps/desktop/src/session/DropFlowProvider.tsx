@@ -169,7 +169,8 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             addToast(`Received ${payload.fileName || "a file"} from ${payload.deviceName || "a nearby device"}`, "success");
             notifyDesktop("DropFlow", `${payload.fileName || "File"} received from ${payload.deviceName || "a nearby device"}`);
             if (settings.autoOpenCompleted) {
-              const targetPath = payload.finalPath || payload.receiveDir || payload.filePath;
+              // Auto-open only the containing folder, never execute received content.
+              const targetPath = payload.receiveDir;
               if (targetPath) invoke("open_received_file", { path: targetPath }).catch(console.error);
             }
           }

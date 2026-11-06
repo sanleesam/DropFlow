@@ -2,7 +2,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -15,10 +15,10 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::protocol::{
     perform_incoming_handshake, read_file_complete, read_file_header, read_frame_header,
     read_transfer_request, write_response_frame, write_transfer_ack, FileMetadata, FrameTag,
-    TransferAckPayload, DEFAULT_CHUNK_SIZE,
+    TransferAckPayload, TransferMetadata, DEFAULT_CHUNK_SIZE,
 };
 use super::security::{
-    get_session_part_file_path, resolve_collision_path,
+    get_session_part_file_path, publish_received_file,
     sanitize_relative_path, verify_safe_target_path,
 };
 
@@ -38,6 +38,8 @@ pub struct IncomingTransferRequestPayload {
 #[serde(rename_all = "camelCase")]
 pub struct TransferProgressPayload {
     pub session_id: String,
+    pub direction: String,
+    pub device_name: String,
     pub current_file_index: u32,
     pub current_file_name: String,
     pub current_file_bytes: u64,
@@ -92,6 +94,7 @@ impl TransferReceiver {
 
         let is_running = Arc::new(AtomicBool::new(true));
         let running_flag = Arc::clone(&is_running);
+        let connection_count = Arc::new(AtomicUsize::new(0));
 
         thread::spawn(move || {
             info!("[Receiver] TCP receiver listening on port {bound_port}");
@@ -102,8 +105,10 @@ impl TransferReceiver {
 
                 match stream_result {
                     Ok(mut stream) => {
+                        let Some(permit) = super::lifecycle::ConnectionPermit::acquire(&connection_count) else { continue; };
                         let app = app_handle.clone();
                         thread::spawn(move || {
+                            let _permit = permit;
                             if let Err(err) = handle_incoming_connection(&app, &mut stream) {
                                 error!("[Receiver] Connection error: {err}");
                             }
@@ -139,6 +144,22 @@ fn cleanup_files(part_files: &[PathBuf]) {
     }
 }
 
+struct PartialFiles(Vec<PathBuf>);
+impl std::ops::Deref for PartialFiles { type Target=Vec<PathBuf>; fn deref(&self)->&Self::Target { &self.0 } }
+impl std::ops::DerefMut for PartialFiles { fn deref_mut(&mut self)->&mut Self::Target { &mut self.0 } }
+impl Drop for PartialFiles { fn drop(&mut self) { cleanup_files(&self.0); } }
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+    #[test] fn partial_files_are_cleaned_when_any_error_unwinds_the_session() {
+        let root=std::env::temp_dir().join(format!("dropflow-cleanup-{}",uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();let part=root.join("test.dropflow-part");fs::write(&part,b"partial").unwrap();
+        { let _files=PartialFiles(vec![part.clone()]); }
+        assert!(!part.exists());fs::remove_dir(root).unwrap();
+    }
+}
+
 struct CancellationGuard<'a> {
     app: &'a AppHandle,
     session_id: String,
@@ -161,61 +182,73 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     let _sleep_guard = app
         .try_state::<crate::power_manager::SleepState>()
         .map(|s| s.sleep_manager.acquire());
+    let mut stream = super::transport::CancellableStream::new(stream,Arc::new(AtomicBool::new(false)))
+        .map_err(|e|e.to_string())?;
 
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))
         .map_err(|e| format!("Failed to set socket read timeout: {e}"))?;
+    stream.set_write_timeout(Some(Duration::from_secs(15))).map_err(|e|e.to_string())?;
 
-    perform_incoming_handshake(stream)?;
+    perform_incoming_handshake(&mut stream)?;
     info!("[Receiver] HANDSHAKE_COMPLETE");
 
     // 1. Read TransferRequest metadata frame
-    let metadata = read_transfer_request(stream)?;
+    let metadata = read_transfer_request(&mut stream)?;
     super::validation::validate_request(&metadata)?;
     info!("[Receiver] REQUEST_RECEIVED from '{}' ({} files, {} bytes)",
         metadata.sender_name, metadata.total_files, metadata.total_size_bytes
     );
 
-    let cancel_flag = Arc::new(AtomicBool::new(false));
-    if let Some(state) = app.try_state::<crate::transfer_manager::TransferState>() {
-        if let Ok(mut cancellations) = state.active_cancellations.lock() {
-            cancellations.insert(metadata.session_id.clone(), Arc::clone(&cancel_flag));
-        }
-    }
+    let container = app.try_state::<crate::state_manager::AppStateContainer>().ok_or("Receiver state is not ready")?;
+    let limit = container.state.lock()
+        .map_err(|e|e.to_string())?.settings.max_concurrent_transfers as usize;
+    let state = app.try_state::<crate::transfer_manager::TransferState>().ok_or("Receiver state is not ready")?;
+    let claim = {
+        let mut active = state.active_cancellations.lock().map_err(|e|e.to_string())?;
+        super::lifecycle::register_session(&mut active, &metadata.session_id, limit)
+    };
+    let cancel_flag = match claim { Ok(flag)=>flag, Err(error)=> { write_response_frame(&mut stream,FrameTag::TransferReject,&error)?; return Err(error); } };
     let _guard = CancellationGuard {
         app,
         session_id: metadata.session_id.clone(),
     };
+    stream.set_cancellation(cancel_flag.clone());
+
+    let result=receive_session(app,&mut stream,&metadata,cancel_flag.clone())
+        .map_err(|error| if cancel_flag.load(Ordering::Relaxed) { "Transfer cancelled".into() } else { error });
+    super::lifecycle::report_result(result, |error| {
+        let _ = app.emit("transfer-failed", TransferFailedPayload { session_id: metadata.session_id.clone(), error: error.into() });
+        crate::state_manager::remove_incomplete_session(app,&metadata.session_id);
+    })
+}
+
+fn receive_session(app: &AppHandle, stream: &mut super::transport::CancellableStream<'_>, metadata: &TransferMetadata, cancel_flag: Arc<AtomicBool>) -> Result<(),String> {
 
     // 2. Check authorization settings & trusted devices
-    let (require_confirmation, auto_accept_trusted, is_trusted) = {
+    let require_confirmation = {
         if let Some(container) = app.try_state::<crate::state_manager::AppStateContainer>() {
             if let Ok(state) = container.state.lock() {
-                let req = state.settings.require_confirmation;
-                let auto_t = state.settings.auto_accept_trusted_devices;
-                let trusted = state.trusted_devices.iter().any(|d| {
-                    (!d.device_id.is_empty() && d.device_id == metadata.sender_id)
-                        || (!d.device_name.is_empty()
-                            && d.device_name.to_lowercase() == metadata.sender_name.to_lowercase())
-                });
-                (req, auto_t, trusted)
+                state.settings.require_confirmation
             } else {
-                (true, true, false)
+                true
             }
         } else {
-            (true, true, false)
+            true
         }
     };
 
-    let should_auto_accept = !require_confirmation || (is_trusted && auto_accept_trusted);
-
-    if !should_auto_accept {
+    if super::lifecycle::needs_approval(require_confirmation, false, false) {
         let (tx, rx) = tokio::sync::oneshot::channel::<super::engine::AuthorizationResponse>();
 
-        if let Some(state) = app.try_state::<crate::transfer_manager::TransferState>() {
-            if let Ok(mut pending) = state.pending_authorizations.lock() {
-                pending.insert(metadata.session_id.clone(), tx);
+        {
+            let state=app.state::<crate::transfer_manager::TransferState>();
+            let mut pending=state.pending_authorizations.lock().map_err(|e|e.to_string())?;
+            if !pending.is_empty() {
+                write_response_frame(stream,FrameTag::TransferReject,"BUSY: Another incoming request is awaiting approval")?;
+                return Err("Busy: another incoming request is awaiting approval".into());
             }
+            pending.insert(metadata.session_id.clone(), tx);
         }
 
         let _ = app.emit(
@@ -281,6 +314,13 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     // 3. Accept transfer
     write_response_frame(stream, FrameTag::TransferAccept, "ACCEPTED")?;
     info!("[Receiver] ACCEPT_SENT");
+    let _ = app.emit("transfer-progress", TransferProgressPayload {
+        session_id: metadata.session_id.clone(), direction: "receive".into(), device_name: metadata.sender_name.clone(),
+        current_file_index: 0, current_file_name: metadata.files[0].relative_path.clone(),
+        current_file_bytes: 0, current_file_total_bytes: metadata.files[0].size_bytes,
+        session_bytes_sent: 0, session_total_bytes: metadata.total_size_bytes,
+        total_files: metadata.total_files, percentage: 0.0, speed_bytes_per_sec: 0,
+    });
 
     let receive_dir = super::engine::configured_receive_dir(app)?;
 
@@ -311,7 +351,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     );
     let mut total_received_bytes: u64 = 0;
     let start_time = Instant::now();
-    let mut created_part_files: Vec<PathBuf> = Vec::new();
+    let mut created_part_files = PartialFiles(Vec::new());
     let mut final_dest_paths: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut last_emit_time = Instant::now();
     let emit_interval = Duration::from_millis(50); // Max 20 FPS progress updates
@@ -320,6 +360,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
 
     info!("[Receiver] STREAMING {} files", metadata.total_files);
     for file_idx in 0..metadata.total_files {
+        if cancel_flag.load(Ordering::Relaxed) { return Err("Transfer cancelled".into()); }
         // Read FileHeader frame
         let file_header = match read_file_header(stream) {
             Ok(h) => h,
@@ -349,7 +390,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
             }
         };
 
-        let collision_resolved_path = resolve_collision_path(&final_target_path);
+        let collision_resolved_path = final_target_path.clone();
         let part_file_path = get_session_part_file_path(&final_target_path, &metadata.session_id);
         if fs::symlink_metadata(&part_file_path).is_ok_and(|meta| meta.file_type().is_symlink()) {
             cleanup_files(&created_part_files);
@@ -436,26 +477,12 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
                 Ok(res) => res,
                 Err(e) => {
                     cleanup_files(&created_part_files);
-                    let _ = app.emit(
-                        "transfer-failed",
-                        TransferFailedPayload {
-                            session_id: metadata.session_id.clone(),
-                            error: format!("Failed to read frame header: {e}"),
-                        },
-                    );
                     return Err(format!("Failed to read frame header: {e}"));
                 }
             };
 
             if cancel_flag.load(Ordering::Relaxed) || tag == FrameTag::Cancel {
                 cleanup_files(&created_part_files);
-                let _ = app.emit(
-                    "transfer-failed",
-                    TransferFailedPayload {
-                        session_id: metadata.session_id.clone(),
-                        error: "Transfer cancelled".to_string(),
-                    },
-                );
                 return Err("Transfer cancelled".to_string());
             }
 
@@ -477,13 +504,6 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
             let mut chunk_buf = vec![0u8; payload_len as usize];
             if let Err(e) = stream.read_exact(&mut chunk_buf) {
                 cleanup_files(&created_part_files);
-                let _ = app.emit(
-                    "transfer-failed",
-                    TransferFailedPayload {
-                        session_id: metadata.session_id.clone(),
-                        error: format!("Failed to read DataChunk payload: {e}"),
-                    },
-                );
                 return Err(format!("Failed to read DataChunk payload: {e}"));
             }
 
@@ -518,6 +538,8 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
                     "transfer-progress",
                     TransferProgressPayload {
                         session_id: metadata.session_id.clone(),
+                        direction: "receive".into(),
+                        device_name: metadata.sender_name.clone(),
                         current_file_index: file_header.file_index,
                         current_file_name: file_header.relative_path.clone(),
                         current_file_bytes: file_bytes_received,
@@ -564,13 +586,6 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
             let err_msg = format!(
                 "File checksum mismatch for file {}",
                 file_header.relative_path
-            );
-            let _ = app.emit(
-                "transfer-failed",
-                TransferFailedPayload {
-                    session_id: metadata.session_id.clone(),
-                    error: err_msg.clone(),
-                },
             );
             return Err(err_msg);
         }
@@ -621,26 +636,17 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
             "Byte count mismatch: expected {} bytes, received {} bytes",
             metadata.total_size_bytes, total_received_bytes
         );
-        let _ = app.emit(
-            "transfer-failed",
-            TransferFailedPayload {
-                session_id: metadata.session_id.clone(),
-                error: err_msg.clone(),
-            },
-        );
         return Err(err_msg);
     }
 
     // Acknowledge only after every verified file has been saved successfully.
-    for (part_path, final_path) in &final_dest_paths {
-        if final_path.exists() {
-            cleanup_files(&created_part_files);
-            return Err(format!("Destination appeared during transfer: {}", final_path.display()));
-        }
-        if let Err(e) = fs::rename(part_path, final_path) {
-            cleanup_files(&created_part_files);
-            return Err(format!("Failed to save {}: {e}", final_path.display()));
-        }
+    if cancel_flag.load(Ordering::Relaxed) { return Err("Transfer cancelled".into()); }
+    for ((part_path, final_path), file) in final_dest_paths.iter().zip(received_files_meta.iter_mut()) {
+        // Recheck ancestors before publishing; never follow a destination link.
+        let relative = final_path.strip_prefix(&receive_dir).map_err(|e| e.to_string())?;
+        verify_safe_target_path(&receive_dir, relative)?;
+        let saved_path = publish_received_file(part_path, final_path)?;
+        file.final_path = saved_path.to_string_lossy().into_owned();
     }
     write_response_frame(stream, FrameTag::TransferAck, "ACK")
         .map_err(|e| format!("Files saved, but failed to send TransferAck: {e}"))?;

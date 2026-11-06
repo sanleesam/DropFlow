@@ -4,13 +4,14 @@ version = 4
 
 [[package]]
 name = "Dropflow"
-version = "0.1.1-beta.19"
+version = "0.1.2-beta.21"
 dependencies = [
  "chrono",
  "flume",
  "log",
  "mdns-sd",
  "objc2-app-kit",
+ "polling",
  "semver",
  "serde",
  "serde_json",

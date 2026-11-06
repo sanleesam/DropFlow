@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { UpdateChannel } from "../types/updater";
@@ -196,6 +196,7 @@ export const ACCENT_COLOR_MAPS: Record<AccentColor, AccentStyles> = {
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const soundNotifications = useRef(true);
   const [settings, setSettings] = useState<Settings>({
     accentColor: "blue",
     askBeforeOverwrite: true,
@@ -205,9 +206,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     deviceVisibility: true,
     receiveDirectory: "",
     requireConfirmation: true,
-    autoAcceptTrustedDevices: true,
+    autoAcceptTrustedDevices: false,
     maxConcurrentTransfers: 3,
-    darkTheme: false,
+    darkTheme: true,
     reduceAnimations: false,
     updateChannel: "beta",
     trustedDevices: [],
@@ -243,6 +244,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const appState = await invoke<any>("get_app_state");
       if (appState && appState.settings) {
         const rustSet = appState.settings;
+        if (typeof rustSet.soundNotifications === "boolean") soundNotifications.current = rustSet.soundNotifications;
         setSettings((prev) => ({
           ...prev,
           deviceName: rustSet.deviceName || prev.deviceName,
@@ -251,7 +253,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           requireConfirmation: typeof rustSet.requireConfirmation === "boolean" ? rustSet.requireConfirmation : !rustSet.autoAccept,
           askBeforeOverwrite: typeof rustSet.askBeforeOverwrite === "boolean" ? rustSet.askBeforeOverwrite : prev.askBeforeOverwrite,
           autoOpenCompleted: typeof rustSet.autoOpenCompleted === "boolean" ? rustSet.autoOpenCompleted : prev.autoOpenCompleted,
-          autoAcceptTrustedDevices: typeof rustSet.autoAcceptTrustedDevices === "boolean" ? rustSet.autoAcceptTrustedDevices : prev.autoAcceptTrustedDevices,
+          autoAcceptTrustedDevices: false,
           maxConcurrentTransfers: rustSet.maxConcurrentTransfers || prev.maxConcurrentTransfers,
           darkTheme: rustSet.theme === "dark",
           updateChannel:
@@ -314,14 +316,14 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           deviceName: next.deviceName,
           receiveDirectory: next.receiveDirectory,
           autoAccept: !next.requireConfirmation,
-          soundNotifications: next.autoOpenCompleted,
+          soundNotifications: soundNotifications.current,
           theme: next.darkTheme ? "dark" : "light",
           accentColor: next.accentColor,
           maxConcurrentTransfers: next.maxConcurrentTransfers,
           askBeforeOverwrite: next.askBeforeOverwrite,
           autoOpenCompleted: next.autoOpenCompleted,
           requireConfirmation: next.requireConfirmation,
-          autoAcceptTrustedDevices: next.autoAcceptTrustedDevices,
+          autoAcceptTrustedDevices: false,
           updateChannel: next.updateChannel,
         },
       }).catch(console.error);

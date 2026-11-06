@@ -64,11 +64,9 @@ export function DevicesPage() {
   const trustPeer = async () => {
     if (!peer) return;
     try {
-      if (trusted && settings.autoAcceptTrustedDevices)
+      if (trusted)
         await removeTrustedDevice(peer.id);
       else {
-        if (!settings.autoAcceptTrustedDevices)
-          updateSetting("autoAcceptTrustedDevices", true);
         await addTrustedDevice({
           deviceId: peer.id,
           deviceName: peer.name,
@@ -78,7 +76,7 @@ export function DevicesPage() {
         });
       }
     } catch {
-      addToast("Couldn't update trust for this device.", "error");
+      addToast("Couldn't remember this device.", "error");
     }
   };
 
@@ -327,17 +325,17 @@ export function DevicesPage() {
               ) : (
                 <>
                   <SettingRow
-                    title="Auto-accept from this device"
+                    title="Remember this device"
                     description={
                       <>
-                        <ShieldCheck size={12} /> Only trust devices you
-                        recognize.
+                        <ShieldCheck size={12} /> Save its name for recognition.
+                        This does not skip incoming approval.
                       </>
                     }
                   >
                     <Switch
-                      label={`Auto-accept from ${name}`}
-                      checked={trusted && settings.autoAcceptTrustedDevices}
+                      label={`Remember ${name}`}
+                      checked={trusted}
                       onChange={trustPeer}
                     />
                   </SettingRow>

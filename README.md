@@ -50,7 +50,8 @@ by different tag prefixes — never tag both platforms with the same ref:
 - ✅ Desktop persistent history/state; Android session history and saved preferences
 - ✅ Native desktop interface
 - ✅ Smooth view transitions
-- ✅ Desktop resume support (Android SAF resume is not implemented)
+- Partial-transfer protocol/state support exists; a user-facing resume workflow
+  is not implemented on desktop or Android.
 - ✅ Sleep prevention during active transfers
 - ✅ Android app with discovery, send and receive
 - ✅ Desktop built-in updater; Android verified update flow implemented, publication/upgrade acceptance pending
@@ -199,8 +200,8 @@ commercially, subject to the license's notice and other requirements. There is
 no warranty. Contributors keep copyright in their work.
 
 Third-party components retain their own terms, including GSAP's Standard
-License. The existing desktop illustration pack has unresolved provenance and
-is excluded from this license grant. See [NOTICE](NOTICE) and
+License. The unused legacy illustration pack was removed; historical copies
+remain outside this license grant. See [NOTICE](NOTICE) and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for scope, attribution and branding
 details. We do not claim that all bundled artwork/dependencies are Apache-2.0.
 

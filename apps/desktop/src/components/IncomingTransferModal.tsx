@@ -105,7 +105,7 @@ export const IncomingTransferModal: React.FC<IncomingTransferModalProps> = ({
           checked={trustDevice}
           onChange={(event) => setTrustDevice(event.target.checked)}
         />
-        Don't ask again for this device
+        Remember this device (approval will still be required)
       </label>
       <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
         <button

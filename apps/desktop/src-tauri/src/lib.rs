@@ -6,6 +6,7 @@ pub mod state_manager;
 pub mod transfer_manager;
 pub mod update_manager;
 mod window_material;
+mod safe_fs;
 
 use std::sync::{Arc, Mutex};
 use log::info;

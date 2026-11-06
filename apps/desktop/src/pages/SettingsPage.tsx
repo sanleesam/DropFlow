@@ -185,6 +185,13 @@ export function SettingsPage() {
                     </span>
                   }
                 >
+                  <div style={{display: "flex", gap: 8}}>
+                  <button type="button" className="df-btn df-btn-soft df-btn-sm"
+                    onClick={() => invoke<string>("get_receive_dir")
+                      .then((path) => invoke("open_received_file", {path}))
+                      .catch(() => addToast("Couldn't open the receive folder.", "error"))}>
+                    <FolderOpen size={14} /> Open
+                  </button>
                   <button
                     type="button"
                     className="df-btn df-btn-soft df-btn-sm"
@@ -193,13 +200,14 @@ export function SettingsPage() {
                     <FolderOpen size={14} />
                     Change
                   </button>
+                  </div>
                 </SettingRow>
                 <SettingRow
-                  title="Open finished transfers"
-                  description="Open a received file when the transfer completes."
+                  title="Open received folder"
+                  description="Open the containing folder after a transfer. Received files are never opened automatically."
                 >
                   <Switch
-                    label="Open finished transfers"
+                    label="Open received folder"
                     checked={settings.autoOpenCompleted}
                     onChange={() =>
                       updateSetting(
@@ -211,7 +219,7 @@ export function SettingsPage() {
                 </SettingRow>
                 <SettingRow
                   title="Ask before accepting"
-                  description="Review incoming files before receiving them."
+                  description="Review incoming files before receiving them. Turning this off allows anyone who can reach DropFlow to send files without approval."
                 >
                   <Switch
                     label="Ask before accepting"
@@ -225,19 +233,10 @@ export function SettingsPage() {
                   />
                 </SettingRow>
                 <SettingRow
-                  title="Auto-accept trusted devices"
-                  description="Skip the incoming prompt for devices you have trusted."
+                  title="Device verification"
+                  description="Remembered names are not authenticated. Automatic acceptance from remembered devices is disabled; keep incoming approval enabled."
                 >
-                  <Switch
-                    label="Auto-accept trusted devices"
-                    checked={settings.autoAcceptTrustedDevices}
-                    onChange={() =>
-                      updateSetting(
-                        "autoAcceptTrustedDevices",
-                        !settings.autoAcceptTrustedDevices,
-                      )
-                    }
-                  />
+                  <span className="df-meta">Approval recommended</span>
                 </SettingRow>
                 <SettingRow
                   title="Transfer history"
@@ -256,18 +255,18 @@ export function SettingsPage() {
             )}
             {tab === "devices" && (
               <section className="df-card df-card-pad">
-                <h2 className="df-v2-section-title">Trusted devices</h2>
+                <h2 className="df-v2-section-title">Remembered devices</h2>
                 <p className="df-kicker">
-                  Manage devices you have allowed to send files without a
-                  prompt.
+                  Saved device names are for recognition, not verified identity.
+                  Incoming approval still applies.
                 </p>
                 {settings.trustedDevices.length === 0 && (
                   <EmptyState
                     compact
                     icon={<ShieldCheck size={22} />}
-                    title="No trusted devices yet"
+                    title="No remembered devices yet"
                   >
-                    Trust a device when accepting a transfer, or from its device
+                    Remember a device when accepting a transfer, or from its device
                     details.
                   </EmptyState>
                 )}
@@ -281,7 +280,7 @@ export function SettingsPage() {
                     <button
                       type="button"
                       className="df-btn df-btn-soft df-btn-sm"
-                      aria-label={`Remove trust for ${device.deviceName}`}
+                      aria-label={`Forget ${device.deviceName}`}
                       onClick={() =>
                         removeTrustedDevice(device.deviceId).catch(() =>
                           addToast("Couldn't remove this device.", "error"),

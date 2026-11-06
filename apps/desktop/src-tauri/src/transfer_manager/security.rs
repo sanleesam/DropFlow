@@ -29,11 +29,15 @@ pub fn sanitize_filename(filename: &str) -> String {
         })
         .collect();
 
-    let clean = sanitized.trim();
+    let clean = sanitized.trim().trim_end_matches('.');
     if clean.is_empty() || clean == "." || clean == ".." {
         "unnamed_file".to_string()
     } else {
-        clean.to_string()
+        let stem = clean.split('.').next().unwrap_or("").to_uppercase();
+        let reserved = ["CON", "PRN", "AUX", "NUL"].contains(&stem.as_str())
+            || ["COM", "LPT"].iter().any(|prefix| stem.strip_prefix(prefix)
+                .is_some_and(|n| ["1","2","3","4","5","6","7","8","9","¹","²","³"].contains(&n)));
+        if reserved { format!("_{clean}") } else { clean.to_string() }
     }
 }
 
@@ -120,7 +124,7 @@ pub fn verify_safe_target_path(base_dir: &Path, rel_path: &Path) -> Result<PathB
 
 /// Resolves filename collision if a file already exists, appending ` (1)`, ` (2)`, etc.
 pub fn resolve_collision_path(target_path: &Path) -> PathBuf {
-    if !target_path.exists() {
+    if fs::symlink_metadata(target_path).is_err() {
         return target_path.to_path_buf();
     }
     let parent = target_path.parent().unwrap_or_else(|| Path::new("."));
@@ -138,11 +142,26 @@ pub fn resolve_collision_path(target_path: &Path) -> PathBuf {
     loop {
         let candidate_name = format!("{stem} ({counter}){ext}");
         let candidate_path = parent.join(candidate_name);
-        if !candidate_path.exists() {
+        if fs::symlink_metadata(&candidate_path).is_err() {
             return candidate_path;
         }
         counter += 1;
     }
+}
+
+/// Publish with an atomic no-replace move; concurrent receives retry a new name.
+pub fn publish_received_file(part: &Path, target: &Path) -> Result<PathBuf, String> {
+    let mut candidate = target.to_path_buf();
+    for _ in 0..10_000 {
+        match crate::safe_fs::rename_noreplace(part, &candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                candidate = resolve_collision_path(target);
+            }
+            Err(error) => return Err(format!("Failed to save {}: {error}", candidate.display())),
+        }
+    }
+    Err("Too many destination collisions; try a different folder".into())
 }
 
 /// Appends `.dropflow-part` to target file path for temporary partial writes.
@@ -154,19 +173,48 @@ pub fn get_part_file_path(target_path: &Path) -> PathBuf {
 
 /// Returns session-specific `.dropflow-part` path for deterministic resume matching.
 pub fn get_session_part_file_path(target_path: &Path, session_id: &str) -> PathBuf {
+    use sha2::{Digest, Sha256};
     let parent = target_path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = target_path
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("file");
-    let safe_session = sanitize_filename(session_id);
-    let part_name = format!("{file_name}.{safe_session}.dropflow-part");
+    // Fixed-length, case-sensitive session identity without using remote text
+    // as a filename. Avoid path aliases and overflowing the filename limit.
+    let mut hash = Sha256::new();
+    hash.update(session_id.as_bytes()); hash.update([0]); hash.update(file_name.as_bytes());
+    let part_name = format!(".dropflow-{:x}.dropflow-part", hash.finalize());
     parent.join(part_name)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn partial_names_do_not_alias_session_text_or_overflow_long_filenames() {
+        let target=PathBuf::from("/tmp").join("x".repeat(240));
+        let a=get_session_part_file_path(&target,"A/b");let b=get_session_part_file_path(&target,"A_b");
+        assert_ne!(a,b);assert_ne!(a,get_session_part_file_path(&target,"a/b"));
+        assert!(a.file_name().unwrap().len()<100);
+        assert_eq!(a,get_session_part_file_path(&target,"A/b"));
+    }
+
+    #[test]
+    fn concurrent_receives_keep_both_files_and_existing_content() {
+        use std::sync::{Arc, Barrier};
+        let root=std::env::temp_dir().join(format!("dropflow-publish-{}",uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let target=root.join("same.txt"); fs::write(&target,b"existing").unwrap();
+        let gate=Arc::new(Barrier::new(2));
+        let handles:Vec<_>=[b"first".to_vec(),b"second".to_vec()].into_iter().enumerate().map(|(i,bytes)| {
+            let part=root.join(format!("{i}.part")); fs::write(&part,&bytes).unwrap();
+            let target=target.clone();let gate=gate.clone();
+            std::thread::spawn(move|| { gate.wait(); let dest=publish_received_file(&part,&target).unwrap(); assert_eq!(fs::read(&dest).unwrap(),bytes); dest })
+        }).collect();
+        let results:Vec<_>=handles.into_iter().map(|h|h.join().unwrap()).collect();
+        assert_ne!(results[0],results[1]); assert_eq!(fs::read(target).unwrap(),b"existing");
+        assert_eq!(fs::read_dir(&root).unwrap().count(),3);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn test_sanitize_filename_basic() {
@@ -178,6 +226,9 @@ mod tests {
         );
         assert_eq!(sanitize_filename("  "), "unnamed_file");
         assert_eq!(sanitize_filename("bad:name?.txt"), "bad_name_.txt");
+        assert_eq!(sanitize_filename("CON.txt"), "_CON.txt");
+        assert_eq!(sanitize_filename("lpt1"), "_lpt1");
+        assert_eq!(sanitize_filename("name."), "name");
     }
 
     #[test]

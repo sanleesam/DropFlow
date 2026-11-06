@@ -11,6 +11,32 @@ See [the current policy](docs/VERSIONING.md). Published versions are not renamed
 Android's numeric `versionCode` only increases, including when moving from the
 legacy beta label to the next alpha product version.
 
+## Desktop — [0.1.2-beta.21] — Unreleased
+
+- Replace socket-clone shutdown cancellation with portable cancellation-aware
+  reads/writes, preserving approval/inactivity timeouts and DFP/1 byte ordering.
+- Add Windows/macOS PR checks before tagging and regression coverage for blocked
+  reads/writes, fragmented input, timeout budgets and a full protocol round trip.
+
+- Fix symlink-target deletion/rename and concurrent receive overwrite races with
+  exclusive filesystem moves and collision retry.
+- Disable unauthenticated remembered-device auto-accept; preserve records and
+  clearly explain incoming approval and explicit allow-all behavior.
+- Bound connections/transfers, protect session identity, reliably report incoming
+  failures, clean partial files and preserve failed history.
+- Interrupt blocked sockets on cancellation, isolate late events, and show
+  finalization rather than premature completion at 100% byte progress.
+- Use native file opening on Windows; auto-open folders, never received content.
+- Harden CSP, filenames, external-folder UX and preference preservation; remove
+  unused uncleared artwork and bundle license notices.
+- Sign the complete macOS app ad-hoc and gate Beta publication on both platforms.
+- See `docs/releases/desktop-0.1.2-beta.21.md` and `docs/DESKTOP_0.1.2_VALIDATION.md`.
+
+## Desktop — 0.1.2-beta.20 — Unpublished candidate
+
+- Publication withheld after the Windows blocked-socket cancellation test failed.
+  The original tag is retained unchanged; Beta 21 supersedes this candidate.
+
 ## Desktop — [0.1.1-beta.19] — 2026-11-04
 
 - Fix folder sending: recursively expand files and preserve nested relative
