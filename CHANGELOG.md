@@ -11,7 +11,7 @@ See [the current policy](docs/VERSIONING.md). Published versions are not renamed
 Android's numeric `versionCode` only increases, including when moving from the
 legacy beta label to the next alpha product version.
 
-## Desktop — [0.1.2-beta.21] — Unreleased
+## Desktop — [0.1.2-beta.21] — 2026-11-06
 
 - Replace socket-clone shutdown cancellation with portable cancellation-aware
   reads/writes, preserving approval/inactivity timeouts and DFP/1 byte ordering.

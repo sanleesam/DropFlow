@@ -73,9 +73,8 @@ reader, socket clone, wire-format change, or background watcher thread is used.
 Local Rust suite passes 74 tests, including a genuinely pending read cancelled
 within one second (the original Windows gate is not weakened), a blocked write,
 fragmented reads, inactivity budgets, a 32 MiB byte-for-byte backpressure test
-and a complete DFP/1 TCP round trip across
-the adapter. Both-platform PR checks are added to run before creating a new tag;
-their results and final artifact evidence remain pending until verified live.
+and a complete DFP/1 TCP round trip across the adapter. Both-platform PR checks
+run before creating a new tag; final results are recorded below.
 
 Beta 21 local frontend checks also pass: TypeScript/production build, 21 lifecycle
 scenarios, 21 UI primitive assertions and 13 release-tooling tests. Windows has
@@ -88,8 +87,39 @@ Historical Beta 20 local checks passed: 69 Rust library tests, TypeScript, 21 li
 scenarios, 21 UI primitive assertions, production frontend build, and 12 desktop
 version/resolver/shared-workflow tests. Workflow YAML and whitespace checks pass.
 
-Cross-platform CI and downloaded release-artifact results will be recorded after
-publication. Local checks do not replace physical Mac↔Windows/Android LAN proof.
+### Published Beta 21 evidence — 2026-11-06
+
+- Source/tag: `v0.1.2-beta.21` resolves to
+  `76d6534ca3b1c9bddeed9cbcab0469da24a0345d`. Beta 20's original tag was not moved.
+- [Read-only preflight run 42200249975](https://github.com/sanleesam/DropFlow/actions/runs/42200249975)
+  passed on macOS (74 Rust tests) and Windows (72). Both platforms passed the
+  blocked-read/write cancellation and 32 MiB byte-integrity regressions.
+- [Release run 42200979554](https://github.com/sanleesam/DropFlow/actions/runs/42200979554)
+  passed both platform jobs and channel sync. The release is public, prerelease
+  true, release ID `436358947`, published `2026-11-06T10:24:08Z`.
+- Downloaded versioned and floating Beta manifests are identical, advertise
+  `0.1.2-beta.21`, and contain all four darwin/windows updater aliases. Artifact
+  URLs point at the immutable versioned release, not a floating installer.
+- Downloaded both updater artifacts and verified their Minisign signatures
+  against the updater public key embedded in the Tauri configuration.
+- Extracted the downloaded Mac archive and passed strict deep codesign
+  verification. Bundle version is `0.1.2-beta.21`; embedded `icon.icns`, `LICENSE`,
+  `NOTICE`, and `THIRD_PARTY_NOTICES.md` match source bytes. Removed the extracted
+  test app afterward; `/Applications/DropFlow.app` was not replaced.
+- [PR #7](https://github.com/sanleesam/DropFlow/pull/7) merged only after these checks,
+  as `9f460a2f1bf6e14fddc403f66a08cd09903daafb`, using `[skip ci]` to avoid an
+  unrelated Development release. Android source/version/release are unchanged.
+
+Downloaded artifact SHA-256 values (also match GitHub's asset digests):
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `DropFlow_aarch64.app.tar.gz` | 6704512 | `51a23ec95e5f7d1783074e330f6bac669f259ff479c351925fe5e50127466769` |
+| `DropFlow_0.1.2-beta.21_x64-setup.exe` | 4347907 | `da96ac4bf945bb4b22d21dec32ddd32219dbd670b87c843269c47aa198607c40` |
+
+### Remaining acceptance limits
+
+These checks do not replace physical Mac↔Windows/Android LAN proof.
 No new physical-device, multi-GB, Developer ID/notarization or Authenticode proof
 is claimed. The browser still deliberately has a home boundary; it does not gain
 arbitrary filesystem write access from this patch. Local malicious filesystem
