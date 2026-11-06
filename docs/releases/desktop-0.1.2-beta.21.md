@@ -15,7 +15,8 @@ Authenticated pairing is not implemented, and transfers are not encrypted.
 
 - Replace platform-dependent cross-handle socket interruption with cancellable
   reads/writes. The 75-second approval and 15-second transfer inactivity budgets
-  remain; short internal polling does not change DFP/1 framing or add a reader.
+  remain; nonblocking I/O and native readiness waits do not change DFP/1 framing
+  or add a reader. Blocking Winsock timeouts are not retried.
 - Verify cancellation after reads are actually pending, cancellation of blocked
   writes, timeout preservation, fragmented frames and a complete DFP/1 round trip
   on both operating systems before creating a release tag.

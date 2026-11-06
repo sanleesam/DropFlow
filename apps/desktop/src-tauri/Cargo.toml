@@ -35,6 +35,7 @@ url = "2"
 semver = "1"
 log = { version = "0.4", features = ["std"] }
 flume = "0.12"
+polling = "=3.11.0"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # Already used transitively by Tauri; direct access preserves native errors.

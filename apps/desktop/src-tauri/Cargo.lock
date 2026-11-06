@@ -11,6 +11,7 @@ dependencies = [
  "log",
  "mdns-sd",
  "objc2-app-kit",
+ "polling",
  "semver",
  "serde",
  "serde_json",

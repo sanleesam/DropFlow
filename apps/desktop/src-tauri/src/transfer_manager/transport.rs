@@ -1,5 +1,6 @@
 //! One socket reader/writer, with cancellable waits and unchanged DFP/1 bytes.
 //! Do not rely on shutdown from a cloned handle waking a Windows blocking recv.
+use polling::{Event, Events, Poller};
 use std::{
     io::{self, Read, Write},
     net::{Shutdown, TcpStream},
@@ -17,18 +18,29 @@ pub struct CancellableStream<'a> {
     cancellation: Arc<AtomicBool>,
     read_timeout: Option<Duration>,
     write_timeout: Option<Duration>,
+    poller: Poller,
+    events: Events,
 }
 
 impl<'a> CancellableStream<'a> {
     pub fn new(socket: &'a mut TcpStream, cancellation: Arc<AtomicBool>) -> io::Result<Self> {
-        let mut stream = Self {
+        // Blocking Winsock timeouts can leave the connection indeterminate.
+        // Only retry nonblocking WouldBlock; readiness waits do not consume bytes.
+        socket.set_read_timeout(None)?;
+        socket.set_write_timeout(None)?;
+        socket.set_nonblocking(true)?;
+        let poller = Poller::new()?;
+        // SAFETY: the exclusive borrow keeps the socket alive and prevents any
+        // other reader. Drop deregisters it before releasing that borrow.
+        unsafe { poller.add(&*socket, Event::none(0))? };
+        let stream = Self {
             socket,
             cancellation,
-            read_timeout: None,
-            write_timeout: None,
+            read_timeout: Some(Duration::from_secs(15)),
+            write_timeout: Some(Duration::from_secs(15)),
+            poller,
+            events: Events::new(),
         };
-        stream.set_read_timeout(Some(Duration::from_secs(15)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(15)))?;
         Ok(stream)
     }
 
@@ -37,14 +49,13 @@ impl<'a> CancellableStream<'a> {
     }
 
     pub fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
-        self.socket.set_read_timeout(Some(poll_timeout(timeout)?))?;
+        validate_timeout(timeout)?;
         self.read_timeout = timeout;
         Ok(())
     }
 
     pub fn set_write_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
-        self.socket
-            .set_write_timeout(Some(poll_timeout(timeout)?))?;
+        validate_timeout(timeout)?;
         self.write_timeout = timeout;
         Ok(())
     }
@@ -69,24 +80,45 @@ impl<'a> CancellableStream<'a> {
         }
         Ok(())
     }
+
+    fn wait_ready(
+        &mut self,
+        event: Event,
+        start: Instant,
+        timeout: Option<Duration>,
+    ) -> io::Result<()> {
+        self.check_wait(start, timeout)?;
+        let wait = timeout.map_or(POLL_INTERVAL, |limit| {
+            limit.saturating_sub(start.elapsed()).min(POLL_INTERVAL)
+        });
+        self.poller.modify(&*self.socket, event)?;
+        self.events.clear();
+        match self.poller.wait(&mut self.events, Some(wait)) {
+            Ok(_) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
 }
 
-fn poll_timeout(timeout: Option<Duration>) -> io::Result<Duration> {
+impl Drop for CancellableStream<'_> {
+    fn drop(&mut self) {
+        // Even if deregistration fails, the poller is dropped while the
+        // exclusively borrowed socket is still alive.
+        if let Err(error) = self.poller.delete(&*self.socket) {
+            log::warn!("Transfer socket deregistration failed: {error}");
+        }
+    }
+}
+
+fn validate_timeout(timeout: Option<Duration>) -> io::Result<()> {
     if timeout.is_some_and(|value| value.is_zero()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Socket timeout must be non-zero",
         ));
     }
-    Ok(timeout.map_or(POLL_INTERVAL, |limit| limit.min(POLL_INTERVAL)))
-}
-
-fn is_poll_timeout(error: &io::Error) -> bool {
-    // Unix commonly reports WouldBlock; Windows commonly reports TimedOut.
-    matches!(
-        error.kind(),
-        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-    )
+    Ok(())
 }
 
 impl Read for CancellableStream<'_> {
@@ -98,7 +130,10 @@ impl Read for CancellableStream<'_> {
         loop {
             self.check_wait(start, self.read_timeout)?;
             match self.socket.read(buffer) {
-                Err(error) if is_poll_timeout(&error) => continue,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    self.wait_ready(Event::readable(0), start, self.read_timeout)?;
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 result => return result,
             }
         }
@@ -114,7 +149,10 @@ impl Write for CancellableStream<'_> {
         loop {
             self.check_wait(start, self.write_timeout)?;
             match self.socket.write(buffer) {
-                Err(error) if is_poll_timeout(&error) => continue,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    self.wait_ready(Event::writable(0), start, self.write_timeout)?;
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 result => return result,
             }
         }
@@ -137,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn poll_timeouts_do_not_truncate_fragmented_protocol_reads() {
+    fn readiness_waits_do_not_truncate_fragmented_protocol_reads() {
         let (mut client, mut peer) = pair();
         let worker = thread::spawn(move || {
             peer.write_all(b"HELLO").unwrap();
@@ -171,6 +209,39 @@ mod tests {
         );
         assert!(start.elapsed() >= Duration::from_millis(160));
         assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn backpressure_preserves_every_byte_when_writes_resume() {
+        let (mut client, mut peer) = pair();
+        const TOTAL: usize = 32 * 1024 * 1024;
+        let worker = thread::spawn(move || {
+            peer.set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            thread::sleep(Duration::from_millis(180));
+            let mut received = 0;
+            let mut buffer = [0; 64 * 1024];
+            while received < TOTAL {
+                let n = peer.read(&mut buffer).unwrap();
+                assert!(n > 0, "stream ended before all bytes arrived");
+                for (index, byte) in buffer[..n].iter().enumerate() {
+                    assert_eq!(*byte, ((received + index) % 251) as u8);
+                }
+                received += n;
+            }
+            peer.write_all(b"OK").unwrap();
+        });
+        let mut stream =
+            CancellableStream::new(&mut client, Arc::new(AtomicBool::new(false))).unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let bytes: Vec<_> = (0..TOTAL).map(|index| (index % 251) as u8).collect();
+        stream.write_all(&bytes).unwrap();
+        let mut ack = [0; 2];
+        stream.read_exact(&mut ack).unwrap();
+        assert_eq!(&ack, b"OK");
+        worker.join().unwrap();
     }
 
     #[test]

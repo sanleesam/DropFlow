@@ -63,19 +63,28 @@ read using a cloned socket's shutdown. Mac passed; Windows failed one test and
 the Beta channel sync was skipped, preserving Beta 19. The Beta 20 tag is retained.
 
 Beta 21 replaces that monitor with a single-owner cancellable Read/Write adapter.
-The kernel waits in 50 ms intervals, but poll timeouts are consumed internally
-until the existing 75-second approval / 15-second inactivity budget expires or
-the user's cancellation flag is set. Cancel returns ConnectionAborted rather
+The socket uses nonblocking I/O plus native readiness waits capped at 50 ms.
+Only WouldBlock is retried, never a blocking Winsock timeout (Microsoft documents
+that as an indeterminate connection). The existing 75-second approval / 15-second
+inactivity budgets remain. Cancel returns ConnectionAborted rather
 than Interrupted, which read_exact/write_all would silently retry. No additional
 reader, socket clone, wire-format change, or background watcher thread is used.
 
-Local Rust suite now passes 73 tests, including a genuinely pending read cancelled
+Local Rust suite passes 74 tests, including a genuinely pending read cancelled
 within one second (the original Windows gate is not weakened), a blocked write,
-fragmented reads, inactivity budgets and a complete DFP/1 TCP round trip across
+fragmented reads, inactivity budgets, a 32 MiB byte-for-byte backpressure test
+and a complete DFP/1 TCP round trip across
 the adapter. Both-platform PR checks are added to run before creating a new tag;
 their results and final artifact evidence remain pending until verified live.
 
-Local final checks passed: 69 Rust library tests, TypeScript, 21 lifecycle
+Beta 21 local frontend checks also pass: TypeScript/production build, 21 lifecycle
+scenarios, 21 UI primitive assertions and 13 release-tooling tests. Windows has
+two fewer Rust tests because Unix symbolic-link tests are platform-specific.
+Readiness API follows [polling's registration contract](https://docs.rs/polling/3.11.0/polling/struct.Poller.html).
+The blocking-timeout restriction is documented by
+[Microsoft Winsock](https://learn.microsoft.com/en-us/windows/win32/winsock/sol-socket-socket-options).
+
+Historical Beta 20 local checks passed: 69 Rust library tests, TypeScript, 21 lifecycle
 scenarios, 21 UI primitive assertions, production frontend build, and 12 desktop
 version/resolver/shared-workflow tests. Workflow YAML and whitespace checks pass.
 
