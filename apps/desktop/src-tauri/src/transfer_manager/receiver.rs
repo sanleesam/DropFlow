@@ -182,17 +182,19 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     let _sleep_guard = app
         .try_state::<crate::power_manager::SleepState>()
         .map(|s| s.sleep_manager.acquire());
+    let mut stream = super::transport::CancellableStream::new(stream,Arc::new(AtomicBool::new(false)))
+        .map_err(|e|e.to_string())?;
 
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))
         .map_err(|e| format!("Failed to set socket read timeout: {e}"))?;
     stream.set_write_timeout(Some(Duration::from_secs(15))).map_err(|e|e.to_string())?;
 
-    perform_incoming_handshake(stream)?;
+    perform_incoming_handshake(&mut stream)?;
     info!("[Receiver] HANDSHAKE_COMPLETE");
 
     // 1. Read TransferRequest metadata frame
-    let metadata = read_transfer_request(stream)?;
+    let metadata = read_transfer_request(&mut stream)?;
     super::validation::validate_request(&metadata)?;
     info!("[Receiver] REQUEST_RECEIVED from '{}' ({} files, {} bytes)",
         metadata.sender_name, metadata.total_files, metadata.total_size_bytes
@@ -206,14 +208,14 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
         let mut active = state.active_cancellations.lock().map_err(|e|e.to_string())?;
         super::lifecycle::register_session(&mut active, &metadata.session_id, limit)
     };
-    let cancel_flag = match claim { Ok(flag)=>flag, Err(error)=> { write_response_frame(stream,FrameTag::TransferReject,&error)?; return Err(error); } };
+    let cancel_flag = match claim { Ok(flag)=>flag, Err(error)=> { write_response_frame(&mut stream,FrameTag::TransferReject,&error)?; return Err(error); } };
     let _guard = CancellationGuard {
         app,
         session_id: metadata.session_id.clone(),
     };
-    let _cancellation = super::lifecycle::SocketCancellation::watch(stream,cancel_flag.clone())?;
+    stream.set_cancellation(cancel_flag.clone());
 
-    let result=receive_session(app,stream,&metadata,cancel_flag.clone())
+    let result=receive_session(app,&mut stream,&metadata,cancel_flag.clone())
         .map_err(|error| if cancel_flag.load(Ordering::Relaxed) { "Transfer cancelled".into() } else { error });
     super::lifecycle::report_result(result, |error| {
         let _ = app.emit("transfer-failed", TransferFailedPayload { session_id: metadata.session_id.clone(), error: error.into() });
@@ -221,7 +223,7 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     })
 }
 
-fn receive_session(app: &AppHandle, stream: &mut TcpStream, metadata: &TransferMetadata, cancel_flag: Arc<AtomicBool>) -> Result<(),String> {
+fn receive_session(app: &AppHandle, stream: &mut super::transport::CancellableStream<'_>, metadata: &TransferMetadata, cancel_flag: Arc<AtomicBool>) -> Result<(),String> {
 
     // 2. Check authorization settings & trusted devices
     let require_confirmation = {

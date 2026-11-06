@@ -1,4 +1,8 @@
-# PAUSED — desktop safety patch checkpoint
+# Historical pause checkpoint — resumed 2026-11-06
+
+The user explicitly resumed on 2026-11-06. The record below describes the paused
+2026-11-05 state, not current release status. Follow newer validation/release notes
+for the Beta 21 continuation; never move the original Beta 20 tag.
 
 Saved at the user's explicit request on 2026-11-05 (Asia/Kolkata).
 **Do not continue debugging, rebuild/retry CI, merge, or publish until the user resumes.**

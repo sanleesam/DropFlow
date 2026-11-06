@@ -83,7 +83,8 @@ pub fn send_files_over_tcp(
     .map_err(|e| format!("Failed to connect to peer at {target_socket_addr}: {e}"))?;
 
     info!("[Sender] CONNECTED to {target_socket_addr}");
-    let _cancellation = super::lifecycle::SocketCancellation::watch(&stream,cancel_flag.clone())?;
+    let mut stream = super::transport::CancellableStream::new(&mut stream,cancel_flag.clone())
+        .map_err(|e| format!("Failed to configure cancellable socket: {e}"))?;
 
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))

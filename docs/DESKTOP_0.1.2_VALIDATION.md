@@ -1,4 +1,8 @@
-# Desktop 0.1.2-beta.20 validation — 2026-11-05
+# Desktop 0.1.2 safety-patch validation — 2026-11-05/06
+
+The native checks below describe Beta 20 on 2026-11-05. Its Windows cancellation
+failure prevented publication. The continuation targets Beta 21; it does not
+retroactively count Beta 20 as released or claim its native checks were rerun.
 
 ## Scope
 
@@ -51,6 +55,25 @@ Disposable native fixtures were under `/private/tmp/dropflow-patch20-receive`.
 No OS/network/accessibility settings or physical-device data were changed.
 
 ## Remaining acceptance / release evidence
+
+### Beta 21 continuation — 2026-11-06
+
+Windows CI run 42033253453 reproduced a failure to interrupt a pending blocking
+read using a cloned socket's shutdown. Mac passed; Windows failed one test and
+the Beta channel sync was skipped, preserving Beta 19. The Beta 20 tag is retained.
+
+Beta 21 replaces that monitor with a single-owner cancellable Read/Write adapter.
+The kernel waits in 50 ms intervals, but poll timeouts are consumed internally
+until the existing 75-second approval / 15-second inactivity budget expires or
+the user's cancellation flag is set. Cancel returns ConnectionAborted rather
+than Interrupted, which read_exact/write_all would silently retry. No additional
+reader, socket clone, wire-format change, or background watcher thread is used.
+
+Local Rust suite now passes 73 tests, including a genuinely pending read cancelled
+within one second (the original Windows gate is not weakened), a blocked write,
+fragmented reads, inactivity budgets and a complete DFP/1 TCP round trip across
+the adapter. Both-platform PR checks are added to run before creating a new tag;
+their results and final artifact evidence remain pending until verified live.
 
 Local final checks passed: 69 Rust library tests, TypeScript, 21 lifecycle
 scenarios, 21 UI primitive assertions, production frontend build, and 12 desktop

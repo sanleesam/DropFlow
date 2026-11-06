@@ -1,5 +1,8 @@
 # DropFlow 0.1.2-beta.20 — desktop safety patch
 
+Historical unpublished candidate. Windows cancellation regression failed, so
+publication was withheld. Its tag is preserved; fixes continue in Beta 21.
+
 This is a **Beta patch**, not a Stable release. Android's version and release
 channel are unchanged.
 

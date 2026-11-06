@@ -69,40 +69,6 @@ impl Drop for ConnectionPermit {
     }
 }
 
-/// Wake blocking reads/writes when a user cancels, including the approval wait.
-pub struct SocketCancellation {
-    stop: std::sync::mpsc::Sender<()>,
-    worker: Option<std::thread::JoinHandle<()>>,
-}
-impl SocketCancellation {
-    pub fn watch(stream: &std::net::TcpStream, flag: Arc<AtomicBool>) -> Result<Self, String> {
-        let socket = stream.try_clone().map_err(|e| e.to_string())?;
-        let (stop, rx) = std::sync::mpsc::channel();
-        let worker = std::thread::spawn(move || loop {
-            if flag.load(Ordering::Relaxed) {
-                let _ = socket.shutdown(std::net::Shutdown::Both);
-                break;
-            }
-            match rx.recv_timeout(std::time::Duration::from_millis(50)) {
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                _ => break,
-            }
-        });
-        Ok(Self {
-            stop,
-            worker: Some(worker),
-        })
-    }
-}
-impl Drop for SocketCancellation {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,15 +78,36 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (_peer, _) = listener.accept().unwrap();
-        client
-            .set_read_timeout(Some(std::time::Duration::from_secs(3)))
-            .unwrap();
         let flag = Arc::new(AtomicBool::new(false));
-        let _watch = SocketCancellation::watch(&client, flag.clone()).unwrap();
-        flag.store(true, Ordering::Relaxed);
+        let worker_flag = flag.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut stream =
+                super::super::transport::CancellableStream::new(&mut client, worker_flag).unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+                .unwrap();
+            ready_tx.send(()).unwrap();
+            tx.send(stream.read_exact(&mut [0]).map_err(|error| error.kind()))
+                .unwrap();
+        });
+        ready_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(180));
+        assert!(matches!(
+            rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
         let start = std::time::Instant::now();
-        let _ = client.read(&mut [0]);
+        flag.store(true, Ordering::Relaxed);
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap(),
+            Err(std::io::ErrorKind::ConnectionAborted)
+        );
         assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        worker.join().unwrap();
     }
     #[test]
     fn spoofed_remembered_peer_still_requires_approval() {

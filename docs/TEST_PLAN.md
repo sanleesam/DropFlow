@@ -4,7 +4,7 @@ Run every case on real hardware: **Android phone**, **Windows PC**, **MacBook**.
 All devices must be on the same Wi-Fi network (no guest network, no AP
 isolation, no VPN). Builds under test (versioned independently per platform):
 
-- Desktop candidate: `0.1.2-beta.20`
+- Desktop candidate: `0.1.2-beta.21` (Beta 20 was withheld after a Windows test failure)
 - Android published preview: `0.2.0-alpha.1`
 
 Blank cells remain unverified. Current automated/native-loopback evidence is in
