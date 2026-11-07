@@ -17,6 +17,7 @@ class TransferProgressTracker(
     private var currentFileBytes = 0L
     private var currentFileTotalBytes = 0L
     private var sessionBytesTransferred = 0L
+    private var phase = TransferPhase.PREPARING
 
     fun startSession(status: String = "Preparing transfer") {
         currentFileName = status
@@ -24,6 +25,7 @@ class TransferProgressTracker(
     }
 
     fun startFile(fileIndex: Int, fileName: String, fileTotalBytes: Long, initialBytes: Long = 0L) {
+        phase = TransferPhase.STREAMING
         currentFileIndex = fileIndex
         currentFileName = fileName
         currentFileBytes = initialBytes.coerceIn(0L, fileTotalBytes)
@@ -39,6 +41,11 @@ class TransferProgressTracker(
     }
 
     fun finishFile() {
+        emitProgress(force = true)
+    }
+
+    fun finishSession() {
+        phase = TransferPhase.FINISHING
         emitProgress(force = true)
     }
 
@@ -58,7 +65,7 @@ class TransferProgressTracker(
         val percentage = if (totalSizeBytes > 0) {
             ((sessionBytesTransferred.toFloat() / totalSizeBytes.toFloat()) * 100f).coerceIn(0f, 100f)
         } else {
-            100f
+            if (phase == TransferPhase.FINISHING) 100f else 0f
         }
 
         val payload = TransferProgressPayload(
@@ -73,7 +80,8 @@ class TransferProgressTracker(
             totalFiles = totalFiles,
             percentage = percentage,
             speedBytesPerSec = speedBytesPerSec,
-            etaSeconds = etaSeconds
+            etaSeconds = etaSeconds,
+            phase = phase
         )
 
         onProgressUpdate(payload)

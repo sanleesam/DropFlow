@@ -46,18 +46,16 @@ fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, onUpdates:
         }
         item {
             SettingsGroup(Icons.Default.Shield, "Receiving files") {
-                SettingSwitch("Ask before receiving", "Review each incoming transfer before it starts.",
+                SettingSwitch("Ask before receiving",
+                    if (state.requireConfirmation) "Review each incoming transfer before it starts."
+                    else "Anyone who can reach this device can send files without asking.",
                     state.requireConfirmation, viewModel::updateRequireConfirmation)
-                HorizontalDivider(color = SurfaceGlassBorder)
-                SettingSwitch("Auto-accept trusted devices", "Trust applies during this app session.",
-                    state.autoAcceptTrustedDevices, viewModel::updateAutoAcceptTrusted,
-                    enabled = state.requireConfirmation)
             }
         }
         item {
             SettingsGroup(Icons.Default.FolderOpen, "Downloads") {
                 StatusPill("Downloads / DropFlow")
-                Text("Received files appear here after verification. Files with the same name are saved as separate copies.",
+                Text("Verified files keep their folders here. Files with the same name are saved as separate copies.",
                     color = TextSecondary, fontSize = 13.sp, lineHeight = 20.sp)
             }
         }

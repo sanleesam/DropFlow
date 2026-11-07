@@ -12,5 +12,6 @@ data class HistoryUiState(
     val selectedFilterTab: HistoryFilterTab = HistoryFilterTab.ALL,
     val searchQuery: String = "",
     val allHistoryItems: List<TransferItem> = emptyList(),
-    val filteredItems: List<TransferItem> = emptyList()
+    val filteredItems: List<TransferItem> = emptyList(),
+    val errorMessage: String? = null
 )

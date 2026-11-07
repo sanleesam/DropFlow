@@ -17,7 +17,6 @@ data class UserPreferences(
     val deviceUuid: String,
     val deviceName: String,
     val requireConfirmation: Boolean,
-    val autoAcceptTrustedDevices: Boolean,
     val askBeforeOverwrite: Boolean,
     val autoOpenCompleted: Boolean,
     val accentColor: String,
@@ -31,7 +30,6 @@ class UserPreferencesRepository(private val context: Context) {
         val DEVICE_UUID = stringPreferencesKey("device_uuid")
         val DEVICE_NAME = stringPreferencesKey("device_name")
         val REQUIRE_CONFIRMATION = booleanPreferencesKey("require_confirmation")
-        val AUTO_ACCEPT_TRUSTED = booleanPreferencesKey("auto_accept_trusted")
         val ASK_BEFORE_OVERWRITE = booleanPreferencesKey("ask_before_overwrite")
         val AUTO_OPEN_COMPLETED = booleanPreferencesKey("auto_open_completed")
         val ACCENT_COLOR = stringPreferencesKey("accent_color")
@@ -49,7 +47,6 @@ class UserPreferencesRepository(private val context: Context) {
             deviceUuid = uuid,
             deviceName = preferences[PreferencesKeys.DEVICE_NAME] ?: android.os.Build.MODEL,
             requireConfirmation = preferences[PreferencesKeys.REQUIRE_CONFIRMATION] ?: true,
-            autoAcceptTrustedDevices = preferences[PreferencesKeys.AUTO_ACCEPT_TRUSTED] ?: true,
             askBeforeOverwrite = preferences[PreferencesKeys.ASK_BEFORE_OVERWRITE] ?: true,
             autoOpenCompleted = preferences[PreferencesKeys.AUTO_OPEN_COMPLETED] ?: false,
             accentColor = preferences[PreferencesKeys.ACCENT_COLOR] ?: "blue",
@@ -83,12 +80,6 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun updateRequireConfirmation(value: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.REQUIRE_CONFIRMATION] = value
-        }
-    }
-
-    suspend fun updateAutoAcceptTrusted(value: Boolean) {
-        context.dataStore.edit { preferences ->
-            preferences[PreferencesKeys.AUTO_ACCEPT_TRUSTED] = value
         }
     }
 

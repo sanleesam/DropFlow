@@ -4,7 +4,6 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
-import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
@@ -15,20 +14,19 @@ private const val TAG = "DropFlowFileSender"
 class FileSender {
 
     /**
-     * Sends files from pre-opened InputStreams (required for Android Storage Access Framework URIs).
-     * Each entry is (inputStream, fileSize, displayName). The caller is responsible for closing the streams.
+     * Opens one Android SAF stream at a time, after the recipient approves.
      *
      * Returns null on success, or a human-readable error message describing the failure.
      */
-    suspend fun sendTransferSessionFromStreams(
+    suspend fun sendTransferSession(
         socketInputStream: InputStream,
         socketOutputStream: OutputStream,
         requestPayload: TransferRequestPayload,
-        fileStreams: List<Triple<InputStream, Long, String>>, // (stream, size, displayName)
+        openFile: (Int) -> InputStream,
         progressTracker: TransferProgressTracker,
         setReadTimeout: (Int) -> Unit = {}
     ): String? = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Starting FileSender (streams) for session ${requestPayload.sessionId} (${fileStreams.size} files)")
+        Log.d(TAG, "Sending ${requestPayload.totalFiles} files in session ${requestPayload.sessionId}")
 
         try {
             // 1. Send TransferRequest frame
@@ -37,7 +35,13 @@ class FileSender {
             // 2. Read TransferAccept frame
             val acceptHeader = readAuthorizationResponse(socketInputStream, setReadTimeout)
             if (acceptHeader.tag == FrameTag.TRANSFER_REJECT) {
-                return@withContext "Transfer declined by recipient"
+                val payload = acceptHeader.payload.toString(Charsets.UTF_8)
+                val reason = runCatching { TransferRejectPayload.fromJsonString(payload).reason }.getOrDefault(payload)
+                return@withContext when {
+                    reason.contains("busy", ignoreCase = true) -> "The recipient is busy. Try again shortly."
+                    reason.contains("timed out", ignoreCase = true) -> "The recipient did not respond in time."
+                    else -> "Transfer declined by recipient"
+                }
             }
             if (acceptHeader.tag != FrameTag.TRANSFER_ACCEPT) {
                 Log.e(TAG, "Peer responded to transfer request with frame tag 0x${String.format("%02X", acceptHeader.tag.code)}")
@@ -46,10 +50,11 @@ class FileSender {
 
             val buffer = ByteArray(Protocol.DEFAULT_CHUNK_SIZE)
 
-            for (idx in fileStreams.indices) {
-                val (fileIn, fileSize, displayName) = fileStreams[idx]
+            for ((idx, file) in requestPayload.files.withIndex()) {
+                val fileSize = file.sizeBytes
+                val displayName = file.relativePath
 
-                Log.d(TAG, "Sending file ${idx + 1}/${fileStreams.size}: '$displayName' ($fileSize bytes)")
+                Log.d(TAG, "Sending file ${idx + 1}/${requestPayload.totalFiles}: '$displayName' ($fileSize bytes)")
 
                 // Send FileHeader — resume always starts at 0 for SAF streams (no seekable resume)
                 FrameUtils.writeFileHeader(
@@ -77,16 +82,17 @@ class FileSender {
                 if (!ack.status.equals("ACCEPTED", ignoreCase = true)) {
                     throw IllegalStateException("Receiver rejected file '$displayName': ${ack.status}")
                 }
-                // Note: resumeOffset from receiver is ignored for SAF streams (no seek support)
+                check(ack.resumeOffset == 0L) { "The recipient requested resume, which Android doesn't support yet" }
 
                 progressTracker.startFile(idx, displayName, fileSize, 0L)
 
                 val messageDigest = MessageDigest.getInstance("SHA-256")
                 var bytesSent = 0L
 
-                BufferedInputStream(fileIn).use { bufferedIn ->
-                    var read: Int
-                    while (bufferedIn.read(buffer).also { read = it } != -1) {
+                BufferedInputStream(openFile(idx)).use { bufferedIn ->
+                    while (bytesSent < fileSize) {
+                        val read = bufferedIn.read(buffer, 0, minOf(buffer.size.toLong(), fileSize - bytesSent).toInt())
+                        if (read <= 0) break
                         FrameUtils.writeHeader(socketOutputStream, FrameTag.DATA_CHUNK, read)
                         socketOutputStream.write(buffer, 0, read)
                         socketOutputStream.flush()
@@ -95,6 +101,7 @@ class FileSender {
                         bytesSent += read
                         progressTracker.onChunkTransferred(read.toLong())
                     }
+                    check(bufferedIn.read() == -1) { "'$displayName' grew after it was selected" }
                 }
 
                 if (bytesSent != fileSize) {
@@ -116,6 +123,7 @@ class FileSender {
                 )
             }
 
+            progressTracker.finishSession()
             // Send TransferComplete
             FrameUtils.writeTransferComplete(socketOutputStream, requestPayload.sessionId)
 

@@ -19,12 +19,18 @@ import com.dropflow.android.ui.theme.*
 
 @Composable
 fun ActiveTransferCard(progress: TransferProgressPayload, onCancel: () -> Unit, modifier: Modifier = Modifier) {
+    val sending = progress.direction == SessionDirection.OUTGOING
+    val phase = when (progress.phase) {
+        TransferPhase.PREPARING -> if (sending) "Awaiting approval" else "Preparing"
+        TransferPhase.STREAMING -> "${if (sending) "Sending" else "Receiving"} · ${progress.currentFileIndex + 1} of ${progress.totalFiles}"
+        TransferPhase.FINISHING -> "Finishing"
+    }
     GlassCard(modifier.fillMaxWidth(), borderColor = BlueAccentHover) {
         Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("${if (progress.direction == SessionDirection.OUTGOING) "Sending" else "Receiving"} · ${progress.currentFileIndex + 1} of ${progress.totalFiles}",
+                    Text(phase,
                         color = IcyBlue, fontSize = 11.sp)
                     Text(progress.currentFileName, color = TextPrimary, fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -35,9 +41,15 @@ fun ActiveTransferCard(progress: TransferProgressPayload, onCancel: () -> Unit, 
                 modifier = Modifier.fillMaxWidth().padding(end = 8.dp).height(5.dp).clip(RoundedCornerShape(3.dp)),
                 color = BlueAccentHover, trackColor = ProgressTrack)
             Row(Modifier.fillMaxWidth().padding(end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("${progress.percentage.toInt().coerceIn(0, 100)}% · ${formatBytes(progress.sessionBytesTransferred)} / ${formatBytes(progress.sessionTotalBytes)}",
+                Text(when (progress.phase) {
+                    TransferPhase.PREPARING -> if (sending) "Keep both devices open" else "Waiting for the first file"
+                    TransferPhase.STREAMING -> "${progress.percentage.toInt().coerceIn(0, 100)}% · ${formatBytes(progress.sessionBytesTransferred)} / ${formatBytes(progress.sessionTotalBytes)}"
+                    TransferPhase.FINISHING -> if (sending) "Waiting for the recipient to confirm" else "Verifying and saving files"
+                },
                     color = TextSecondary, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                Text(formatSpeed(progress.speedBytesPerSec), color = IcyBlue, fontSize = 11.sp)
+                if (progress.phase == TransferPhase.STREAMING) {
+                    Text(formatSpeed(progress.speedBytesPerSec), color = IcyBlue, fontSize = 11.sp)
+                }
             }
         }
     }

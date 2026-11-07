@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import socket
 import struct
 import subprocess
@@ -31,7 +32,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 ADB = str(Path(os.environ.get('ANDROID_HOME', str(Path.home() / 'Library/Android/sdk'))) / 'platform-tools/adb')
 def adb(*params):
     return subprocess.check_output([ADB, '-s', args.serial, *params])
-adb('forward', f'tcp:{args.port}', 'tcp:42100')
+adb('forward', '--no-rebind', f'tcp:{args.port}', 'tcp:42100')
 def nodes():
     for attempt in range(3):
         try:
@@ -81,8 +82,8 @@ def connect():
     frame(s,10,'HELLO DFP/1'); assert read(s)==(10,b'HELLO_ACK DFP/1')
     return s
 
-def request(s, names, bodies, count=None):
-    sid='qa-'+uuid.uuid4().hex[:10]
+def request(s, names, bodies, count=None, session_id=None):
+    sid=session_id or 'qa-'+uuid.uuid4().hex[:10]
     files=[dict(fileIndex=i,relativePath=n,sizeBytes=len(b)) for i,(n,b) in enumerate(zip(names,bodies))]
     p=dict(sessionId=sid,senderId='qa-peer',senderName='MacBook Pro · Android QA',senderPlatform='macOS',
         totalFiles=len(files) if count is None else count,totalSizeBytes=sum(len(x) for x in bodies),files=files)
@@ -116,6 +117,18 @@ def run():
         frame(s,6,sid); tag,p=read(s); assert tag==8 and json.loads(p)['status']=='ACK',(tag,p)
         for n,b in zip(names,bodies): assert adb('exec-out','cat','/sdcard/Download/DropFlow/'+n)==b
     print('PASS: request on Settings, two files including empty, bytes saved before final ACK',flush=True)
+    folder='alpha2-nested-'+uuid.uuid4().hex[:8]
+    nested=f'{folder}/sub/Unicode-വീട്.txt'
+    nested_path='/sdcard/Download/DropFlow/'+nested
+    collision_path=nested_path.removesuffix('.txt')+' (1).txt'
+    for body in (b'original nested bytes', b'independent collision bytes'):
+        with connect() as s:
+            sid,_=request(s,[nested],[body]); accepted(s)
+            sendfile(s,0,nested,body); frame(s,6,sid)
+            assert read(s)[0]==8
+    assert adb('shell','-T','cat',shlex.quote(nested_path))==b'original nested bytes'
+    assert adb('shell','-T','cat',shlex.quote(collision_path))==b'independent collision bytes'
+    print('PASS: folder hierarchy and Unicode survive; duplicate names preserve both files',flush=True)
     # Decline from History.
     tap('Transfers')
     with connect() as s:
@@ -124,6 +137,9 @@ def run():
     with connect() as s:
         request(s,['invalid-count.txt'],[b'no'],count=2); gone(s)
     print('PASS: malformed manifest rejected',flush=True)
+    with connect() as s:
+        request(s,['../outside.txt'],[b'no']); gone(s)
+    print('PASS: path traversal rejected before receiving',flush=True)
     with connect() as s:
         sid,_=request(s,['accepted-name.txt'],[b'no']); accepted(s)
         frame(s,4,dict(fileIndex=0,relativePath='different-name.txt',sizeBytes=2)); gone(s)
@@ -141,9 +157,11 @@ def run():
         assert adb('shell','test','!','-e','/sdcard/Download/DropFlow/'+name)==b''
     print('PASS: sender cancellation cleans up output',flush=True)
     with connect() as first:
-        request(first,['pending.txt'],[b'pending'])
-        with connect() as second:
-            request(second,['second.txt'],[b'second']); assert read(second)[0]==3
+        sid,_=request(first,['pending.txt'],[b'pending'])
+        for _ in range(2):
+            with connect() as second:
+                request(second,['second.txt'],[b'second'],session_id=sid)
+                tag,p=read(second); assert tag==3 and b'Busy' in p,(tag,p)
         tap('Decline'); assert read(first)[0]==3
     print('PASS: concurrent request rejected without replacing original prompt',flush=True)
     tap('Settings')
@@ -162,15 +180,29 @@ def run():
         tap('Transfers')
         assert any(n.get('text', '').startswith('Receiving ·') for n in nodes())
         tap('Cancel transfer')
-        tag, _ = read(s)
-        assert tag == 7, tag
+        try:
+            read(s)
+            raise AssertionError('Local cancellation did not close the socket')
+        except (EOFError, ConnectionResetError):
+            pass
         time.sleep(.5)
         assert adb('shell', 'test', '!', '-e', '/sdcard/Download/DropFlow/' + name) == b''
     assert any(n.get('text') == 'Cancelled' for n in nodes())
     print('PASS: progress across About/History and local cancellation status/cleanup', flush=True)
     tap('Transfers'); shot('history-results')
+    adb('shell','am','force-stop','com.dropflow.android')
+    adb('shell','am','start','-n','com.dropflow.android/.MainActivity')
+    tap('Transfers')
+    assert any(n.get('text') == 'Cancelled' for n in nodes()), 'History missing after restart'
+    tap('Clear history',scroll=True)
+    assert any(n.get('text') == 'Clear transfer history?' for n in nodes())
+    tap('Clear history')
+    assert any(n.get('text') == 'No recent transfers' for n in nodes())
+    assert adb('shell','-T','cat',shlex.quote(nested_path))==b'original nested bytes'
+    print('PASS: history survives process restart; clearing it keeps received files',flush=True)
     for name in names:
         adb('shell', 'rm', '/sdcard/Download/DropFlow/' + name)
+    adb('shell','rm',shlex.quote(nested_path),shlex.quote(collision_path))
     print('RECEIVER CHECKS PASSED',flush=True)
 if __name__ == '__main__':
     try:

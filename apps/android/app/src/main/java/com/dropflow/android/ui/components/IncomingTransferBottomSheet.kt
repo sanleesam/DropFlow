@@ -24,8 +24,6 @@ import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Tablet
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -34,10 +32,7 @@ import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,8 +41,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
 import com.dropflow.android.core.network.transfer.TransferRequestPayload
 import com.dropflow.android.core.util.formatBytes
 import com.dropflow.android.ui.theme.BackgroundDark
@@ -61,15 +54,11 @@ import com.dropflow.android.ui.theme.TextSecondary
 @Composable
 fun IncomingTransferBottomSheet(
     request: TransferRequestPayload,
-    onAccept: (trustDevice: Boolean) -> Unit,
+    onAccept: () -> Unit,
     onDecline: () -> Unit,
     modifier: Modifier = Modifier,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 ) {
-    // Keyed per request so a declined transfer never leaks its trust choice
-    // into the next incoming request.
-    var trustDevice by remember(request.sessionId) { mutableStateOf(false) }
-
     val platformIcon: ImageVector = when (request.senderPlatform.lowercase()) {
         "macbook", "laptop" -> Icons.Default.Laptop
         "tablet" -> Icons.Default.Tablet
@@ -178,27 +167,8 @@ fun IncomingTransferBottomSheet(
                 }
             }
 
-            // Trust Device Toggle
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Checkbox(
-                    checked = trustDevice,
-                    modifier = Modifier.semantics { contentDescription = "Trust this device during this app session" },
-                    onCheckedChange = { trustDevice = it },
-                    colors = CheckboxDefaults.colors(
-                        checkedColor = BlueAccentPrimary,
-                        uncheckedColor = TextSecondary
-                    )
-                )
-                Text(
-                    text = "Trust this device during this app session",
-                    color = TextPrimary,
-                    fontSize = 12.sp
-                )
-            }
+            Text("Only accept files you were expecting. Sender identity isn't verified.",
+                color = TextSecondary, fontSize = 12.sp)
 
             // Action Buttons (Accept / Decline)
             Row(
@@ -226,7 +196,7 @@ fun IncomingTransferBottomSheet(
                 }
 
                 Button(
-                    onClick = { onAccept(trustDevice) },
+                    onClick = onAccept,
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp),

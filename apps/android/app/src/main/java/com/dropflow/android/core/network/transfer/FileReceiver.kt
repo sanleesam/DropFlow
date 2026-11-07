@@ -25,12 +25,12 @@ class FileReceiver(
     ): Boolean = withContext(Dispatchers.IO) {
         Log.d(TAG, "Starting FileReceiver for session ${requestPayload.sessionId} (${requestPayload.totalFiles} files, ${requestPayload.totalSizeBytes} bytes)")
         val activeTargets = mutableListOf<WritableTarget>()
-        val completedTargets = mutableListOf<Pair<WritableTarget, Long>>() // target -> bytesWritten
+        val completedTargets = mutableListOf<WritableTarget>()
 
         try {
             ReceiveValidation.request(requestPayload)
             for (i in 0 until requestPayload.totalFiles) {
-                val header = FrameUtils.readHeader(inputStream)
+                val header = readReceiveHeader(inputStream)
                 if (header.tag != FrameTag.FILE_HEADER) {
                     throw IllegalStateException("Expected FILE_HEADER frame tag, received 0x${String.format("%02X", header.tag.code)}")
                 }
@@ -42,22 +42,17 @@ class FileReceiver(
 
                 progressTracker.startFile(i, fileHeader.relativePath, fileHeader.sizeBytes)
 
-                // Send TransferAck (resumeOffset: 0)
-                FrameUtils.writeTransferAck(outputStream, TransferAckPayload(status = "ACCEPTED", resumeOffset = 0L))
-
                 // Open the storage target (MediaStore on API 29+, legacy .part file below).
                 val target = storageManager.prepareTargetStream(fileHeader.relativePath)
                 activeTargets += target
+                FrameUtils.writeTransferAck(outputStream, TransferAckPayload(status = "ACCEPTED", resumeOffset = 0L))
 
                 val messageDigest = MessageDigest.getInstance("SHA-256")
                 var bytesWritten = 0L
 
                 target.stream.use { fileOut ->
                     while (bytesWritten < fileHeader.sizeBytes) {
-                        val chunkHeader = FrameUtils.readHeader(inputStream)
-                        if (chunkHeader.tag == FrameTag.TRANSFER_CANCEL) {
-                            throw IllegalStateException("Transfer cancelled by sender")
-                        }
+                        val chunkHeader = readReceiveHeader(inputStream)
                         if (chunkHeader.tag != FrameTag.DATA_CHUNK) {
                             throw IllegalStateException("Expected DATA_CHUNK frame tag, received 0x${String.format("%02X", chunkHeader.tag.code)}")
                         }
@@ -74,12 +69,13 @@ class FileReceiver(
                         progressTracker.onChunkTransferred(chunkBytes.size.toLong())
                     }
                     fileOut.flush()
+                    fileOut.fd.sync()
                 }
 
                 progressTracker.finishFile()
 
                 // Read FileComplete frame
-                val compHeader = FrameUtils.readHeader(inputStream)
+                val compHeader = readReceiveHeader(inputStream)
                 if (compHeader.tag != FrameTag.FILE_COMPLETE) {
                     throw IllegalStateException("Expected FILE_COMPLETE frame tag, received 0x${String.format("%02X", compHeader.tag.code)}")
                 }
@@ -97,12 +93,12 @@ class FileReceiver(
 
                 // File verified — remember it for finalization once the whole
                 // session completes, matching the desktop receiver semantics.
-                completedTargets += target to bytesWritten
+                completedTargets += target
                 activeTargets.remove(target)
                 Log.d(TAG, "File '${target.displayName}' received and verified (${bytesWritten} bytes)")
             }
 
-            val finalHeader = FrameUtils.readHeader(inputStream)
+            val finalHeader = readReceiveHeader(inputStream)
             if (finalHeader.tag != FrameTag.TRANSFER_COMPLETE) {
                 throw IllegalStateException("Expected TRANSFER_COMPLETE, received ${finalHeader.tag}")
             }
@@ -112,9 +108,8 @@ class FileReceiver(
             }
             // Session fully verified — publish every file now. This keeps failed
             // sessions from leaving partial output in the Downloads folder.
-            completedTargets.forEach { (target, bytesWritten) ->
-                storageManager.completePendingFile(target, bytesWritten)
-            }
+            progressTracker.finishSession()
+            completedTargets.forEach(storageManager::completePendingFile)
             // A sender may report success only after durable output has been published.
             FrameUtils.writeTransferAck(outputStream, TransferAckPayload(status = "ACK"))
             completedTargets.clear()
@@ -126,11 +121,17 @@ class FileReceiver(
                 storageManager.cleanupTarget(target)
             }
             // Anything already written but not yet finalized is cleaned up too.
-            completedTargets.forEach { (target, _) ->
+            completedTargets.forEach { target ->
                 storageManager.cleanupTarget(target)
             }
             Log.e(TAG, "FileReceiver session failed for ${requestPayload.sessionId}: ${e.message}", e)
             false
         }
+    }
+
+    private fun readReceiveHeader(input: InputStream): FrameHeader {
+        val header = FrameUtils.readHeader(input)
+        check(header.tag != FrameTag.TRANSFER_CANCEL) { "Transfer cancelled by sender" }
+        return header
     }
 }

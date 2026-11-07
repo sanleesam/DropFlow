@@ -2,13 +2,22 @@ package com.dropflow.android.core.update
 
 import java.net.HttpURLConnection
 import java.net.URI
+import java.util.concurrent.CancellationException
 import org.json.JSONObject
 
 class ChannelNotPublished : Exception("This update channel has no published release yet.")
 
 class AndroidUpdateClient {
-    @Volatile private var activeConnection: HttpURLConnection? = null
-    fun cancel() { activeConnection?.disconnect() }
+    private var activeConnection: HttpURLConnection? = null
+    private var cancelled = false
+
+    fun cancel() {
+        val connection = synchronized(this) {
+            cancelled = true
+            activeConnection.also { activeConnection = null }
+        }
+        connection?.disconnect()
+    }
 
     fun <T> request(address: String, block: (HttpURLConnection) -> T): T {
         var uri = URI(address)
@@ -16,12 +25,16 @@ class AndroidUpdateClient {
             require(isTrustedUpdateRedirect(uri)) { "Untrusted update redirect" }
             val connection = (uri.toURL().openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = false
+                useCaches = false
                 connectTimeout = 10_000
                 readTimeout = 15_000
                 setRequestProperty("User-Agent", "DropFlow-Android-Updater")
             }
-            activeConnection = connection
             try {
+                synchronized(this) {
+                    if (cancelled) throw CancellationException("Update request cancelled")
+                    activeConnection = connection
+                }
                 when (val status = connection.responseCode) {
                     301, 302, 303, 307, 308 -> {
                         uri = uri.resolve(connection.getHeaderField("Location") ?: error("Missing update redirect"))
@@ -32,7 +45,9 @@ class AndroidUpdateClient {
                 }
             } finally {
                 connection.disconnect()
-                if (activeConnection === connection) activeConnection = null
+                synchronized(this) {
+                    if (activeConnection === connection) activeConnection = null
+                }
             }
         }
         error("Too many update redirects")

@@ -108,7 +108,8 @@ fun DropFlowNavHost(navController: NavHostController, homeViewModel: HomeViewMod
     state.pendingTransferRequest?.let { request ->
         key(request.sessionId) {
             IncomingTransferBottomSheet(request,
-                onAccept = homeViewModel::acceptTransfer, onDecline = { homeViewModel.declineTransfer() })
+                onAccept = { homeViewModel.acceptTransfer(request) },
+                onDecline = { homeViewModel.declineTransfer(request) })
         }
     }
 }

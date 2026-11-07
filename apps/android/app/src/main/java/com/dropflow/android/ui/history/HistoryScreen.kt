@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -18,9 +19,20 @@ import com.dropflow.android.ui.theme.*
 @Composable
 fun HistoryScreen(viewModel: HistoryViewModel, modifier: Modifier = Modifier) {
     val state by viewModel.uiState.collectAsState()
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
+    if (confirmClear) AlertDialog(
+        onDismissRequest = { confirmClear = false },
+        title = { Text("Clear transfer history?") },
+        text = { Text("This removes the activity list from DropFlow. Your files won't be deleted.") },
+        confirmButton = { TextButton(onClick = { confirmClear = false; viewModel.clearHistory() }) { Text("Clear history") } },
+        dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } }
+    )
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { PageIntro("YOUR ACTIVITY", "Transfers", "View your sent and received files during this app session.") }
+        item { PageIntro("YOUR ACTIVITY", "Transfers", "Your last 100 transfers, saved on this device.") }
+        state.errorMessage?.let { message ->
+            item { Text(message, color = MaterialTheme.colorScheme.error) }
+        }
         item {
             OutlinedTextField(state.searchQuery, viewModel::setSearchQuery,
                 modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(12.dp),
@@ -47,5 +59,12 @@ fun HistoryScreen(viewModel: HistoryViewModel, modifier: Modifier = Modifier) {
                 if (state.allHistoryItems.isEmpty()) "Sent and received files will appear here."
                 else "Try a different search or switch the filter.")
         } else items(state.filteredItems, key = { it.id }) { TransferCard(it) }
+        if (state.allHistoryItems.isNotEmpty()) item {
+            TextButton(onClick = { confirmClear = true }) {
+                Icon(Icons.Default.DeleteOutline, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Clear history")
+            }
+        }
     }
 }

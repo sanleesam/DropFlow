@@ -52,7 +52,7 @@ class NsdDeviceDiscoveryEngine(
     // serviceToPeerMap: serviceName -> UUID
     private val serviceToPeerMap = ConcurrentHashMap<String, String>()
     // pendingResolutions: set of serviceNames currently queued or being resolved
-    private val pendingResolutions = ConcurrentHashMap.newKeySet<String>()
+    private val pendingResolutions = ConcurrentHashMap<String, NsdServiceInfo>()
 
     // Sequential resolution queue to avoid NsdManager.FAILURE_ALREADY_ACTIVE (code 3)
     private val resolveQueue = ConcurrentLinkedQueue<NsdServiceInfo>()
@@ -65,10 +65,8 @@ class NsdDeviceDiscoveryEngine(
 
     private var discoveryRetryCount = 0
 
-    private var isBroadcasting = false
-    private var isBrowsing = false
-
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val restartDiscovery = Runnable { startBrowsing() }
 
     private val localDeviceType: String
         get() {
@@ -76,13 +74,15 @@ class NsdDeviceDiscoveryEngine(
             return if (isTablet) "tablet" else "phone"
         }
 
-    fun initialize(uuid: String, deviceName: String, port: Int = DEFAULT_PORT) {
+    fun initialize(uuid: String) {
         this.localUuid = uuid
     }
 
     fun start(deviceName: String = currentDeviceName ?: "Android Device", port: Int = DEFAULT_PORT) {
         startBroadcasting(deviceName, port)
+        discoveryRetryCount = 0
         startBrowsing()
+        registerNetworkCallback()
     }
 
     fun stop() {
@@ -92,7 +92,7 @@ class NsdDeviceDiscoveryEngine(
     }
 
     fun startBroadcasting(deviceName: String = currentDeviceName ?: "Android Device", port: Int = DEFAULT_PORT) {
-        if (isBroadcasting || localUuid.isEmpty()) return
+        if (registrationListener != null || localUuid.isEmpty()) return
         currentDeviceName = deviceName
 
         val serviceInfo = NsdServiceInfo().apply {
@@ -113,18 +113,23 @@ class NsdDeviceDiscoveryEngine(
 
         registrationListener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(NsdServiceInfo: NsdServiceInfo) {
-                Log.d(TAG, "[DropFlowNSD] mDNS Service registered: ${NsdServiceInfo.serviceName}")
-                isBroadcasting = true
+                mainHandler.post {
+                    if (registrationListener === this) Log.d(TAG, "mDNS service registered: ${NsdServiceInfo.serviceName}")
+                }
             }
 
             override fun onRegistrationFailed(arg0: NsdServiceInfo, arg1: Int) {
-                Log.e(TAG, "[DropFlowNSD] mDNS Registration failed code: $arg1")
-                isBroadcasting = false
+                mainHandler.post {
+                    if (registrationListener !== this) return@post
+                    Log.e(TAG, "mDNS registration failed: $arg1")
+                    registrationListener = null
+                }
             }
 
             override fun onServiceUnregistered(arg0: NsdServiceInfo) {
-                Log.d(TAG, "[DropFlowNSD] mDNS Service unregistered")
-                isBroadcasting = false
+                mainHandler.post {
+                    if (registrationListener === this) registrationListener = null
+                }
             }
 
             override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
@@ -136,19 +141,20 @@ class NsdDeviceDiscoveryEngine(
             nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registrationListener)
         } catch (e: Exception) {
             Log.e(TAG, "[DropFlowNSD] Failed to register mDNS service", e)
+            registrationListener = null
         }
     }
 
     fun stopBroadcasting() {
-        registrationListener?.let {
+        val previous = registrationListener
+        registrationListener = null
+        previous?.let {
             try {
                 nsdManager.unregisterService(it)
             } catch (e: Exception) {
                 Log.w(TAG, "[DropFlowNSD] Safe warning on unregisterService", e)
             }
         }
-        registrationListener = null
-        isBroadcasting = false
     }
 
     /** Re-registers the mDNS service so peers immediately see the new [deviceName]. */
@@ -159,66 +165,61 @@ class NsdDeviceDiscoveryEngine(
     }
 
     fun startBrowsing() {
-        if (isBrowsing) return
-        discoveryRetryCount = 0
+        if (discoveryListener != null) return
 
         discoveryListener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(regType: String) {
-                Log.d(TAG, "[DropFlowNSD] mDNS Discovery started: $regType")
-                isBrowsing = true
-                mainHandler.post { listener.onDiscoveryStarted() }
+                mainHandler.post {
+                    if (discoveryListener !== this) return@post
+                    Log.d(TAG, "[DropFlowNSD] mDNS Discovery started: $regType")
+                    listener.onDiscoveryStarted()
+                }
             }
 
             override fun onServiceFound(service: NsdServiceInfo) {
                 Log.d(TAG, "[DropFlowNSD] service discovered: ${service.serviceName}")
-                if (service.serviceType.contains("_dropflow._tcp")) {
-                    enqueueResolve(service)
+                mainHandler.post {
+                    if (discoveryListener === this &&
+                        service.serviceType.trimEnd('.').equals(SERVICE_TYPE.trimEnd('.'), ignoreCase = true)) {
+                        enqueueResolve(service)
+                    }
                 }
             }
 
             override fun onServiceLost(service: NsdServiceInfo) {
-                val serviceName = service.serviceName
-                Log.d(TAG, "[DropFlowNSD] service removed: $serviceName")
-                pendingResolutions.remove(serviceName)
-
-                val peerUuid = serviceToPeerMap.remove(serviceName)
-                if (peerUuid != null) {
-                    if (!serviceToPeerMap.values.contains(peerUuid)) {
-                        val removedDevice = discoveredPeersMap.remove(peerUuid)
-                        if (removedDevice != null) {
-                            Log.d(TAG, "[DropFlowNSD] device removed: $peerUuid (${removedDevice.name})")
-                        } else {
-                            Log.d(TAG, "[DropFlowNSD] device removed: $peerUuid")
-                        }
-                        mainHandler.post { listener.onDeviceLost(peerUuid) }
-                    } else {
-                        Log.d(TAG, "[DropFlowNSD] Service $serviceName removed but peer $peerUuid remains mapped via another service")
+                mainHandler.post {
+                    if (discoveryListener !== this) return@post
+                    val serviceName = service.serviceName
+                    pendingResolutions.remove(serviceName)
+                    val peerUuid = serviceToPeerMap.remove(serviceName) ?: return@post
+                    if (peerUuid !in serviceToPeerMap.values) {
+                        discoveredPeersMap.remove(peerUuid)
+                        listener.onDeviceLost(peerUuid)
                     }
-                } else {
-                    Log.d(TAG, "[DropFlowNSD] Service removed before resolution completed or missing mapping: $serviceName")
                 }
             }
 
             override fun onDiscoveryStopped(serviceType: String) {
-                Log.d(TAG, "[DropFlowNSD] mDNS Discovery stopped")
-                isBrowsing = false
-                mainHandler.post { listener.onDiscoveryStopped() }
+                mainHandler.post {
+                    if (discoveryListener !== this) return@post
+                    discoveryListener = null
+                    clearDiscoveryState()
+                    listener.onDiscoveryStopped()
+                }
             }
 
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                Log.e(TAG, "[DropFlowNSD] mDNS Start discovery failed code: $errorCode")
-                isBrowsing = false
-
-                // The previous discovery listener is often still shutting down;
-                // retry automatically instead of surfacing a transient error.
-                if (errorCode == NsdManager.FAILURE_ALREADY_ACTIVE && discoveryRetryCount < DISCOVERY_RETRY_LIMIT) {
-                    discoveryRetryCount++
-                    Log.d(TAG, "[DropFlowNSD] Discovery busy, retrying (attempt $discoveryRetryCount)")
-                    mainHandler.postDelayed({ startBrowsing() }, RESCAN_DELAY_MS * discoveryRetryCount)
-                    return
+                mainHandler.post {
+                    if (discoveryListener !== this) return@post
+                    Log.e(TAG, "[DropFlowNSD] mDNS Start discovery failed code: $errorCode")
+                    discoveryListener = null
+                    if (errorCode == NsdManager.FAILURE_ALREADY_ACTIVE && discoveryRetryCount < DISCOVERY_RETRY_LIMIT) {
+                        discoveryRetryCount++
+                        mainHandler.postDelayed(restartDiscovery, RESCAN_DELAY_MS * discoveryRetryCount)
+                    } else {
+                        listener.onError("Couldn't search for devices. Try refreshing.")
+                    }
                 }
-
-                mainHandler.post { listener.onError("Discovery failed code $errorCode") }
             }
 
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
@@ -230,19 +231,22 @@ class NsdDeviceDiscoveryEngine(
             nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
         } catch (e: Exception) {
             Log.e(TAG, "[DropFlowNSD] Failed to start mDNS discovery", e)
+            discoveryListener = null
+            listener.onError("Couldn't search for devices. Try refreshing.")
         }
     }
 
     fun stopBrowsing() {
-        discoveryListener?.let {
+        mainHandler.removeCallbacks(restartDiscovery)
+        val previous = discoveryListener
+        discoveryListener = null
+        previous?.let {
             try {
                 nsdManager.stopServiceDiscovery(it)
             } catch (e: Exception) {
                 Log.w(TAG, "[DropFlowNSD] Safe warning on stopServiceDiscovery", e)
             }
         }
-        discoveryListener = null
-        isBrowsing = false
         clearDiscoveryState()
     }
 
@@ -254,22 +258,24 @@ class NsdDeviceDiscoveryEngine(
     fun restartBrowsing() {
         Log.d(TAG, "[DropFlowNSD] Manual rescan requested")
         stopBrowsing()
-        mainHandler.postDelayed({ startBrowsing() }, RESCAN_DELAY_MS)
+        discoveryRetryCount = 0
+        mainHandler.postDelayed(restartDiscovery, RESCAN_DELAY_MS)
     }
 
     private fun enqueueResolve(serviceInfo: NsdServiceInfo) {
-        pendingResolutions.add(serviceInfo.serviceName)
+        if (resolveQueue.size >= 64 || pendingResolutions.putIfAbsent(serviceInfo.serviceName, serviceInfo) != null) return
         resolveQueue.add(serviceInfo)
         processNextResolve()
     }
 
+    @Suppress("DEPRECATION") // Keeps a single resolution path on Android 8 and newer.
     private fun processNextResolve() {
         synchronized(resolveLock) {
             if (isResolving) return
             val serviceInfo = resolveQueue.poll() ?: return
             val serviceName = serviceInfo.serviceName
 
-            if (!pendingResolutions.contains(serviceName)) {
+            if (pendingResolutions[serviceName] !== serviceInfo) {
                 Log.d(TAG, "[DropFlowNSD] Service $serviceName was lost while queued, skipping resolution")
                 return processNextResolve()
             }
@@ -280,24 +286,26 @@ class NsdDeviceDiscoveryEngine(
             val resolveListener = object : NsdManager.ResolveListener {
                 override fun onResolveFailed(failedService: NsdServiceInfo, errorCode: Int) {
                     Log.w(TAG, "[DropFlowNSD] mDNS Resolve failed for ${failedService.serviceName} code $errorCode")
-                    pendingResolutions.remove(failedService.serviceName)
-                    synchronized(resolveLock) {
+                    mainHandler.post {
+                        if (pendingResolutions[serviceName] === serviceInfo) pendingResolutions.remove(serviceName)
                         isResolving = false
+                        processNextResolve()
                     }
-                    processNextResolve()
                 }
 
                 override fun onServiceResolved(resolved: NsdServiceInfo) {
-                    try {
-                        handleServiceResolved(resolved)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "[DropFlowNSD] Exception inside handleServiceResolved", e)
-                    } finally {
-                        pendingResolutions.remove(resolved.serviceName)
-                        synchronized(resolveLock) {
+                    mainHandler.post {
+                        try {
+                            if (pendingResolutions[serviceName] === serviceInfo) {
+                                pendingResolutions.remove(serviceName)
+                                handleServiceResolved(resolved)
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "[DropFlowNSD] Exception inside handleServiceResolved", e)
+                        } finally {
                             isResolving = false
+                            processNextResolve()
                         }
-                        processNextResolve()
                     }
                 }
             }
@@ -313,8 +321,9 @@ class NsdDeviceDiscoveryEngine(
         }
     }
 
+    @Suppress("DEPRECATION") // getHost is the compatibility fallback before API 34.
     private fun handleServiceResolved(resolved: NsdServiceInfo) {
-        Log.d(TAG, "[DropFlowNSD] service resolved: ${resolved.serviceName} at ${resolved.host}:${resolved.port}")
+        Log.d(TAG, "mDNS service resolved: ${resolved.serviceName}:${resolved.port}")
 
         val txtRecord = resolved.attributes
         val deviceUuid = getStringAttr(txtRecord, "device_uuid")
@@ -336,13 +345,13 @@ class NsdDeviceDiscoveryEngine(
             ?: getStringAttr(txtRecord, "protocol_version")
             ?: PROTOCOL_VERSION
 
-        if (!version.startsWith("DFP/")) {
+        if (version != PROTOCOL_VERSION) {
             Log.w(TAG, "[DropFlowNSD] Peer rejected: unsupported protocol version '$version'")
             return
         }
 
         val port = resolved.port
-        if (port <= 0) {
+        if (port !in 1..65535) {
             Log.w(TAG, "[DropFlowNSD] Peer rejected: invalid port $port")
             return
         }
@@ -353,14 +362,11 @@ class NsdDeviceDiscoveryEngine(
         val osAttr = getStringAttr(txtRecord, "operating_system") ?: platformAttr
         val capsAttr = getStringAttr(txtRecord, "capabilities") ?: "tcp_v1,sha256"
 
-        val resolvedAddressList = mutableListOf<DeviceAddress>()
-        resolved.host?.let { host ->
-            val ipStr = host.hostAddress
-            if (!ipStr.isNullOrEmpty() && !host.isLoopbackAddress && !host.isAnyLocalAddress && !host.isMulticastAddress) {
-                val family = if (ipStr.contains(":")) "ipv6" else "ipv4"
-                resolvedAddressList.add(DeviceAddress(address = ipStr, family = family))
-            }
-        }
+        val hosts = if (Build.VERSION.SDK_INT >= 34) resolved.hostAddresses else listOfNotNull(resolved.host)
+        val resolvedAddressList = hosts
+            .filterNot { it.isLoopbackAddress || it.isAnyLocalAddress || it.isMulticastAddress }
+            .mapNotNull { host -> host.hostAddress?.let { DeviceAddress(it, if (':' in it) "ipv6" else "ipv4") } }
+            .distinctBy { it.address }.sortedBy { it.family != "ipv4" }
 
         if (resolvedAddressList.isEmpty()) {
             Log.w(TAG, "[DropFlowNSD] Peer rejected: no usable IP addresses for ${resolved.serviceName}")
@@ -375,7 +381,7 @@ class NsdDeviceDiscoveryEngine(
             if (!serviceToPeerMap.values.contains(previousUuid)) {
                 discoveredPeersMap.remove(previousUuid)
                 Log.d(TAG, "[DropFlowNSD] Peer identity replaced for service $serviceName: previous UUID $previousUuid removed")
-                mainHandler.post { listener.onDeviceLost(previousUuid) }
+                listener.onDeviceLost(previousUuid)
             }
         }
 
@@ -401,10 +407,10 @@ class NsdDeviceDiscoveryEngine(
 
         if (isNew) {
             Log.d(TAG, "[DropFlowNSD] device added: ${updatedDevice.name} (UUID=${updatedDevice.id}, type=${updatedDevice.type})")
-            mainHandler.post { listener.onDeviceFound(updatedDevice) }
+            listener.onDeviceFound(updatedDevice)
         } else if (isChanged) {
             Log.d(TAG, "[DropFlowNSD] device updated: ${updatedDevice.name} (UUID=${updatedDevice.id}, type=${updatedDevice.type})")
-            mainHandler.post { listener.onDeviceFound(updatedDevice) }
+            listener.onDeviceFound(updatedDevice)
         } else {
             Log.d(TAG, "[DropFlowNSD] Peer re-resolved unchanged: ${updatedDevice.name} (UUID=${updatedDevice.id})")
         }
@@ -450,19 +456,17 @@ class NsdDeviceDiscoveryEngine(
             override fun onAvailable(network: Network) {
                 Log.d(TAG, "[DropFlowNSD] Wi-Fi Network available, triggering mDNS auto-rediscovery")
                 mainHandler.postDelayed({
-                    if (isBrowsing) {
-                        stopBrowsing()
-                        startBrowsing()
-                    }
-                    if (isBroadcasting || localUuid.isNotEmpty()) {
-                        restartBroadcasting(currentDeviceName ?: "Android Device")
-                    }
+                    if (networkCallback !== this) return@postDelayed
+                    restartBrowsing()
+                    restartBroadcasting(currentDeviceName ?: "Android Device")
                 }, 500)
             }
 
             override fun onLost(network: Network) {
                 Log.d(TAG, "[DropFlowNSD] Wi-Fi Network lost")
-                clearDiscoveryState()
+                mainHandler.post {
+                    if (networkCallback === this) restartBrowsing()
+                }
             }
         }
 
@@ -492,11 +496,12 @@ class NsdDeviceDiscoveryEngine(
         synchronized(resolveLock) {
             resolveQueue.clear()
             pendingResolutions.clear()
-            isResolving = false
+            // An old NSD resolution may still complete. Its token is invalidated,
+            // but do not start another until the platform returns its callback.
         }
         serviceToPeerMap.clear()
         discoveredPeersMap.clear()
-        mainHandler.post { listener.onAllDevicesCleared() }
+        listener.onAllDevicesCleared()
     }
 
     private fun getStringAttr(attributes: Map<String, ByteArray>?, key: String): String? {

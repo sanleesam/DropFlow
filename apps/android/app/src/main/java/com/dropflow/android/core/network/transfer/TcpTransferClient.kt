@@ -1,6 +1,5 @@
 package com.dropflow.android.core.network.transfer
 
-import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -10,10 +9,9 @@ import java.util.UUID
 
 private const val TAG = "DropFlowTcpClient"
 
-class TcpTransferClient {
+internal class TcpTransferClient {
 
     suspend fun connect(
-        context: Context,
         peerUuid: String,
         peerName: String,
         host: String,
@@ -32,8 +30,8 @@ class TcpTransferClient {
         )
 
         Log.d(TAG, "Initiating outgoing TCP connection to $host:$port (peerUuid: $peerUuid)")
+        val socket = Socket()
         return@withContext try {
-            val socket = Socket()
             socket.connect(InetSocketAddress(host, port), Protocol.CONNECT_TIMEOUT_MS)
 
             val connection = TransferConnection(socket, initialSession, onSessionStateChanged)
@@ -51,6 +49,7 @@ class TcpTransferClient {
                 null
             }
         } catch (e: Exception) {
+            runCatching { socket.close() }
             Log.e(TAG, "Failed to connect to TCP peer at $host:$port: ${e.message}", e)
             initialSession.copy(state = SessionState.FAILED, errorMessage = e.message).also {
                 onSessionStateChanged(it)

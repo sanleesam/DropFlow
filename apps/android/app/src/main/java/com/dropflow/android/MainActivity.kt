@@ -37,7 +37,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private val historyViewModel: HistoryViewModel by viewModels {
-        HistoryViewModel.factory((application as DropFlowApplication).transferEngine)
+        HistoryViewModel.factory((application as DropFlowApplication).transferHistory)
     }
 
     private val settingsViewModel: SettingsViewModel by viewModels {

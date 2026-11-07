@@ -26,7 +26,9 @@ data class UpdatesUiState(
 
 class UpdatesViewModel(context: Context, private val preferences: UserPreferencesRepository) : ViewModel() {
     private val app = context.applicationContext
-    private val client = AndroidUpdateClient()
+    // Each operation owns its connection. Old redirects can't steal the
+    // connection that a newer channel check or download needs to cancel.
+    private var activeClient: AndroidUpdateClient? = null
     private val _state = MutableStateFlow(UpdatesUiState())
     val state = _state.asStateFlow()
     private var operation: Job? = null
@@ -45,7 +47,8 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
     private fun reset(channel: AndroidUpdateChannel = _state.value.channel) {
         generation++
         operation?.cancel()
-        client.cancel()
+        activeClient?.cancel()
+        activeClient = null
         readyApk?.delete()
         readyApk = null
         _state.value = UpdatesUiState(channel)
@@ -61,6 +64,7 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
         reset()
         val token = generation
         val channel = _state.value.channel
+        val client = AndroidUpdateClient().also { activeClient = it }
         _state.update { it.copy(phase = UpdatePhase.CHECKING) }
         operation = viewModelScope.launch {
             try {
@@ -85,6 +89,7 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
         readyApk?.delete()
         readyApk = null
         val token = generation
+        val client = AndroidUpdateClient().also { activeClient = it }
         _state.update { it.copy(phase = UpdatePhase.DOWNLOADING, downloaded = 0, message = null) }
         operation = viewModelScope.launch {
             val directory = File(app.cacheDir, "updates")
@@ -165,7 +170,7 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
             .onFailure { error -> _state.update { it.copy(phase = UpdatePhase.ERROR, message = error.message) } }
     }
 
-    override fun onCleared() { operation?.cancel(); client.cancel(); super.onCleared() }
+    override fun onCleared() { operation?.cancel(); activeClient?.cancel(); super.onCleared() }
     companion object {
         fun factory(context: Context, preferences: UserPreferencesRepository): ViewModelProvider.Factory = viewModelFactory {
             initializer { UpdatesViewModel(context.applicationContext, preferences) }
