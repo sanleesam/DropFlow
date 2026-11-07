@@ -12,7 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.dropflow.android.BuildConfig
+import com.dropflow.android.core.model.InstalledRelease
 import com.dropflow.android.core.model.Device
 import com.dropflow.android.core.model.DeviceAddress
 import com.dropflow.android.core.model.DeviceStatus
@@ -36,6 +36,7 @@ class NsdDeviceDiscoveryEngine(
     private val listener: DeviceDiscoveryListener
 ) {
     private val appContext: Context = context.applicationContext
+    private val appVersion = InstalledRelease.read(appContext).versionName
     private val nsdManager: NsdManager = appContext.getSystemService(Context.NSD_SERVICE) as NsdManager
     private val connectivityManager: ConnectivityManager = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
@@ -105,7 +106,7 @@ class NsdDeviceDiscoveryEngine(
             setAttribute("device_type", localDeviceType)
             setAttribute("platform", "Android")
             setAttribute("operating_system", "Android ${Build.VERSION.RELEASE}")
-            setAttribute("application_version", BuildConfig.VERSION_NAME)
+            setAttribute("application_version", appVersion)
             setAttribute("version", PROTOCOL_VERSION)
             setAttribute("protocol_version", PROTOCOL_VERSION)
             setAttribute("capabilities", "tcp_v1,sha256,chunked")

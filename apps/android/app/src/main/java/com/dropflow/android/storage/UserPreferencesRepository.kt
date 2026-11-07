@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import com.dropflow.android.core.model.InstalledRelease
+import com.dropflow.android.core.update.AndroidUpdateChannel
 import java.util.UUID
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "user_preferences")
@@ -25,6 +27,7 @@ data class UserPreferences(
 )
 
 class UserPreferencesRepository(private val context: Context) {
+    private val defaultChannel = AndroidUpdateChannel.forVersion(InstalledRelease.read(context).versionName).id
 
     private object PreferencesKeys {
         val DEVICE_UUID = stringPreferencesKey("device_uuid")
@@ -52,7 +55,7 @@ class UserPreferencesRepository(private val context: Context) {
             accentColor = preferences[PreferencesKeys.ACCENT_COLOR] ?: "blue",
             reduceMotion = preferences[PreferencesKeys.REDUCE_MOTION] ?: false,
             updateChannel = preferences[PreferencesKeys.UPDATE_CHANNEL]
-                ?: com.dropflow.android.core.update.AndroidUpdateChannel.forVersion(com.dropflow.android.BuildConfig.VERSION_NAME).id
+                ?: defaultChannel
         )
     }
 

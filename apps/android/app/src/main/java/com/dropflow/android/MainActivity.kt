@@ -13,7 +13,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.navigation.compose.rememberNavController
-import com.dropflow.android.core.network.transfer.StorageManager
+import com.dropflow.android.core.model.InstalledRelease
 import com.dropflow.android.ui.about.AboutViewModel
 import com.dropflow.android.ui.history.HistoryViewModel
 import com.dropflow.android.ui.home.HomeViewModel
@@ -44,7 +44,9 @@ class MainActivity : ComponentActivity() {
         SettingsViewModel.factory((application as DropFlowApplication).userPreferencesRepository)
     }
 
-    private val aboutViewModel: AboutViewModel by viewModels()
+    private val aboutViewModel: AboutViewModel by viewModels {
+        AboutViewModel.factory(InstalledRelease.read(applicationContext))
+    }
     private val updatesViewModel: UpdatesViewModel by viewModels {
         UpdatesViewModel.factory(applicationContext, (application as DropFlowApplication).userPreferencesRepository)
     }
