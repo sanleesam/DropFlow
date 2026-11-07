@@ -30,6 +30,14 @@ class UpdateInstrumentation : Instrumentation() {
             passed += "real Android JSON parser"
             verifyUpdateApk(targetContext, apk, manifest)
             passed += "installed APK signing identity preflight"
+            val partial = File.createTempFile("upgrade-preflight-", ".part", targetContext.cacheDir)
+            try {
+                apk.copyTo(partial, overwrite = true)
+                verifyUpdateApk(targetContext, partial, manifest)
+                passed += "private .part cache APK parses before installer handoff"
+            } finally {
+                partial.delete()
+            }
             check(runCatching { verifyUpdateApk(targetContext, apk, manifest.copy(versionCode = manifest.versionCode + 1)) }.isFailure)
             passed += "APK metadata mismatch rejected"
             check(runCatching { parseAndroidUpdateManifest(raw.put("versionCode", 18.5).toString(), AndroidUpdateChannel.ALPHA) }.isFailure)

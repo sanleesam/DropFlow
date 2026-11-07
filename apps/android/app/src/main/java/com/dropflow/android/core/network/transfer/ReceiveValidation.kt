@@ -3,13 +3,14 @@ package com.dropflow.android.core.network.transfer
 /** Validates the accepted manifest before any storage allocation. DFP/1 stays unchanged. */
 internal object ReceiveValidation {
     fun request(request: TransferRequestPayload) {
-        require(request.sessionId.isNotBlank()) { "Missing transfer session ID" }
+        require(request.sessionId.isNotBlank() && request.sessionId.length <= 128) { "Invalid transfer session ID" }
         require(request.totalFiles > 0 && request.totalFiles == request.files.size) { "Invalid file count" }
         var total = 0L
         request.files.forEachIndexed { index, file ->
             require(file.fileIndex == index && file.sizeBytes >= 0 && file.relativePath.isNotBlank()) {
                 "Invalid file metadata at index $index"
             }
+            ReceivePath.components(file.relativePath)
             total = Math.addExact(total, file.sizeBytes)
         }
         require(total == request.totalSizeBytes) { "Transfer size does not match file metadata" }

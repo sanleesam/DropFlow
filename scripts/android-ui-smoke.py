@@ -56,7 +56,7 @@ tap('Home'); assert visible('No cloud required.'); shot('home')
 tap('Devices'); assert visible('Search devices'); shot('devices')
 tap('Transfers'); assert visible('Find a file or device'); shot('transfers')
 tap('Settings'); shot('settings')
-tap('Updates', seek=True); assert visible('Installed version'); shot('updates-top')
+tap('Updates', seek=True); assert visible('Installed version') and visible(expected_version); shot('updates-top')
 tap('Check for updates', seek=True)
 deadline = time.monotonic() + 35
 online = True

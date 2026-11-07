@@ -164,8 +164,14 @@ First desktop milestone intended for real users on Windows and macOS.
 
 ## Android — [0.2.0-alpha.2] — Unreleased
 
-- Reserved next source target after publishing Alpha 1; no second Alpha release
-  is published yet. Install number 19 is above the verified Alpha 1 baseline.
+- Keep received folder hierarchy and preserve same-name files as separate copies.
+- Persist the last 100 transfer results with local search and a clear-history action.
+- Remove unauthenticated device-ID auto-accept and isolate one active transfer,
+  including busy requests, approval, cancellation, and final acknowledgement.
+- Recover more reliably from discovery refreshes and use alternate advertised endpoints.
+- Make update cancellation independent of newer requests. Keep the Alpha 1
+  signing key for in-place upgrades (install number 19).
+- Report installed APK identity consistently in About, Updates and discovery.
 
 ## Android — [0.2.0-alpha.1] — 2026-11-05
 

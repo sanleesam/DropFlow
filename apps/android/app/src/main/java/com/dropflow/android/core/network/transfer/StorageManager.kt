@@ -6,201 +6,136 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.util.Log
-import androidx.core.content.ContextCompat
+import android.webkit.MimeTypeMap
 import androidx.annotation.RequiresApi
+import androidx.core.content.ContextCompat
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.FileAlreadyExistsException
+import java.nio.file.Files
 
 private const val TAG = "DropFlowStorage"
 private const val RECEIVE_SUBDIR = "DropFlow"
 
 class StorageManager(private val context: Context) {
-
-    fun getReceiveDirectory(): File {
-        val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val dropFlowDir = File(publicDownloads, RECEIVE_SUBDIR)
-        if (!dropFlowDir.exists()) {
-            dropFlowDir.mkdirs()
-        }
-        return dropFlowDir
-    }
-
-    /**
-     * Prepares a writable target for the final destination file described by [fileName].
-     *
-     * On API 29+ this cannot be done with plain java.io.File (scoped storage), so the
-     * final file is pre-created in MediaStore and written via [result.outputStream].
-     * On API 28 and below the legacy public Downloads path is used directly.
-     *
-     * Callers finish with [completePendingFile], which finalizes the MediaStore row and
-     * frees the pending flag so gallery/media scanners pick the file up.
-     */
+    /** Allocate a pending MediaStore row or a uniquely owned legacy staging file. */
     fun prepareTargetStream(fileName: String): WritableTarget {
-        val sanitized = sanitizeFilename(fileName)
+        val parts = ReceivePath.components(fileName)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            prepareMediaStoreTarget(sanitized)
+            prepareMediaStoreTarget(parts)
         } else {
-            prepareLegacyTarget(sanitized)
+            prepareLegacyTarget(parts)
         }
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun prepareMediaStoreTarget(sanitizedName: String): WritableTarget {
+    private fun prepareMediaStoreTarget(parts: List<String>): WritableTarget {
         val resolver = context.contentResolver
-        val displayName = sanitizedName.substringAfterLast('/')
-        val relativePath = "Download/$RECEIVE_SUBDIR"
-
-        for (attempt in 0 until 10) {
-            var pendingUri: Uri? = null
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            try {
-                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                    ?: throw IOException("MediaStore insert returned null for '$displayName'")
-                pendingUri = uri
-                Log.d(TAG, "MediaStore target created for '$displayName' -> $uri")
-                return WritableTarget(
-                    mode = TargetMode.MEDIA_STORE,
-                    stream = resolver.openOutputStream(uri)
-                        ?: throw IOException("Could not open MediaStore output stream for '$displayName'"),
-                    file = null,
-                    uri = uri,
-                    displayName = displayName
-                )
-            } catch (e: java.io.FileNotFoundException) {
-                pendingUri?.let { runCatching { resolver.delete(it, null, null) } }
-                // DISPLAY_NAME already exists: MediaStore appended " (n)" to the
-                // display name but openOutputStream can still fail on the conflicting
-                // row — retrying inserts a fresh entry that resolves the collision.
-                Log.d(TAG, "MediaStore name collision for '$displayName', retrying")
-                continue
-            } catch (e: Exception) {
-                pendingUri?.let { runCatching { resolver.delete(it, null, null) } }
-                throw e
-            }
+        val name = parts.last()
+        val folder = (listOf(Environment.DIRECTORY_DOWNLOADS, RECEIVE_SUBDIR) + parts.dropLast(1)).joinToString("/")
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-        throw IOException("Could not create a unique MediaStore entry for '$sanitizedName'")
+        // The provider owns collision handling and allocates separate files.
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw IOException("Could not create '$name' in Downloads")
+        try {
+            val descriptor = resolver.openFileDescriptor(uri, "w")
+                ?: throw IOException("Could not open '$name' in Downloads")
+            return WritableTarget(ParcelFileDescriptor.AutoCloseOutputStream(descriptor), null, uri, name)
+        } catch (error: Exception) {
+            runCatching { resolver.delete(uri, null, null) }
+            throw error
+        }
     }
 
-    private fun prepareLegacyTarget(sanitizedName: String): WritableTarget {
-        val dir = getReceiveDirectory()
-        val nameOnly = sanitizedName.substringAfterLast('/')
-        var target = File(dir, nameOnly)
-        if (target.exists()) {
-            target = resolveCollision(dir, nameOnly)
+    private fun prepareLegacyTarget(parts: List<String>): WritableTarget {
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).canonicalFile
+        val dir = File(downloads, (listOf(RECEIVE_SUBDIR) + parts.dropLast(1)).joinToString("/"))
+        if (dir.canonicalFile != dir || (!dir.mkdirs() && !dir.isDirectory)) {
+            throw IOException("Could not create the receive folder")
         }
-        val partFile = preparePartFile(target)
-        return WritableTarget(
-            mode = TargetMode.LEGACY_FILE,
-            stream = partFile.outputStream(),
-            file = target,
-            uri = null,
-            displayName = target.name
-        )
+        val stage = File.createTempFile(".dropflow-", ".part", dir)
+        try {
+            return WritableTarget(stage.outputStream(), stage, null, parts.last())
+        } catch (error: Exception) {
+            stage.delete()
+            throw error
+        }
     }
 
-    /**
-     * Finalizes a completed transfer target: commits the MediaStore row (clearing the
-     * pending flag) or renames the legacy .part file onto its final destination.
-     * Must be called exactly once per successful file; on failure callers keep the
-     * stream open responsibility and simply close it — cleanup happens in FileReceiver.
-     */
-    fun completePendingFile(target: WritableTarget, totalBytes: Long) {
-        target.stream.flush()
-        target.stream.close()
-
-        when (target.mode) {
-            TargetMode.MEDIA_STORE -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val values = ContentValues().apply {
-                        put(MediaStore.MediaColumns.IS_PENDING, 0)
-                        put(MediaStore.MediaColumns.SIZE, totalBytes)
-                    }
-                    if (context.contentResolver.update(target.uri!!, values, null, null) != 1) {
-                        throw IOException("Could not publish '${target.displayName}'")
-                    }
-                    Log.d(TAG, "MediaStore entry published: ${target.uri} ($totalBytes bytes)")
-                }
+    /** Publish already closed and verified data, without replacing another file. */
+    fun completePendingFile(target: WritableTarget) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+            if (context.contentResolver.update(checkNotNull(target.uri), values, null, null) != 1) {
+                throw IOException("Could not publish '${target.displayName}'")
             }
-            TargetMode.LEGACY_FILE -> {
-                val partFile = preparePartFile(target.file!!)
-                if (!partFile.renameTo(target.file!!)) {
-                    throw IOException("Failed to finalize '${target.displayName}'")
-                }
-                Log.d(TAG, "Legacy file finalized: ${target.file!!.absolutePath} ($totalBytes bytes)")
-            }
+        } else {
+            val stage = checkNotNull(target.stagingFile)
+            target.publishedFile = LegacyPublication.publish(stage, target.displayName)
+            stage.delete()
         }
-        target.published = true
     }
 
-    /**
-     * Deletes any data written so far for a failed or cancelled transfer.
-     */
+    /** Clean up only storage allocated by this transfer. */
     fun cleanupTarget(target: WritableTarget) {
         runCatching { target.stream.close() }
-        when (target.mode) {
-            TargetMode.MEDIA_STORE -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    runCatching {
-                        context.contentResolver.delete(target.uri!!, null, null)
-                    }.onFailure { Log.w(TAG, "Failed to delete pending MediaStore entry ${target.uri}") }
-                }
-            }
-            TargetMode.LEGACY_FILE -> {
-                runCatching {
-                    preparePartFile(target.file!!).delete()
-                    if (target.published) target.file.delete()
-                }
-            }
-        }
-    }
-
-    fun preparePartFile(finalFile: File): File {
-        return File(finalFile.parentFile, "${finalFile.name}.part")
+        runCatching {
+            target.uri?.let { context.contentResolver.delete(it, null, null) }
+            target.stagingFile?.delete()
+            target.publishedFile?.delete()
+        }.onFailure { Log.w(TAG, "Could not remove transfer output", it) }
     }
 
     fun isLegacyStoragePermissionGranted(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) return true
-        return ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-        ) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun resolveCollision(dir: File, fileName: String): File {
-        val dotIndex = fileName.lastIndexOf('.')
-        val nameWithoutExt = if (dotIndex > 0) fileName.substring(0, dotIndex) else fileName
-        val ext = if (dotIndex > 0) fileName.substring(dotIndex) else ""
-
-        var counter = 1
-        var candidate: File
-        do {
-            candidate = File(dir, "$nameWithoutExt ($counter)$ext")
-            counter++
-        } while (candidate.exists())
-        return candidate
-    }
-
-    private fun sanitizeFilename(fileName: String): String {
-        return fileName.replace("[\\\\/:*?\"<>|]".toRegex(), "_")
+        return ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
     }
 }
 
-enum class TargetMode { MEDIA_STORE, LEGACY_FILE }
-
 class WritableTarget(
-    val mode: TargetMode,
-    val stream: java.io.OutputStream,
-    val file: File?,
+    val stream: FileOutputStream,
+    val stagingFile: File?,
     val uri: Uri?,
     val displayName: String
 ) {
-    var published: Boolean = false
+    var publishedFile: File? = null
         internal set
+}
+
+internal object LegacyPublication {
+    fun publish(stage: File, name: String): File {
+        val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
+        for (index in 0..9999) {
+            val candidate = File(stage.parentFile, if (index == 0) name else
+                "${name.substring(0, dot)} ($index)${name.substring(dot)}")
+            try {
+                // CREATE_NEW is exclusive even if another writer races us.
+                Files.createFile(candidate.toPath())
+            } catch (_: FileAlreadyExistsException) {
+                continue
+            }
+            try {
+                candidate.outputStream().use { output ->
+                    stage.inputStream().use { it.copyTo(output) }
+                    output.fd.sync()
+                }
+                return candidate
+            } catch (error: Exception) {
+                candidate.delete()
+                throw error
+            }
+        }
+        throw IOException("Too many files named '$name'")
+    }
 }

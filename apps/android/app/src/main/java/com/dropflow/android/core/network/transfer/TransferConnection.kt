@@ -1,32 +1,32 @@
 package com.dropflow.android.core.network.transfer
 
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.Socket
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "DropFlowConnection"
 
-class TransferConnection(
+internal class TransferConnection(
     val socket: Socket,
     val session: TransferSession,
     private val onSessionStateChanged: (TransferSession) -> Unit,
-    private val onRequestReceived: ((TransferRequestPayload, (Boolean, String?) -> Unit) -> Unit)? = null,
+    private val claimTransfer: ((String) -> Boolean)? = null,
+    private val releaseTransfer: ((String) -> Unit)? = null,
+    private val requestDecision: (suspend (TransferRequestPayload) -> IncomingDecision)? = null,
     private val onProgressUpdated: ((TransferProgressPayload?) -> Unit)? = null,
-    private val onTransferFinished: ((TransferRequestPayload, Boolean, String?) -> Unit)? = null
+    private val onTransferFinished: (suspend (TransferRequestPayload, Boolean, String?, Boolean) -> Unit)? = null
 ) {
-    private val scope = CoroutineScope(Dispatchers.IO + Job())
+    private val closed = AtomicBoolean(false)
+    private val cancelled = AtomicBoolean(false)
+    val isCancelled: Boolean get() = cancelled.get()
 
     var inputStream: InputStream? = null
         private set
@@ -126,11 +126,11 @@ class TransferConnection(
         }
     }
 
-    fun startListening(context: android.content.Context) {
-        scope.launch {
+    suspend fun startListening(context: android.content.Context) {
+        withContext(Dispatchers.IO) {
             try {
-                val inp = inputStream ?: return@launch
-                val out = outputStream ?: return@launch
+                val inp = inputStream ?: return@withContext
+                val out = outputStream ?: return@withContext
 
                 while (_currentSession.value.state == SessionState.CONNECTED) {
                     val header = FrameUtils.readHeader(inp)
@@ -141,62 +141,8 @@ class TransferConnection(
                         FrameTag.TRANSFER_REQUEST -> {
                             val requestPayload = TransferRequestPayload.fromJsonString(String(payloadBytes, StandardCharsets.UTF_8))
                             ReceiveValidation.request(requestPayload)
-                            transferSessionId = requestPayload.sessionId
-                            Log.d(TAG, "Parsed TRANSFER_REQUEST from '${requestPayload.senderName}' for file '${requestPayload.primaryFileName}'")
-                            val requestFinished = CompletableDeferred<Unit>()
-
-                            val requestHandler = onRequestReceived
-                            if (requestHandler == null) {
-                                updateState(SessionState.FAILED, "Incoming transfers are not supported")
-                                return@launch
-                            }
-                            requestHandler.invoke(requestPayload) { accepted, reason ->
-                                scope.launch {
-                                    try {
-                                        if (accepted) {
-                                            Log.d(TAG, "User accepted transfer for request ${requestPayload.sessionId}. Starting FileReceiver.")
-                                            FrameUtils.writeTransferAccept(out, TransferAcceptPayload(status = "ACCEPTED"))
-
-                                            val tracker = TransferProgressTracker(
-                                                sessionId = requestPayload.sessionId,
-                                                totalFiles = requestPayload.totalFiles,
-                                                totalSizeBytes = requestPayload.totalSizeBytes,
-                                                direction = SessionDirection.INCOMING,
-                                                onProgressUpdate = { progress -> onProgressUpdated?.invoke(progress) }
-                                            )
-
-                                            val fileReceiver = FileReceiver(context)
-                                            val success = fileReceiver.receiveTransferSession(inp, out, requestPayload, tracker)
-
-                                            onProgressUpdated?.invoke(null)
-                                            if (success) {
-                                                Log.d(TAG, "FileReceiver session ${requestPayload.sessionId} finished successfully!")
-                                                onTransferFinished?.invoke(requestPayload, true, null)
-                                                updateState(SessionState.DISCONNECTED)
-                                            } else {
-                                                val error = fileReceiver.failureReason ?: "File transfer failed"
-                                                onTransferFinished?.invoke(requestPayload, false, error)
-                                                updateState(SessionState.FAILED, error)
-                                            }
-                                        } else {
-                                            Log.d(TAG, "User declined transfer for request ${requestPayload.sessionId}: ${reason ?: "Declined"}")
-                                            FrameUtils.writeTransferReject(out, TransferRejectPayload(status = "REJECTED", reason = reason ?: "User declined transfer"))
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Failed to execute transfer receiving session", e)
-                                        onProgressUpdated?.invoke(null)
-                                        onTransferFinished?.invoke(requestPayload, false, e.message)
-                                        updateState(SessionState.FAILED, e.message)
-                                    } finally {
-                                        requestFinished.complete(Unit)
-                                    }
-                                }
-                            }
-
-                            // Only the authorization callback may read this stream after a request.
-                            // Waiting here prevents a second reader from consuming FILE_HEADER frames.
-                            requestFinished.await()
-                            return@launch
+                            receiveRequest(context, inp, out, requestPayload)
+                            return@withContext
                         }
                         FrameTag.HEARTBEAT -> {
                             Log.d(TAG, "Heartbeat frame received")
@@ -222,32 +168,63 @@ class TransferConnection(
         }
     }
 
-    fun cancelTransfer() {
-        scope.launch {
-            try {
-                outputStream?.let { FrameUtils.writeTransferCancel(it, transferSessionId ?: session.sessionId) }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to notify peer about cancellation", e)
-            } finally {
-                close()
+    private suspend fun receiveRequest(
+        context: android.content.Context,
+        input: InputStream,
+        output: OutputStream,
+        request: TransferRequestPayload
+    ) {
+        val decide = requestDecision ?: return
+        if (claimTransfer?.invoke(session.sessionId) != true) {
+            FrameUtils.writeTransferReject(output, TransferRejectPayload("REJECTED", "Busy: another transfer is in progress"))
+            return
+        }
+        transferSessionId = request.sessionId
+        try {
+            val decision = decide(request)
+            if (!decision.accepted) {
+                FrameUtils.writeTransferReject(output, TransferRejectPayload("REJECTED", decision.reason ?: "User declined transfer"))
+                return
             }
+            val receiver = FileReceiver(context)
+            val tracker = TransferProgressTracker(
+                sessionId = request.sessionId,
+                totalFiles = request.totalFiles,
+                totalSizeBytes = request.totalSizeBytes,
+                direction = SessionDirection.INCOMING,
+                onProgressUpdate = { progress -> onProgressUpdated?.invoke(progress) }
+            )
+            val error = try {
+                FrameUtils.writeTransferAccept(output, TransferAcceptPayload(status = "ACCEPTED"))
+                tracker.startSession("Preparing to receive")
+                if (receiver.receiveTransferSession(input, output, request, tracker)) null
+                else receiver.failureReason ?: "File transfer failed"
+            } catch (e: Exception) {
+                Log.w(TAG, "Receive failed for ${session.sessionId}", e)
+                e.message ?: "File transfer failed"
+            }
+            onProgressUpdated?.invoke(null)
+            onTransferFinished?.invoke(request, error == null, error, isCancelled)
+        } finally {
+            releaseTransfer?.invoke(session.sessionId)
         }
     }
 
+    fun cancelTransfer() {
+        cancelled.set(true)
+        // Closing interrupts a blocked read or write. Never interleave a second
+        // writer's cancellation frame with a file frame already on this socket.
+        runCatching { socket.close() }
+    }
+
     fun close() {
+        if (!closed.compareAndSet(false, true)) return
         try {
-            updateState(SessionState.CLOSING)
-            inputStream?.close()
-            outputStream?.close()
-            if (!socket.isClosed) {
-                socket.close()
-            }
-            updateState(SessionState.DISCONNECTED)
-            Log.d(TAG, "Socket cleanly closed for session ${session.sessionId}")
+            socket.close()
         } catch (e: Exception) {
             Log.w(TAG, "Error closing socket for session ${session.sessionId}", e)
         } finally {
-            scope.cancel()
+            updateState(SessionState.DISCONNECTED)
         }
     }
 }

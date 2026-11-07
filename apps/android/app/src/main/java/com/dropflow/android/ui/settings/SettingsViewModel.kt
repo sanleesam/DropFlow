@@ -25,7 +25,6 @@ class SettingsViewModel(
                 _uiState.value = SettingsUiState(
                     deviceName = prefs.deviceName,
                     requireConfirmation = prefs.requireConfirmation,
-                    autoAcceptTrustedDevices = prefs.autoAcceptTrustedDevices,
                     askBeforeOverwrite = prefs.askBeforeOverwrite,
                     autoOpenCompleted = prefs.autoOpenCompleted,
                     accentColor = prefs.accentColor,
@@ -44,12 +43,6 @@ class SettingsViewModel(
     fun updateRequireConfirmation(value: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.updateRequireConfirmation(value)
-        }
-    }
-
-    fun updateAutoAcceptTrusted(value: Boolean) {
-        viewModelScope.launch {
-            userPreferencesRepository.updateAutoAcceptTrusted(value)
         }
     }
 

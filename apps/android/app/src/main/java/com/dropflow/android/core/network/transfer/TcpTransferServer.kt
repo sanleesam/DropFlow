@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Semaphore
 
 private const val TAG = "DropFlowTcpServer"
 
@@ -24,13 +25,15 @@ enum class ServerStatus {
     ERROR
 }
 
-class TcpTransferServer(
+internal class TcpTransferServer(
     private val context: Context,
-    private val onRequestReceived: (TransferRequestPayload, (Boolean, String?) -> Unit) -> Unit,
+    private val claimTransfer: (String) -> Boolean,
+    private val releaseTransfer: (String) -> Unit,
+    private val requestDecision: suspend (TransferRequestPayload) -> IncomingDecision,
     private val onIncomingConnection: (TransferConnection) -> Unit,
     private val onSessionStateChanged: (TransferSession) -> Unit,
     private val onProgressUpdated: (TransferProgressPayload?) -> Unit,
-    private val onTransferFinished: (TransferRequestPayload, Boolean, String?) -> Unit
+    private val onTransferFinished: suspend (TransferRequestPayload, Boolean, String?, Boolean) -> Unit
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + Job())
 
@@ -39,14 +42,16 @@ class TcpTransferServer(
     val status: StateFlow<ServerStatus> = _status.asStateFlow()
 
     private val activeConnectionsMap = ConcurrentHashMap<String, TransferConnection>()
+    private val connectionSlots = Semaphore(8)
 
     suspend fun start(port: Int = Protocol.DEFAULT_PORT) = withContext(Dispatchers.IO) {
         if (_status.value == ServerStatus.RUNNING) return@withContext
 
         _status.value = ServerStatus.STARTING
         try {
-            serverSocket = ServerSocket(port).apply {
+            serverSocket = ServerSocket().apply {
                 reuseAddress = true
+                bind(java.net.InetSocketAddress(port))
             }
             _status.value = ServerStatus.RUNNING
             Log.d(TAG, "TCP Server started and listening on port $port")
@@ -65,6 +70,10 @@ class TcpTransferServer(
         while (_status.value == ServerStatus.RUNNING && !server.isClosed) {
             try {
                 val clientSocket: Socket = server.accept()
+                if (!connectionSlots.tryAcquire()) {
+                    clientSocket.close()
+                    continue
+                }
                 val peerAddr = clientSocket.inetAddress?.hostAddress ?: "unknown"
                 val peerPort = clientSocket.port
                 Log.d(TAG, "Incoming TCP connection accepted from $peerAddr:$peerPort")
@@ -87,7 +96,9 @@ class TcpTransferServer(
                             activeConnectionsMap.remove(updatedSession.sessionId)
                         }
                     },
-                    onRequestReceived = onRequestReceived,
+                    claimTransfer = claimTransfer,
+                    releaseTransfer = releaseTransfer,
+                    requestDecision = requestDecision,
                     onProgressUpdated = onProgressUpdated,
                     onTransferFinished = onTransferFinished
                 )
@@ -96,11 +107,11 @@ class TcpTransferServer(
                 onIncomingConnection(connection)
 
                 scope.launch {
-                    val handshakeSuccess = connection.performIncomingHandshake()
-                    if (handshakeSuccess) {
-                        connection.startListening(context)
-                    } else {
+                    try {
+                        if (connection.performIncomingHandshake()) connection.startListening(context)
+                    } finally {
                         connection.close()
+                        connectionSlots.release()
                     }
                 }
             } catch (e: Exception) {

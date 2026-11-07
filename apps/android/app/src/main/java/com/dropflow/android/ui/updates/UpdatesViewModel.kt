@@ -10,7 +10,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.dropflow.android.BuildConfig
+import com.dropflow.android.core.model.InstalledRelease
 import com.dropflow.android.core.update.*
 import com.dropflow.android.storage.UserPreferencesRepository
 import kotlinx.coroutines.*
@@ -19,15 +19,18 @@ import java.io.File
 
 enum class UpdatePhase { IDLE, CHECKING, CURRENT, UNAVAILABLE, AVAILABLE, DOWNLOADING, READY, VERIFYING, PERMISSION_REQUIRED, INSTALLER_OPEN, ERROR }
 data class UpdatesUiState(
-    val channel: AndroidUpdateChannel = AndroidUpdateChannel.forVersion(BuildConfig.VERSION_NAME),
+    val channel: AndroidUpdateChannel,
     val phase: UpdatePhase = UpdatePhase.IDLE, val manifest: AndroidUpdateManifest? = null,
     val downloaded: Long = 0, val message: String? = null, val checkedAt: Long? = null
 )
 
 class UpdatesViewModel(context: Context, private val preferences: UserPreferencesRepository) : ViewModel() {
     private val app = context.applicationContext
-    private val client = AndroidUpdateClient()
-    private val _state = MutableStateFlow(UpdatesUiState())
+    val installedRelease = InstalledRelease.read(app)
+    // Each operation owns its connection. Old redirects can't steal the
+    // connection that a newer channel check or download needs to cancel.
+    private var activeClient: AndroidUpdateClient? = null
+    private val _state = MutableStateFlow(UpdatesUiState(AndroidUpdateChannel.forVersion(installedRelease.versionName)))
     val state = _state.asStateFlow()
     private var operation: Job? = null
     private var generation = 0L
@@ -36,7 +39,7 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
     init {
         viewModelScope.launch {
             preferences.userPreferencesFlow.collect { prefs ->
-                val channel = AndroidUpdateChannel.fromId(prefs.updateChannel, BuildConfig.VERSION_NAME)
+                val channel = AndroidUpdateChannel.fromId(prefs.updateChannel, installedRelease.versionName)
                 if (channel != _state.value.channel) reset(channel)
             }
         }
@@ -45,7 +48,8 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
     private fun reset(channel: AndroidUpdateChannel = _state.value.channel) {
         generation++
         operation?.cancel()
-        client.cancel()
+        activeClient?.cancel()
+        activeClient = null
         readyApk?.delete()
         readyApk = null
         _state.value = UpdatesUiState(channel)
@@ -61,13 +65,14 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
         reset()
         val token = generation
         val channel = _state.value.channel
+        val client = AndroidUpdateClient().also { activeClient = it }
         _state.update { it.copy(phase = UpdatePhase.CHECKING) }
         operation = viewModelScope.launch {
             try {
                 val manifest = withContext(Dispatchers.IO) { client.check(channel) }
                 if (token != generation) return@launch
                 _state.update { it.copy(manifest = manifest, checkedAt = System.currentTimeMillis(),
-                    phase = if (manifest.isNewerThan(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toLong()))
+                    phase = if (manifest.isNewerThan(installedRelease.versionName, installedRelease.versionCode))
                         UpdatePhase.AVAILABLE else UpdatePhase.CURRENT) }
             } catch (cancelled: CancellationException) { throw cancelled
             } catch (_: ChannelNotPublished) {
@@ -81,10 +86,11 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
     fun download() {
         val manifest = _state.value.manifest ?: return
         if (_state.value.phase !in listOf(UpdatePhase.AVAILABLE, UpdatePhase.ERROR)) return
-        if (!manifest.isNewerThan(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toLong())) return
+        if (!manifest.isNewerThan(installedRelease.versionName, installedRelease.versionCode)) return
         readyApk?.delete()
         readyApk = null
         val token = generation
+        val client = AndroidUpdateClient().also { activeClient = it }
         _state.update { it.copy(phase = UpdatePhase.DOWNLOADING, downloaded = 0, message = null) }
         operation = viewModelScope.launch {
             val directory = File(app.cacheDir, "updates")
@@ -165,7 +171,7 @@ class UpdatesViewModel(context: Context, private val preferences: UserPreference
             .onFailure { error -> _state.update { it.copy(phase = UpdatePhase.ERROR, message = error.message) } }
     }
 
-    override fun onCleared() { operation?.cancel(); client.cancel(); super.onCleared() }
+    override fun onCleared() { operation?.cancel(); activeClient?.cancel(); super.onCleared() }
     companion object {
         fun factory(context: Context, preferences: UserPreferencesRepository): ViewModelProvider.Factory = viewModelFactory {
             initializer { UpdatesViewModel(context.applicationContext, preferences) }

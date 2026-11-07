@@ -32,49 +32,24 @@ class HomeViewModel(
 
     private val discoveryEngine = NsdDeviceDiscoveryEngine(context.applicationContext, this)
 
-    // Devices the user chose to trust via the incoming-transfer prompt. Kept here so
-    // persisted-preference updates can re-emit the full policy without losing them.
-    private val trustedDeviceIds = mutableSetOf<String>()
-
-    private var latestPreferences: com.dropflow.android.storage.UserPreferences =
-        com.dropflow.android.storage.UserPreferences(
-            deviceUuid = "",
-            deviceName = "",
-            requireConfirmation = true,
-            autoAcceptTrustedDevices = true,
-            askBeforeOverwrite = true,
-            autoOpenCompleted = false,
-            accentColor = "blue"
-        )
-
     init {
         viewModelScope.launch {
             val stableUuid = userPreferencesRepository.getOrCreateDeviceUuid()
 
             userPreferencesRepository.userPreferencesFlow.collectLatest { prefs ->
-                latestPreferences = prefs
+                transferEngine.updateAuthorizationPolicy(prefs.requireConfirmation)
                 _uiState.update { current -> current.copy(
                     localDeviceName = prefs.deviceName,
                     localUuid = prefs.deviceUuid.ifEmpty { stableUuid }
                 ) }
 
                 if (discoveryEngine.localUuid.isEmpty()) {
-                    discoveryEngine.initialize(stableUuid, prefs.deviceName)
+                    discoveryEngine.initialize(stableUuid)
                     discoveryEngine.start(prefs.deviceName)
                 } else if (discoveryEngine.currentDeviceName != prefs.deviceName) {
                     // Re-register only when the advertised name actually changed.
                     discoveryEngine.restartBroadcasting(prefs.deviceName)
                 }
-            }
-        }
-
-        viewModelScope.launch {
-            userPreferencesRepository.userPreferencesFlow.collectLatest { prefs ->
-                transferEngine.updateAuthorizationPolicy(
-                    requireConfirmation = prefs.requireConfirmation,
-                    autoAcceptTrustedDevices = prefs.autoAcceptTrustedDevices,
-                    trustedDeviceIds = trustedDeviceIds.toSet()
-                )
             }
         }
 
@@ -119,23 +94,12 @@ class HomeViewModel(
         }
     }
 
-    fun acceptTransfer(trustDevice: Boolean = false) {
-        val currentRequest = _uiState.value.pendingTransferRequest ?: return
-        if (trustDevice && currentRequest.senderId.isNotBlank()) {
-            trustedDeviceIds += currentRequest.senderId
-            val prefs = latestPreferences
-            transferEngine.updateAuthorizationPolicy(
-                requireConfirmation = prefs.requireConfirmation,
-                autoAcceptTrustedDevices = prefs.autoAcceptTrustedDevices,
-                trustedDeviceIds = trustedDeviceIds.toSet()
-            )
-        }
-        transferEngine.acceptPendingTransfer(currentRequest.sessionId, trustDevice)
+    fun acceptTransfer(request: com.dropflow.android.core.network.transfer.TransferRequestPayload) {
+        transferEngine.respondToRequest(request, accept = true)
     }
 
-    fun declineTransfer(reason: String = "User declined transfer") {
-        val currentRequest = _uiState.value.pendingTransferRequest ?: return
-        transferEngine.declinePendingTransfer(currentRequest.sessionId, reason)
+    fun declineTransfer(request: com.dropflow.android.core.network.transfer.TransferRequestPayload) {
+        transferEngine.respondToRequest(request, accept = false)
     }
 
     fun cancelActiveTransfer() {

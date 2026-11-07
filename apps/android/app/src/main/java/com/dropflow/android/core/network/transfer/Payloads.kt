@@ -188,6 +188,8 @@ data class TransferRejectPayload(
     }
 }
 
+enum class TransferPhase { PREPARING, STREAMING, FINISHING }
+
 data class TransferProgressPayload(
     val sessionId: String,
     val direction: SessionDirection,
@@ -200,5 +202,6 @@ data class TransferProgressPayload(
     val totalFiles: Int,
     val percentage: Float,
     val speedBytesPerSec: Long,
-    val etaSeconds: Long
+    val etaSeconds: Long,
+    val phase: TransferPhase = TransferPhase.STREAMING
 )

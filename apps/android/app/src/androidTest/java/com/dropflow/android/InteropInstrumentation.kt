@@ -47,10 +47,11 @@ class InteropInstrumentation : Instrumentation() {
                 runOnMainSync {
                     val viewModel = getter.invoke(activity) as HomeViewModel
                     viewModel.onDeviceFound(peer)
-                    if (viewModel.uiState.value.pendingTransferRequest?.senderId == peerId) {
+                    val request = viewModel.uiState.value.pendingTransferRequest
+                    if (request != null && request.senderId == peerId) {
                         when (decision) {
-                            "accept" -> viewModel.acceptTransfer(false)
-                            "decline" -> viewModel.declineTransfer()
+                            "accept" -> viewModel.acceptTransfer(request)
+                            "decline" -> viewModel.declineTransfer(request)
                         }
                     }
                 }

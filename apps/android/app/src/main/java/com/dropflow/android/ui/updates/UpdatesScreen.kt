@@ -13,7 +13,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.Role
-import com.dropflow.android.BuildConfig
 import com.dropflow.android.core.update.AndroidUpdateChannel
 import com.dropflow.android.ui.components.*
 import com.dropflow.android.ui.theme.*
@@ -23,6 +22,7 @@ import java.util.Date
 @Composable
 fun UpdatesScreen(viewModel: UpdatesViewModel, modifier: Modifier = Modifier) {
     val state by viewModel.state.collectAsState()
+    val release = viewModel.installedRelease
     val context = LocalContext.current
     val busy = state.phase in listOf(UpdatePhase.CHECKING, UpdatePhase.DOWNLOADING, UpdatePhase.VERIFYING)
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp),
@@ -31,8 +31,8 @@ fun UpdatesScreen(viewModel: UpdatesViewModel, modifier: Modifier = Modifier) {
         item { GlassCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Installed version", color = TextSecondary, fontSize = 13.sp)
-                Text(BuildConfig.VERSION_NAME, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                if (BuildConfig.DEBUG) Text("Debug preview · published updates use the release signing key.", color = TextMuted, fontSize = 12.sp)
+                Text(release.versionName, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                if (release.debuggable) Text("Debug preview · published updates use the release signing key.", color = TextMuted, fontSize = 12.sp)
             }
         } }
         item { Text("Update channel", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold) }
@@ -78,7 +78,7 @@ fun UpdatesScreen(viewModel: UpdatesViewModel, modifier: Modifier = Modifier) {
                     }
                     UpdatePhase.AVAILABLE -> PrimaryAction("Download update", Icons.Default.Download, viewModel::download, Modifier.fillMaxWidth())
                     UpdatePhase.ERROR -> {
-                        if (state.manifest != null && state.manifest!!.isNewerThan(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toLong()))
+                        if (state.manifest?.isNewerThan(release.versionName, release.versionCode) == true)
                             PrimaryAction("Retry download", Icons.Default.Download, viewModel::download, Modifier.fillMaxWidth())
                         else PrimaryAction("Try again", Icons.Default.Refresh, viewModel::check, Modifier.fillMaxWidth())
                     }

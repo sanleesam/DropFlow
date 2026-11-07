@@ -27,7 +27,7 @@ fun HomeScreen(viewModel: HomeViewModel, recentTransfers: List<TransferItem>,
     val selected = state.discoveredDevices.firstOrNull {
         it.id == state.selectedDeviceId && it.status == DeviceStatus.ONLINE
     }
-    val busy = state.outgoingTransferActive || state.activeProgress != null || state.activeSessions.isNotEmpty()
+    val busy = state.outgoingTransferActive || state.activeProgress != null || state.pendingTransferRequest != null
     val greeting = when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
         in 5..11 -> "Good morning."
         in 12..17 -> "Good afternoon."
@@ -66,7 +66,7 @@ fun HomeScreen(viewModel: HomeViewModel, recentTransfers: List<TransferItem>,
         item { SendFilesCard(selected, busy, viewModel::sendFiles) }
         item { SectionHeading("Recent activity", "All transfers", onViewTransfers) }
         if (recentTransfers.isEmpty()) item {
-            EmptyState(Icons.Default.Description, "No recent transfers", "Sent and received files will appear here during this app session.")
+            EmptyState(Icons.Default.Description, "No recent transfers", "Sent and received files will appear here.")
         } else items(recentTransfers.take(3), key = { "recent-" + it.id }) { TransferCard(it) }
     }
 }

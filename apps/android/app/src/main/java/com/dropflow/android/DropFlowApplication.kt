@@ -3,6 +3,7 @@ package com.dropflow.android
 import android.app.Application
 import com.dropflow.android.core.network.transfer.TransferEngine
 import com.dropflow.android.storage.UserPreferencesRepository
+import com.dropflow.android.storage.TransferHistoryRepository
 
 class DropFlowApplication : Application() {
 
@@ -11,11 +12,14 @@ class DropFlowApplication : Application() {
 
     lateinit var transferEngine: TransferEngine
         private set
+    lateinit var transferHistory: TransferHistoryRepository
+        private set
 
     override fun onCreate() {
         super.onCreate()
         userPreferencesRepository = UserPreferencesRepository(this)
-        transferEngine = TransferEngine(this)
+        transferHistory = TransferHistoryRepository(this)
+        transferEngine = TransferEngine(this, transferHistory)
         transferEngine.startServer()
     }
 
