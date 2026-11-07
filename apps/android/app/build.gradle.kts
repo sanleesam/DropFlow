@@ -37,8 +37,8 @@ android {
         applicationId = "com.dropflow.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 19
-        versionName = "0.2.0-alpha.2"
+        versionCode = 20
+        versionName = "0.2.0-alpha.3"
 
         testInstrumentationRunner = providers.gradleProperty("dropflowInteropRunner")
             .orElse("androidx.test.runner.AndroidJUnitRunner").get()

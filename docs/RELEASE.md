@@ -102,7 +102,7 @@ To publish an exact build number, commit the validated desktop change, create
 Promotion to Beta is a maintainer decision: tag a coherent milestone as
 `v*-beta.*` and the Beta workflow takes it from there.
 
-## Android release (published: 0.2.0-alpha.1; next source target: 0.2.0-alpha.2)
+## Android release (published: 0.2.0-alpha.2; next source target: 0.2.0-alpha.3)
 
 1. Bump `versionName` / `versionCode` in `apps/android/app/build.gradle.kts`
    (`versionCode` only ever increases). Run `node scripts/android-version.mjs check`
@@ -110,7 +110,7 @@ Promotion to Beta is a maintainer decision: tag a coherent milestone as
 2. Run `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease` in
    `apps/android`. A local release APK is unsigned unless release signing is configured.
    Review the physical-device and upgrade limitations in
-   [Android Alpha 1 preparation](ANDROID_ALPHA1.md). The maintainer approved an
+   [Android Alpha 2 validation](ANDROID_ALPHA2.md). The maintainer approved an
    explicitly experimental Alpha and the one-time reinstall migration; this is
    not permission to call untested hardware paths verified or promote to Stable.
 3. After automated checks and signed-artifact verification pass, commit and tag

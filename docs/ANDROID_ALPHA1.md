@@ -1,5 +1,8 @@
 # Android 0.2.0-alpha.1 preparation — updated 2026-11-05
 
+This is a historical record. See [Alpha 2 validation](ANDROID_ALPHA2.md)
+for the current release and its test results.
+
 Released: `0.2.0-alpha.1`, versionCode 18, on 2026-11-05. The actual
 published Beta 1 APK was inspected: versionCode 17, package `com.dropflow.android`,
 certificate SHA-256 `f364ad7616f35c03d3b7982b912c95964054252a5dee833986a8ccb362dbd8cd`.

@@ -25,11 +25,12 @@ Published versions are never renamed. See [the versioning policy](docs/VERSIONIN
 Current releases:
 
 - **Desktop**: [`0.1.2-beta.21`](https://github.com/sanleesam/DropFlow/releases/tag/v0.1.2-beta.21) (Windows x64, macOS arm64)
-- **Android**: [`0.2.0-alpha.1`](https://github.com/sanleesam/DropFlow/releases/tag/android-v0.2.0-alpha.1)
-  (install number 18), an experimental preview. Legacy Beta 1 users must back up
-  files and reinstall once because its temporary signing key was replaced.
-  The next **unreleased** source target is `0.2.0-alpha.2` (install number 19).
-  See [Android verification and limitations](docs/ANDROID_ALPHA1.md).
+- **Android**: [`0.2.0-alpha.2`](https://github.com/sanleesam/DropFlow/releases/tag/android-v0.2.0-alpha.2)
+  (install number 19), an experimental preview. Alpha 1 users can update in
+  place. Legacy Beta 1 users still need the
+  [one-time reinstall](docs/ANDROID_ALPHA1.md#signing-migration-and-experimental-release-decision).
+  The next **unreleased** source target is `0.2.0-alpha.3` (install number 20).
+  See [Android verification and limitations](docs/ANDROID_ALPHA2.md).
 
 See [CHANGELOG.md](CHANGELOG.md), [docs/RELEASE.md](docs/RELEASE.md) and [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
@@ -41,20 +42,20 @@ by different tag prefixes — never tag both platforms with the same ref:
 | Platform | Tag example | Workflow | Artifact |
 | --- | --- | --- | --- |
 | Desktop Beta | `v0.1.2-beta.21` | `.github/workflows/release-beta.yml` | Updater-signed bundles + `latest.json` |
-| Android | `android-v0.2.0-alpha.1` | `.github/workflows/release-android.yml` | Permanently signed APK + Android-only updater manifest |
+| Android | `android-v0.2.0-alpha.2` | `.github/workflows/release-android.yml` | Permanently signed APK + Android-only updater manifest |
 
 ### Completed
 
 - ✅ Device discovery (mDNS)
 - ✅ Custom TCP transfer engine (DFP/1)
-- ✅ Desktop persistent history/state; Android session history and saved preferences
+- ✅ Desktop and Android persistent history and saved preferences
 - ✅ Native desktop interface
 - ✅ Smooth view transitions
 - Partial-transfer protocol/state support exists; a user-facing resume workflow
   is not implemented on desktop or Android.
 - ✅ Sleep prevention during active transfers
 - ✅ Android app with discovery, send and receive
-- ✅ Desktop built-in updater; Android verified update flow implemented, publication/upgrade acceptance pending
+- ✅ Desktop built-in updater; Android signed downloads and user-confirmed installation
 
 ### Troubleshooting discovery
 

@@ -1,6 +1,6 @@
 # Android Alpha 2 validation
 
-Candidate: `0.2.0-alpha.2` (install number 19). Alpha 1 used install number 18
+Published: `0.2.0-alpha.2` (install number 19), 2026-11-07. Alpha 1 used install number 18
 with the same pinned certificate. This is an experimental Android-only release;
 no desktop version, release workflow, protocol framing, or installed app is changed.
 
@@ -31,6 +31,23 @@ no desktop version, release workflow, protocol framing, or installed app is chan
 
 The tests use a disposable, read-only emulator overlay; no phone, host Wi-Fi,
 firewall, or desktop configuration was modified.
+
+## Published artifact
+
+- [Android release run 42364007851](https://github.com/sanleesam/DropFlow/actions/runs/42364007851)
+  passed. The immutable Android tag points to
+  `f3a70d7eab7f49ed157c087a01bec67b5e036fa7`.
+- [Public Alpha 2](https://github.com/sanleesam/DropFlow/releases/tag/android-v0.2.0-alpha.2)
+  is a prerelease. The downloaded APK is 11,540,626 bytes, SHA-256
+  `f490b9c997ecca37c0300260eb1302d1c01f7e2ca1e50319c32e38a882f5efe3`.
+  Package ID, version/code, minimum SDK, permanent signature and bundled notices
+  were independently verified. Both Alpha manifests are byte-identical.
+- Public Alpha 1 found and downloaded Alpha 2 in-app, verified the APK,
+  explained Android's install permission, and opened the installer. The
+  isolated emulator used the normal permission, confirmation, and Play Protect
+  scan screens. Android reported **App updated** and versionCode 19. The
+  installed APK hash matched the public download, and the seeded device name
+  survived the upgrade. About reported Alpha 2.
 
 ## Reproduce
 

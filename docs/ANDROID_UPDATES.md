@@ -60,6 +60,8 @@ not change for routine releases. `release-baseline.json` records the last
 public upgrade baseline; update it only after a successful published Android
 release, then choose a newer source target for the next release.
 
-This implementation has unit, emulator UI and APK-preflight coverage. A real
-published same-key download/install upgrade remains unverified; see
-[ANDROID_ALPHA1.md](ANDROID_ALPHA1.md). It is not claimed as already passed.
+The live Alpha 1 → Alpha 2 path was verified on a disposable emulator: check,
+download and verify the public APK, grant installer permission, confirm the
+upgrade through Android's normal screens, and retain settings after installation.
+The installed APK hash matched the public artifact. Physical-device and Android
+8/9 installer acceptance remain open. See [ANDROID_ALPHA2.md](ANDROID_ALPHA2.md).

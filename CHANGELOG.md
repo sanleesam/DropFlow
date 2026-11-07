@@ -162,7 +162,7 @@ First desktop milestone intended for real users on Windows and macOS.
 
 - DFP/1 protocol unchanged; desktop remains the reference implementation.
 
-## Android — [0.2.0-alpha.2] — Unreleased
+## Android — [0.2.0-alpha.2] — 2026-11-07
 
 - Keep received folder hierarchy and preserve same-name files as separate copies.
 - Persist the last 100 transfer results with local search and a clear-history action.

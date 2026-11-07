@@ -5,7 +5,7 @@ All devices must be on the same Wi-Fi network (no guest network, no AP
 isolation, no VPN). Builds under test (versioned independently per platform):
 
 - Desktop published Beta: `0.1.2-beta.21` (Beta 20 was withheld after a Windows test failure)
-- Android published preview: `0.2.0-alpha.1`
+- Android published preview: `0.2.0-alpha.2`
 
 Blank cells remain unverified. Current automated/native-loopback evidence is in
 `DESKTOP_0.1.2_VALIDATION.md`; it does not fill the physical-device matrix below.
