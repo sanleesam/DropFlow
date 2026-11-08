@@ -132,18 +132,31 @@ they are not an internet pairing code.
   process, change saved networks, or fall back to the default route. The
   request and socket are released on success, cancellation, failure, or
   timeout. A detected default-network change aborts the test.
+- **Unpublished candidate:** Android 10+ devices that report native Wi-Fi
+  Direct can explicitly try [P2P group-client mode](https://developer.android.com/reference/android/net/wifi/p2p/WifiP2pConfig.Builder)
+  instead, even when secondary Wi-Fi is unavailable. It refuses to use an
+  existing P2P group and only removes the test's uniquely named group.
+  It uses the group owner’s private IPv4 address and binds to the test
+  interface’s local address after checking for visible subnet overlaps.
+  It never retries on the default network. This route is not proven on
+  physical phones yet; some firmware may briefly interrupt Wi-Fi even
+  though DropFlow does not ask to switch the primary connection.
+- The candidate moves the lab to **Settings → General** on Windows and the
+  main **Settings** page on Android. The Windows toggle starts a packaged
+  helper without a console; its credentials, progress and result appear
+  inside DropFlow. Turning it off closes the helper’s input pipe and asks it
+  to stop; an unresponsive helper is forcibly terminated after a bounded wait.
 - Mac ↔ Mac remains an independent AWDL probe. Native macOS ↔ Android and
   macOS ↔ Windows Nearby are not implemented. Use the existing shared-LAN
   transfer if the devices already have a common reachable network.
 
 ### Hardware run
 
-The original Windows Development `0.1.2-dev.1` preview still requires BLE.
-The Wi-Fi-only change is prepared for Windows Development `0.1.2-dev.2`.
-It works with the existing Android Alpha `0.2.0-alpha.3` lab protocol; no
-Android update is needed. In preview builds, open **Settings → Updates →
-Open Nearby Link lab**. The Mac build and ordinary Beta releases omit the
-lab. To test the Wi-Fi-only change from source:
+Published Windows Development `0.1.2-dev.2` already makes BLE optional,
+but it and Android Alpha `0.2.0-alpha.3` still use the old Updates entry.
+Native Android Wi-Fi Direct and the in-app Windows controls described above
+are local candidate changes, not in either published preview. Mac and
+ordinary Beta builds omit the lab. To test the candidate from source:
 
 1. On a Windows 10/11 test PC with a Wi-Fi Direct-capable adapter, run from the repo root:
 
@@ -157,17 +170,21 @@ lab. To test the Wi-Fi-only change from source:
 2. Build the Android debug APK with `:app:assembleDebug` and install it on a
    dedicated Android test phone. A debug APK cannot replace a differently
    signed production install; do not remove the production app to run the
-   probe. Open the lab screen from **Settings → Updates**. The lab activity
-   cannot be opened by other apps.
+   probe. Open **Settings → Open Nearby Link lab**. The lab activity cannot
+   be opened by other apps.
 
    Enter the host’s temporary credentials and approve Android’s secondary
-   connection if prompted. Do not join the test SSID from system Wi-Fi settings.
+   connection if prompted. If the phone does not support a secondary Wi-Fi
+   connection, try the explicitly labelled native Wi-Fi Direct option, if
+   available. Do not join the test SSID from system Wi-Fi settings.
 3. Start with the two devices on different normal networks and monitor Internet
    traffic independently on both. Confirm both receipts, unchanged primary
    connectivity, and release of the temporary link. Repeat on representative
    Windows drivers and Android devices, including rejection, interruption,
    Android without secondary-STA capability, Windows with BLE absent or off
    (allowed), and Windows without Wi-Fi (rejected).
+   Check that stopping on either side or leaving the Android screen releases
+   the session and does not affect an existing non-DropFlow P2P group.
    Synthetic exchange and cross-compilation do not establish radio
    interoperability, throughput gains, or production readiness.
 
@@ -176,6 +193,8 @@ firewall and adapter errors in-app, authenticate peer identity and encrypt
 the transport end-to-end, and integrate the existing transfer approval and
 verified completion behavior. Keep the LAN path independent and do not
 advertise the Mac cross-platform pairs as Nearby until a supported route exists.
+Automatic phone discovery and phone-generated code pairing are also not part
+of this candidate; the test uses manually entered one-time Wi-Fi credentials.
 
 Local validation: the Windows host type-checks for x64 and ARM64; its Rust
 wire tests passed. Android debug assembly, lint, JVM tests, and release Kotlin

@@ -1,5 +1,6 @@
 package com.dropflow.android.ui.settings
 
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -22,12 +24,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import com.dropflow.android.ui.components.*
 import com.dropflow.android.ui.theme.*
+import com.dropflow.android.BuildConfig
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, onUpdates: () -> Unit, modifier: Modifier = Modifier) {
     val state by viewModel.uiState.collectAsState()
     var draft by rememberSaveable(state.deviceName) { mutableStateOf(state.deviceName) }
     val keyboard = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
     val canSave = draft.trim().isNotEmpty() && draft.trim() != state.deviceName
     val save = { if (canSave) { viewModel.updateDeviceName(draft); keyboard?.hide() }; Unit }
     LazyColumn(modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp),
@@ -42,6 +46,17 @@ fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, onUpdates:
                     keyboardActions = KeyboardActions(onDone = { save() }),
                     supportingText = { if (draft.isBlank()) Text("Enter a name to save.") }, isError = draft.isBlank())
                 PrimaryAction("Save name", Icons.Default.Check, save, enabled = canSave)
+            }
+        }
+        if (BuildConfig.NEARBY_LAB) {
+            item {
+                SettingsGroup(Icons.Default.Wifi, "Nearby Link · Experimental") {
+                    Text("Test a direct link to Windows with synthetic data. Open the lab to choose the connection mode and turn the test on or off.",
+                        color = TextSecondary, fontSize = 13.sp)
+                    OutlinedButton(onClick = {
+                        context.startActivity(Intent().setClassName(context, "${context.packageName}.nearby.NearbyLinkLabActivity"))
+                    }) { Text("Open Nearby Link lab") }
+                }
             }
         }
         item {
