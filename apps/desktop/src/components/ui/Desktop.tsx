@@ -245,10 +245,12 @@ export function Switch({
   label,
   checked,
   onChange,
+  disabled = false,
 }: {
   label: string;
   checked: boolean;
   onChange: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -256,6 +258,7 @@ export function Switch({
       role="switch"
       aria-label={label}
       aria-checked={checked}
+      disabled={disabled}
       className={`df-switch${checked ? " on" : ""}`}
       onClick={onChange}
     >

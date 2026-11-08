@@ -15,6 +15,7 @@ import { useToast } from "../components/ToastProvider";
 import { useUpdater } from "../hooks/useUpdater";
 import { useDropFlow } from "../session/DropFlowProvider";
 import { UpdatesSettings } from "../components/UpdatesSettings";
+import { NearbyLinkSettings } from "../components/NearbyLinkSettings";
 import {
   EmptyState,
   Modal,
@@ -174,6 +175,7 @@ export function SettingsPage() {
                 </SettingRow>
               </section>
             )}
+            {tab === "general" && import.meta.env.VITE_DROPFLOW_NEARBY_LAB === "1" && <NearbyLinkSettings />}
             {tab === "transfers" && (
               <section className="df-card df-card-pad">
                 <h2 className="df-v2-section-title">Receiving files</h2>

@@ -3,7 +3,9 @@ use crate::wire;
 use std::error::Error;
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -163,6 +165,7 @@ struct Session<'a> {
     primary_wifi: Vec<GUID>,
     primary_internet: Option<GUID>,
     deadline: Instant,
+    cancelled: &'a AtomicBool,
 }
 
 impl Drop for Session<'_> {
@@ -174,6 +177,7 @@ impl Drop for Session<'_> {
 
 impl Session<'_> {
     fn check(&self) -> Result<()> {
+        check_cancelled(self.cancelled)?;
         if Instant::now() >= self.deadline {
             return Err("Nearby Link session timed out".into());
         }
@@ -233,7 +237,15 @@ impl Write for GuardedSocket<'_> {
     }
 }
 
-fn host(wlan: &Wlan) -> Result<()> {
+fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
+    if cancelled.load(Ordering::Relaxed) {
+        return Err("Nearby Link stopped".into());
+    }
+    Ok(())
+}
+
+fn host(wlan: &Wlan, cancelled: &AtomicBool, ipc: bool) -> Result<()> {
+    check_cancelled(cancelled)?;
     let primary_wifi = wlan.snapshot()?.1;
     let primary_internet = internet_adapter()?;
     let publisher = WiFiDirectAdvertisementPublisher::new()?;
@@ -277,7 +289,9 @@ fn host(wlan: &Wlan) -> Result<()> {
         primary_wifi,
         primary_internet,
         deadline: Instant::now() + Duration::from_secs(150),
+        cancelled,
     };
+    session.check()?;
     session.publisher.Start()?;
     let startup = Instant::now() + Duration::from_secs(10);
     while session.publisher.Status()? != WiFiDirectAdvertisementPublisherStatus::Started {
@@ -288,9 +302,14 @@ fn host(wlan: &Wlan) -> Result<()> {
         thread::sleep(TICK);
     }
     session.check()?;
-    println!("Nearby Link lab · 16 MiB each direction · expires in 150 seconds");
-    println!("Enter on the Android probe only (do not join this in Wi-Fi settings):");
-    println!("SSID: {ssid}\nPassphrase: {passphrase}");
+    if ipc {
+        println!("ready\t{ssid}\t{passphrase}");
+        io::stdout().flush()?;
+    } else {
+        println!("Nearby Link lab · 16 MiB each direction · expires in 150 seconds");
+        println!("Enter on the Android probe only (do not join this in Wi-Fi settings):");
+        println!("SSID: {ssid}\nPassphrase: {passphrase}");
+    }
 
     let request = loop {
         session.check()?;
@@ -341,6 +360,10 @@ fn host(wlan: &Wlan) -> Result<()> {
         }
     };
     drop(tcp);
+    if ipc {
+        println!("testing");
+        io::stdout().flush()?;
+    }
     stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
@@ -351,33 +374,49 @@ fn host(wlan: &Wlan) -> Result<()> {
         next_check: start,
     })?;
     session.check()?;
-    println!(
-        "Verified 16 MiB each direction over {local} ↔ {remote} in {:.2}s",
-        start.elapsed().as_secs_f64()
-    );
     let _ = device.Close();
+    if ipc {
+        println!("verified\t{}", start.elapsed().as_millis());
+        io::stdout().flush()?;
+    } else {
+        println!(
+            "Verified 16 MiB each direction over {local} ↔ {remote} in {:.2}s",
+            start.elapsed().as_secs_f64()
+        );
+    }
     Ok(())
 }
 
-pub fn run() -> Result<()> {
+pub fn run(ipc: bool) -> Result<()> {
     let command = std::env::args().nth(1);
     let command = match command.as_deref() {
-        Some(command @ ("status" | "host")) => command,
+        Some(command @ ("status" | "host" | "host-ipc")) => command,
         _ => return Err("Usage: dropflow-nearby-windows-lab status|host".into()),
     };
     unsafe { RoInitialize(RO_INIT_MULTITHREADED)? };
     let _runtime = Runtime;
+    let cancelled = Arc::new(AtomicBool::new(false));
+    if ipc {
+        let cancelled = Arc::clone(&cancelled);
+        // Parent closes its pipe on Stop or exit; any byte or EOF means stop.
+        thread::spawn(move || {
+            let _ = io::stdin().read(&mut [0]);
+            cancelled.store(true, Ordering::Relaxed);
+        });
+    }
     let wlan = Wlan::open()
         .map_err(|err| format!("Nearby Link unavailable: Windows WLAN is unavailable: {err}"))?;
     let bluetooth = preflight(check_wifi(&wlan), check_ble)
         .map_err(|err| format!("Nearby Link unavailable: {err}"))?;
-    match bluetooth {
+    if !ipc {
+        match bluetooth {
         BluetoothStatus::Available => println!("Bluetooth LE is available. This lab uses manual Wi-Fi pairing."),
         BluetoothStatus::Unavailable => println!("Bluetooth LE is unavailable or could not be verified. Using Wi-Fi-only manual pairing."),
+      }
     }
     if command == "status" {
         println!("Wi-Fi is enabled; Wi-Fi Direct driver and concurrency remain unverified.");
         return Ok(());
     }
-    host(&wlan)
+    host(&wlan, &cancelled, ipc)
 }

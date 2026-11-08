@@ -94,6 +94,7 @@ mod release_info_tests {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(nearby_lab::NearbyLab::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -181,7 +182,8 @@ pub fn run() {
             state_manager::remove_trusted_device,
             state_manager::get_trusted_devices,
             get_release_info,
-            nearby_lab::start_nearby_link_lab,
+            nearby_lab::nearby_link_lab_status,
+            nearby_lab::set_nearby_link_lab,
             fs_browser::get_disk_usage,
             fs_browser::get_user_folders,
             fs_browser::list_directory,

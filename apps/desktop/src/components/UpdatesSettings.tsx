@@ -9,8 +9,6 @@ import { useSettings } from "./SettingsProvider";
 import { useUpdater } from "../hooks/useUpdater";
 import { Progress } from "./ui/Desktop";
 import { formatBytes } from "../utils/formatters";
-import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
 
 export function UpdatesSettings({
   installedVersion,
@@ -21,19 +19,6 @@ export function UpdatesSettings({
   const updater = useUpdater();
   const { status, progress, versionInfo, lastCheckedAt, error } = updater.state;
   const busy = ["checking", "downloading", "installing"].includes(status);
-  const [labError, setLabError] = useState("");
-  const [openingLab, setOpeningLab] = useState(false);
-  const openLab = async () => {
-    setLabError("");
-    setOpeningLab(true);
-    try {
-      await invoke("start_nearby_link_lab");
-    } catch (error) {
-      setLabError(String(error));
-    } finally {
-      setOpeningLab(false);
-    }
-  };
   const messages = {
     idle: "Check for a new build when you're ready.",
     checking: "Checking the selected channel…",
@@ -46,20 +31,6 @@ export function UpdatesSettings({
   };
   return (
     <div className="df-v2-stack">
-      {import.meta.env.VITE_DROPFLOW_NEARBY_LAB === "1" && (
-        <section className="df-card df-card-pad">
-          <h2 className="df-v2-section-title">Nearby Link · Experimental</h2>
-          <p className="df-meta">
-            Test a secondary Wi-Fi connection with Android Alpha. Use the
-            temporary credentials shown by Windows. Bluetooth is optional, and
-            the lab only sends test data.
-          </p>
-          <button type="button" className="df-btn df-btn-primary" onClick={openLab} disabled={openingLab}>
-            Open Nearby Link lab
-          </button>
-          {labError && <p role="alert">{labError}</p>}
-        </section>
-      )}
       <section className="df-card df-card-pad">
         <div className="df-v2-note">
           <Download size={22} />

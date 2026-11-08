@@ -8,15 +8,17 @@ mod wire;
 fn main() {
     #[cfg(windows)]
     {
-        let result = windows_host::run();
+        let ipc = std::env::args().nth(1).as_deref() == Some("host-ipc");
+        let result = windows_host::run(ipc);
         if let Err(error) = &result {
-            eprintln!("{error}");
-        }
-        // The transfer session has already been torn down. Give app users time
-        // to read diagnostics before the separate Windows console closes.
-        if std::env::var_os("DROPFLOW_NEARBY_CONSOLE").is_some() {
-            println!("Press Enter to close the Nearby Link lab.");
-            let _ = std::io::stdin().read_line(&mut String::new());
+            if ipc {
+                println!(
+                    "error\t{}",
+                    error.to_string().replace(['\r', '\n', '\t'], " ")
+                );
+            } else {
+                eprintln!("{error}");
+            }
         }
         if result.is_err() {
             std::process::exit(1);
