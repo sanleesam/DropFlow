@@ -96,7 +96,8 @@ def accepted(s):
 def sendfile(s,i,name,body,bad=False):
     frame(s,4,dict(fileIndex=i,relativePath=name,sizeBytes=len(body),resumeOffset=0))
     assert read(s)[0]==8
-    for start in range(0,len(body),65536): frame(s,5,body[start:start+65536])
+    chunk_size = 256 * 1024
+    for start in range(0,len(body),chunk_size): frame(s,5,body[start:start+chunk_size])
     frame(s,9,dict(fileIndex=i,bytesWritten=len(body),sha256Checksum='0'*64 if bad else hashlib.sha256(body).hexdigest()))
 
 def gone(s):
@@ -110,13 +111,13 @@ def run():
     # Confirm prompts work from Settings; original beta only mounted them on Home.
     tap('Settings')
     with connect() as s:
-        names=['beta2-qa-'+uuid.uuid4().hex[:6]+'.txt','beta2-empty-'+uuid.uuid4().hex[:6]+'.txt']
-        bodies=[b'DropFlow Android Beta 2 verification\n',b'']
+        names=['df-bulk-qa-'+uuid.uuid4().hex[:6]+'.bin','df-empty-'+uuid.uuid4().hex[:6]+'.txt']
+        bodies=[bytes(range(256))*4096+b'tail',b'']
         sid,_=request(s,names,bodies); time.sleep(.3); shot('incoming-settings'); accepted(s)
         for i,(name,body) in enumerate(zip(names,bodies)): sendfile(s,i,name,body)
         frame(s,6,sid); tag,p=read(s); assert tag==8 and json.loads(p)['status']=='ACK',(tag,p)
         for n,b in zip(names,bodies): assert adb('exec-out','cat','/sdcard/Download/DropFlow/'+n)==b
-    print('PASS: request on Settings, two files including empty, bytes saved before final ACK',flush=True)
+    print('PASS: request on Settings, 256 KiB frames plus short tail and empty file, bytes saved before final ACK',flush=True)
     folder='alpha2-nested-'+uuid.uuid4().hex[:8]
     nested=f'{folder}/sub/Unicode-വീട്.txt'
     nested_path='/sdcard/Download/DropFlow/'+nested

@@ -26,6 +26,7 @@ class FileReceiver(
         Log.d(TAG, "Starting FileReceiver for session ${requestPayload.sessionId} (${requestPayload.totalFiles} files, ${requestPayload.totalSizeBytes} bytes)")
         val activeTargets = mutableListOf<WritableTarget>()
         val completedTargets = mutableListOf<WritableTarget>()
+        val frames = BulkFrameReader()
 
         try {
             ReceiveValidation.request(requestPayload)
@@ -57,16 +58,13 @@ class FileReceiver(
                             throw IllegalStateException("Expected DATA_CHUNK frame tag, received 0x${String.format("%02X", chunkHeader.tag.code)}")
                         }
                         val remainingBytes = fileHeader.sizeBytes - bytesWritten
-                        if (chunkHeader.payloadLength <= 0 || chunkHeader.payloadLength.toLong() > remainingBytes) {
-                            throw IllegalStateException("Invalid DATA_CHUNK length ${chunkHeader.payloadLength} for '${fileHeader.relativePath}'")
-                        }
+                        val length = chunkHeader.payloadLength
+                        val chunkBytes = frames.read(inputStream, length, remainingBytes)
+                        fileOut.write(chunkBytes, 0, length)
+                        messageDigest.update(chunkBytes, 0, length)
 
-                        val chunkBytes = FrameUtils.readPayload(inputStream, chunkHeader.payloadLength)
-                        fileOut.write(chunkBytes)
-                        messageDigest.update(chunkBytes)
-
-                        bytesWritten += chunkBytes.size
-                        progressTracker.onChunkTransferred(chunkBytes.size.toLong())
+                        bytesWritten += length
+                        progressTracker.onChunkTransferred(length.toLong())
                     }
                     fileOut.flush()
                     fileOut.fd.sync()

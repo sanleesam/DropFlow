@@ -106,20 +106,25 @@ pub struct TransferAckPayload {
 
 // ─── Binary Frame Encoding & Decoding Helpers ────────────────────────────────
 
+pub(super) const FRAME_HEADER_SIZE: usize = 10;
+
+pub(super) fn encode_frame_header(tag: FrameTag, payload_len: u32) -> [u8; FRAME_HEADER_SIZE] {
+    let mut header = [0u8; FRAME_HEADER_SIZE];
+    header[0..4].copy_from_slice(MAGIC_BYTES);
+    header[4] = PROTOCOL_VERSION;
+    header[5] = tag as u8;
+    header[6..10].copy_from_slice(&payload_len.to_be_bytes());
+    header
+}
+
 /// Writes a 10-byte global packet header: `[DFP1][VERSION:1][TAG:1][LEN:4 BE]`
 pub fn write_frame_header<W: Write>(
     writer: &mut W,
     tag: FrameTag,
     payload_len: u32,
 ) -> Result<(), String> {
-    let mut header = [0u8; 10];
-    header[0..4].copy_from_slice(MAGIC_BYTES);
-    header[4] = PROTOCOL_VERSION;
-    header[5] = tag as u8;
-    header[6..10].copy_from_slice(&payload_len.to_be_bytes());
-
     writer
-        .write_all(&header)
+        .write_all(&encode_frame_header(tag, payload_len))
         .map_err(|e| format!("Failed to write frame header: {e}"))?;
 
     Ok(())
@@ -127,7 +132,7 @@ pub fn write_frame_header<W: Write>(
 
 /// Reads and validates the 10-byte global packet header.
 pub fn read_frame_header<R: Read>(reader: &mut R) -> Result<(FrameTag, u32), String> {
-    let mut header = [0u8; 10];
+    let mut header = [0u8; FRAME_HEADER_SIZE];
     reader
         .read_exact(&mut header)
         .map_err(|e| format!("Failed to read frame header: {e}"))?;

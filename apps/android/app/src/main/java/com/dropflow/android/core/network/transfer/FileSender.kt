@@ -48,7 +48,7 @@ class FileSender {
                 return@withContext "Unexpected response from recipient (0x${String.format("%02X", acceptHeader.tag.code)})"
             }
 
-            val buffer = ByteArray(Protocol.DEFAULT_CHUNK_SIZE)
+            val frames = BulkFrameWriter()
 
             for ((idx, file) in requestPayload.files.withIndex()) {
                 val fileSize = file.sizeBytes
@@ -91,13 +91,12 @@ class FileSender {
 
                 BufferedInputStream(openFile(idx)).use { bufferedIn ->
                     while (bytesSent < fileSize) {
-                        val read = bufferedIn.read(buffer, 0, minOf(buffer.size.toLong(), fileSize - bytesSent).toInt())
+                        val read = bufferedIn.read(frames.bytes, Protocol.HEADER_SIZE,
+                            minOf(frames.payloadCapacity.toLong(), fileSize - bytesSent).toInt())
                         if (read <= 0) break
-                        FrameUtils.writeHeader(socketOutputStream, FrameTag.DATA_CHUNK, read)
-                        socketOutputStream.write(buffer, 0, read)
-                        socketOutputStream.flush()
+                        frames.send(socketOutputStream, read)
 
-                        messageDigest.update(buffer, 0, read)
+                        messageDigest.update(frames.bytes, Protocol.HEADER_SIZE, read)
                         bytesSent += read
                         progressTracker.onChunkTransferred(read.toLong())
                     }

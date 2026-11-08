@@ -6,6 +6,9 @@ authors = ["DropFlow Team"]
 edition = "2021"
 license = "Apache-2.0"
 
+[features]
+experimental-transfer = []
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]

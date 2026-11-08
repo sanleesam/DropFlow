@@ -10,10 +10,11 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
+use super::bulk_io::ChunkWriter;
 use super::protocol::{
     perform_outgoing_handshake, read_frame_header, read_transfer_ack, write_file_complete,
     write_file_header, write_frame_header, write_transfer_request, FileCompletePayload,
-    FileHeaderPayload, FileMetadata, FrameTag, TransferMetadata, DEFAULT_CHUNK_SIZE,
+    FileHeaderPayload, FileMetadata, FrameTag, TransferMetadata,
 };
 use super::receiver::{TransferCompletedPayload, TransferFailedPayload, TransferProgressPayload};
 
@@ -165,6 +166,7 @@ pub fn send_files_over_tcp(
 
     // 3. Stream data for each file
     info!("[Sender] STREAMING {} files", total_files_count);
+    let mut chunks = ChunkWriter::new();
     for (idx, file_meta) in transfer_meta.files.iter().enumerate() {
         let path_str = &file_meta.final_path;
         if cancel_flag.load(Ordering::Relaxed) {
@@ -205,20 +207,20 @@ pub fn send_files_over_tcp(
 
         let mut file_bytes_sent: u64 = 0;
         let mut hasher = Sha256::new();
-        let mut file_buffer = vec![0u8; DEFAULT_CHUNK_SIZE];
         if ack.resume_offset > 0 && ack.resume_offset < file_meta.size_bytes {
             file.seek(SeekFrom::Start(0))
                 .map_err(|e| format!("Failed to seek file for checksum: {e}"))?;
             let mut remaining = ack.resume_offset;
             while remaining > 0 {
-                let to_read = (remaining as usize).min(file_buffer.len());
+                let buffer = chunks.payload();
+                let to_read = remaining.min(buffer.len() as u64) as usize;
                 let read = file
-                    .read(&mut file_buffer[..to_read])
+                    .read(&mut buffer[..to_read])
                     .map_err(|e| format!("Failed to read resume prefix: {e}"))?;
                 if read == 0 {
                     return Err("Unexpected EOF while hashing resume prefix".to_string());
                 }
-                hasher.update(&file_buffer[..read]);
+                hasher.update(&buffer[..read]);
                 remaining -= read as u64;
             }
             file.seek(SeekFrom::Start(ack.resume_offset))
@@ -230,7 +232,7 @@ pub fn send_files_over_tcp(
             );
         }
 
-        loop {
+        while file_bytes_sent < file_meta.size_bytes {
             if cancel_flag.load(Ordering::Relaxed) {
                 let _ = write_frame_header(&mut stream, FrameTag::Cancel, 0);
                 let err_msg = "Transfer cancelled by user".to_string();
@@ -244,21 +246,19 @@ pub fn send_files_over_tcp(
                 return Err(err_msg);
             }
 
+            let buffer = chunks.payload();
+            let limit = (file_meta.size_bytes - file_bytes_sent).min(buffer.len() as u64) as usize;
             let n = file
-                .read(&mut file_buffer)
+                .read(&mut buffer[..limit])
                 .map_err(|e| format!("Failed reading file chunk: {e}"))?;
 
             if n == 0 {
-                break;
+                return Err(format!("'{}' shrank after it was selected", file_meta.relative_path));
             }
 
-            hasher.update(&file_buffer[..n]);
-
-            // Write DataChunk frame header + payload
-            write_frame_header(&mut stream, FrameTag::DataChunk, n as u32)?;
-            stream
-                .write_all(&file_buffer[..n])
-                .map_err(|e| format!("Failed writing chunk payload to socket: {e}"))?;
+            hasher.update(&buffer[..n]);
+            chunks.send(&mut stream, n)
+                .map_err(|e| format!("Failed writing data frame to socket: {e}"))?;
 
             file_bytes_sent += n as u64;
             total_sent_bytes += n as u64;
@@ -299,6 +299,9 @@ pub fn send_files_over_tcp(
             }
         }
 
+        if file.read(&mut [0]).map_err(|e| format!("Failed checking end of file: {e}"))? != 0 {
+            return Err(format!("'{}' grew after it was selected", file_meta.relative_path));
+        }
         let file_checksum = format!("{:x}", hasher.finalize());
 
         // 3b. Send FileComplete frame

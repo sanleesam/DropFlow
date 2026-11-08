@@ -10,3 +10,6 @@ mod selection;
 mod validation;
 mod lifecycle;
 mod transport;
+mod bulk_io;
+#[cfg(any(test, feature = "experimental-transfer"))]
+pub mod batch_v2;

@@ -358,6 +358,7 @@ fn receive_session(app: &AppHandle, stream: &mut super::transport::CancellableSt
 
     let mut received_files_meta: Vec<FileMetadata> = Vec::new();
 
+    let mut chunks = super::bulk_io::ChunkReader::default();
     info!("[Receiver] STREAMING {} files", metadata.total_files);
     for file_idx in 0..metadata.total_files {
         if cancel_flag.load(Ordering::Relaxed) { return Err("Transfer cancelled".into()); }
@@ -492,27 +493,15 @@ fn receive_session(app: &AppHandle, stream: &mut super::transport::CancellableSt
             }
 
             let remaining_bytes = file_header.size_bytes - file_bytes_received;
-            if payload_len == 0 || payload_len as u64 > remaining_bytes {
-                cleanup_files(&created_part_files);
-                return Err(format!(
-                    "Invalid DataChunk length {payload_len} for '{}'",
-                    file_header.relative_path
-                ));
-            }
+            let chunk_buf = chunks.read(stream, payload_len as usize, remaining_bytes)
+                .map_err(|e| format!("Failed to read data frame for '{}': {e}", file_header.relative_path))?;
 
-            // Read payload length bytes
-            let mut chunk_buf = vec![0u8; payload_len as usize];
-            if let Err(e) = stream.read_exact(&mut chunk_buf) {
-                cleanup_files(&created_part_files);
-                return Err(format!("Failed to read DataChunk payload: {e}"));
-            }
-
-            if let Err(e) = out_file.write_all(&chunk_buf) {
+            if let Err(e) = out_file.write_all(chunk_buf) {
                 cleanup_files(&created_part_files);
                 return Err(format!("Failed to write chunk to disk: {e}"));
             }
 
-            file_hasher.update(&chunk_buf);
+            file_hasher.update(chunk_buf);
 
             file_bytes_received += payload_len as u64;
             total_received_bytes += payload_len as u64;

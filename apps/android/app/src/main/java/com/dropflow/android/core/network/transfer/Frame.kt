@@ -35,17 +35,23 @@ data class FrameHeader(
 object FrameUtils {
 
     fun writeHeader(outputStream: OutputStream, tag: FrameTag, payloadLength: Int) {
+        val header = ByteArray(Protocol.HEADER_SIZE)
+        encodeHeader(header, tag, payloadLength)
+        outputStream.write(header)
+    }
+
+    internal fun encodeHeader(buffer: ByteArray, tag: FrameTag, payloadLength: Int) {
+        require(buffer.size >= Protocol.HEADER_SIZE)
         require(payloadLength in 0..maxPayloadSize(tag)) {
             "Invalid ${tag.name} payload size: $payloadLength"
         }
-        val buffer = ByteBuffer.allocate(Protocol.HEADER_SIZE).apply {
-            order(ByteOrder.BIG_ENDIAN)
-            put(Protocol.MAGIC_BYTES)
-            put(Protocol.PROTOCOL_VERSION)
-            put(tag.code)
-            putInt(payloadLength)
-        }
-        outputStream.write(buffer.array())
+        Protocol.MAGIC_BYTES.copyInto(buffer)
+        buffer[4] = Protocol.PROTOCOL_VERSION
+        buffer[5] = tag.code
+        buffer[6] = (payloadLength ushr 24).toByte()
+        buffer[7] = (payloadLength ushr 16).toByte()
+        buffer[8] = (payloadLength ushr 8).toByte()
+        buffer[9] = payloadLength.toByte()
     }
 
     fun readHeader(inputStream: InputStream): FrameHeader {
@@ -83,15 +89,20 @@ object FrameUtils {
 
     fun readPayload(inputStream: InputStream, length: Int): ByteArray {
         val payload = ByteArray(length)
+        readPayloadInto(inputStream, payload, length)
+        return payload
+    }
+
+    internal fun readPayloadInto(inputStream: InputStream, payload: ByteArray, length: Int) {
+        require(length in 0..payload.size)
         var bytesRead = 0
         while (bytesRead < length) {
             val read = inputStream.read(payload, bytesRead, length - bytesRead)
-            if (read == -1) {
+            if (read <= 0) {
                 throw java.io.EOFException("End of stream reached while reading payload")
             }
             bytesRead += read
         }
-        return payload
     }
 
     fun writeTransferRequest(outputStream: OutputStream, payload: TransferRequestPayload) {
