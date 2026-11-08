@@ -1,7 +1,7 @@
 # DropFlow transfer-engine lab
 
 Experimental branch: `codex/transfer-engine-lab`. No release, default Nearby
-mode, OS network changes, or new externally reachable production listener.
+mode, changes to saved network settings, or new production listener.
 
 ## What the research supports
 
@@ -51,11 +51,11 @@ mode, OS network changes, or new externally reachable production listener.
    synthetic payload, checks SHA-256, times out after 45 seconds and never
    joins another network. The localhost self-test does not advertise a service.
 
-The two experimental components are **not wired together**. Batch v2 assumes
+The batch engine and native-link probes are **not wired together**. Batch v2 assumes
 an authenticated encrypted stream, an approved manifest and an authenticated
 resume-point exchange. There is no production TLS pairing, persistent checkpoint
 journal, filesystem publication integration, Android batch v2 implementation,
-or new UI in this branch. The callbacks in the prototype define those boundaries;
+or new production UI. The callbacks in the prototype define those boundaries;
 they do not make staging durable or publication idempotent by themselves.
 
 ## What was measured
@@ -105,6 +105,78 @@ on a controlled network. The manual probe is plaintext and accepts one peer;
 it is not suitable for real files. Confirm the AWDL interface, matching digest,
 unchanged primary routes and continuing internet traffic. Repeat in reverse.
 Only then attach authenticated pairing and the batch engine to the direct link.
+
+## Windows ↔ Android Nearby Link probe
+
+This is a standalone Windows host plus a debug-only Android screen. It
+exchanges and verifies 16 MiB of synthetic data in each direction. No file
+picker, production transfer, BLE discovery, cloud account, or relay is
+involved. Credentials are temporary and entered locally for the hardware test;
+they are not an internet pairing code.
+
+- Windows checks for a WLAN interface and enabled Wi-Fi and BLE radios before
+  starting anything. Missing, disabled, unsupported, or undetectable hardware
+  is unavailable; Ethernet alone does not qualify. Passing `status` is a
+  hardware preflight, not a guarantee of Wi-Fi Direct driver support.
+- The Windows host uses the [classic Windows Wi-Fi Direct group-owner API](https://learn.microsoft.com/en-us/samples/microsoft/windows-classic-samples/wifi-direct-legacy/).
+  It advertises a one-session WPA2 group, gets the peer endpoint from Windows,
+  and opens TCP only on that endpoint’s local address for that peer. It stops
+  on a detected loss of a pre-existing WLAN association or change of the
+  original Internet adapter. [Microsoft’s driver model](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/wdi-objects)
+  describes concurrent station and group-owner operation, but real driver and
+  firewall behavior must be verified before enabling the feature in-app.
+- Android 12 or newer must report support for [concurrent local-only Wi-Fi](https://developer.android.com/reference/android/net/wifi/WifiNetworkSpecifier).
+  The user may get an Android approval prompt for a **second** connection.
+  The socket is bound to that connection only. The probe does not bind the
+  process, change saved networks, or fall back to the default route. The
+  request and socket are released on success, cancellation, failure, or
+  timeout. A detected default-network change aborts the test.
+- Mac ↔ Mac remains an independent AWDL probe. Native macOS ↔ Android and
+  macOS ↔ Windows Nearby are not implemented. Use the existing shared-LAN
+  transfer if the devices already have a common reachable network.
+
+### Hardware run
+
+1. On a Windows 10/11 test PC with Wi-Fi and BLE, run from the repo root:
+
+   ```powershell
+   cargo run --release --locked --manifest-path scripts/nearby-windows/Cargo.toml -- status
+   cargo run --release --locked --manifest-path scripts/nearby-windows/Cargo.toml -- host
+   ```
+
+   Keep the one-time passphrase private. If firewall policy blocks the probe,
+   report it; do not turn off the firewall or open the port to every network.
+2. Build the Android debug APK with `:app:assembleDebug` and install it on a
+   dedicated Android test phone. A debug APK cannot replace a differently
+   signed production install; do not remove the production app to run the
+   probe. With that phone connected over ADB, open the lab screen:
+
+   ```sh
+   adb shell am start -n com.dropflow.android/.nearby.NearbyLinkLabActivity
+   ```
+
+   Enter the host’s temporary credentials and approve Android’s secondary
+   connection if prompted. Do not join the test SSID from system Wi-Fi settings.
+3. Start with the two devices on different normal networks and monitor Internet
+   traffic independently on both. Confirm both receipts, unchanged primary
+   connectivity, and release of the temporary link. Repeat on representative
+   Windows drivers and Android devices, including rejection, interruption,
+   Android without secondary-STA capability, and Windows without Wi-Fi or BLE.
+   Synthetic exchange and cross-compilation do not establish radio
+   interoperability, throughput gains, or production readiness.
+
+Before production: prove coexistence and byte integrity on hardware, handle
+firewall and adapter errors in-app, authenticate peer identity and encrypt
+the transport end-to-end, and integrate the existing transfer approval and
+verified completion behavior. Keep the LAN path independent and do not
+advertise the Mac cross-platform pairs as Nearby until a supported route exists.
+
+Local validation: the Windows host type-checks for x64 and ARM64; its Rust
+wire tests passed. Android debug assembly, lint, JVM tests, and release Kotlin
+compilation passed. The debug activity and extra network permission are absent
+from the merged release manifest. The Android emulator reported no secondary
+Wi-Fi support and correctly disabled the test button. No physical Windows ↔
+Android radio session has been verified.
 
 Measure current and candidate builds on the same physical pairs, both
 directions, with a multi-GB file and a folder with hundreds of small files.

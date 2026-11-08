@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nearby_lab_title">DropFlow Nearby Link lab</string>
+    <string name="nearby_lab_description">Enter the temporary credentials shown by the Windows lab host. Android may ask to add a second, local-only Wi-Fi link. This test exchanges synthetic bytes only.</string>
+    <string name="nearby_lab_ssid">DIRECT-DF-… network name</string>
+    <string name="nearby_lab_passphrase">Temporary passphrase</string>
+    <string name="nearby_lab_run">Run link test</string>
+    <string name="nearby_lab_cancel">Cancel</string>
+    <string name="nearby_lab_ready">Ready to test on this device.</string>
+    <string name="nearby_lab_android_required">Unavailable: this probe requires Android 12 or later.</string>
+    <string name="nearby_lab_concurrency_required">Unavailable: this device does not support a second local-only Wi-Fi connection.</string>
+    <string name="nearby_lab_enable_wifi">Unavailable: Wi-Fi must already be on. This probe does not change your settings.</string>
+    <string name="nearby_lab_invalid_credentials">Enter the network name and passphrase printed by the Windows host.</string>
+    <string name="nearby_lab_waiting">Waiting for Android’s approval and the local-only link…</string>
+    <string name="nearby_lab_no_link">The local-only link was declined, unavailable, or timed out.</string>
+    <string name="nearby_lab_primary_changed">The original Android default connection changed. The probe was stopped.</string>
+    <string name="nearby_lab_lost">The Nearby Link disconnected.</string>
+    <string name="nearby_lab_wrong_network">Android did not provide an isolated local-only Wi-Fi link.</string>
+    <string name="nearby_lab_exchanging">Exchanging synthetic test data with the Windows host…</string>
+    <string name="nearby_lab_success">Verified 16 MiB in each direction. Android’s default network stayed unchanged during the probe.</string>
+    <string name="nearby_lab_failed">The Windows endpoint could not be reached or did not pass the data check.</string>
+    <string name="nearby_lab_cancelled">Test cancelled. Temporary link released.</string>
+</resources>
