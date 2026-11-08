@@ -50,8 +50,9 @@ export function UpdatesSettings({
         <section className="df-card df-card-pad">
           <h2 className="df-v2-section-title">Nearby Link · Experimental</h2>
           <p className="df-meta">
-            Test a secondary Wi-Fi connection with Android Alpha. The lab uses
-            test data only and requires Wi-Fi and Bluetooth Low Energy.
+            Test a secondary Wi-Fi connection with Android Alpha. Use the
+            temporary credentials shown by Windows. Bluetooth is optional, and
+            the lab only sends test data.
           </p>
           <button type="button" className="df-btn df-btn-primary" onClick={openLab} disabled={openingLab}>
             Open Nearby Link lab

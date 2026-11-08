@@ -1,3 +1,4 @@
+use crate::hardware::{preflight, BluetoothStatus};
 use crate::wire;
 use std::error::Error;
 use std::io::{self, Read, Write};
@@ -111,7 +112,7 @@ fn wait_for<T: windows::core::RuntimeType>(
     result
 }
 
-fn check_radios(wlan: &Wlan) -> Result<()> {
+fn check_wifi(wlan: &Wlan) -> Result<()> {
     if !wlan.snapshot()?.0 {
         return Err("no usable Wi-Fi adapter was found".into());
     }
@@ -125,18 +126,19 @@ fn check_radios(wlan: &Wlan) -> Result<()> {
     if !wifi_on {
         return Err("Wi-Fi is off or its radio is unavailable".into());
     }
-    // Windows can return no default Bluetooth adapter, surfaced as a null
-    // WinRT result/error. Both absence and an indeterminate result fail closed.
-    let adapter = wait_for(BluetoothAdapter::GetDefaultAsync()?, deadline, || Ok(()))
-        .map_err(|err| format!("no usable Bluetooth adapter: {err}"))?;
+    Ok(())
+}
+
+fn check_ble() -> Result<bool> {
+    // This lookup is advisory only. Missing hardware, disabled radios and
+    // policy/API errors all fall back to manual Wi-Fi pairing.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let adapter = wait_for(BluetoothAdapter::GetDefaultAsync()?, deadline, || Ok(()))?;
     if !adapter.IsLowEnergySupported()? {
-        return Err("the Bluetooth adapter does not support BLE".into());
+        return Ok(false);
     }
     let bluetooth = wait_for(adapter.GetRadioAsync()?, deadline, || Ok(()))?;
-    if bluetooth.State()? != RadioState::On {
-        return Err("Bluetooth is off or unavailable".into());
-    }
-    Ok(())
+    Ok(bluetooth.State()? == RadioState::On)
 }
 
 fn internet_adapter() -> Result<Option<GUID>> {
@@ -367,11 +369,14 @@ pub fn run() -> Result<()> {
     let _runtime = Runtime;
     let wlan = Wlan::open()
         .map_err(|err| format!("Nearby Link unavailable: Windows WLAN is unavailable: {err}"))?;
-    check_radios(&wlan).map_err(|err| format!("Nearby Link unavailable: {err}"))?;
+    let bluetooth = preflight(check_wifi(&wlan), check_ble)
+        .map_err(|err| format!("Nearby Link unavailable: {err}"))?;
+    match bluetooth {
+        BluetoothStatus::Available => println!("Bluetooth LE is available. This lab uses manual Wi-Fi pairing."),
+        BluetoothStatus::Unavailable => println!("Bluetooth LE is unavailable or could not be verified. Using Wi-Fi-only manual pairing."),
+    }
     if command == "status" {
-        println!(
-            "Wi-Fi and BLE are enabled; Wi-Fi Direct driver and concurrency remain unverified."
-        );
+        println!("Wi-Fi is enabled; Wi-Fi Direct driver and concurrency remain unverified.");
         return Ok(());
     }
     host(&wlan)

@@ -1,3 +1,5 @@
+#[cfg(any(windows, test))]
+mod hardware;
 #[cfg(windows)]
 mod windows_host;
 #[cfg(any(windows, test))]
@@ -22,7 +24,7 @@ fn main() {
     }
     #[cfg(not(windows))]
     {
-        eprintln!("This probe requires Windows, an enabled Wi-Fi adapter and enabled BLE.");
+        eprintln!("This probe requires Windows and a Wi-Fi Direct-capable adapter.");
         std::process::exit(1);
     }
 }

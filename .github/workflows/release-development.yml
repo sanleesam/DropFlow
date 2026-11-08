@@ -104,7 +104,7 @@ jobs:
 
       - name: Build Windows Nearby Link Lab
         id: nearby
-        if: runner.os == 'Windows' && github.ref == 'refs/tags/v0.1.2-dev.1'
+        if: runner.os == 'Windows' && github.ref == 'refs/tags/v0.1.2-dev.2'
         shell: bash
         run: |
           cargo test --locked --manifest-path scripts/nearby-windows/Cargo.toml
@@ -137,7 +137,7 @@ jobs:
             These builds may contain unfinished or unstable changes. For curated
             milestone releases, switch to the **Beta** channel in Settings → About.
 
-            ${{ github.ref == 'refs/tags/v0.1.2-dev.1' && '**Experimental — Windows only:** Settings → Updates → Open Nearby Link lab. Pair with Android Alpha 3. Synthetic test data only; not a file transfer feature. Wi-Fi and BLE are required. Mac does not include the lab.' || '' }}
+            ${{ github.ref == 'refs/tags/v0.1.2-dev.2' && '**Experimental — Windows only:** Settings → Updates → Open Nearby Link lab. Pair with Android Alpha 3. Bluetooth is optional; a Wi-Fi Direct-capable adapter is required. Synthetic test data only. Mac does not include the lab.' || '' }}
           prerelease: true
           includeUpdaterJson: true
           updaterJsonPreferNsis: true

@@ -114,10 +114,11 @@ picker, production transfer, BLE discovery, cloud account, or relay is
 involved. Credentials are temporary and entered locally for the hardware test;
 they are not an internet pairing code.
 
-- Windows checks for a WLAN interface and enabled Wi-Fi and BLE radios before
-  starting anything. Missing, disabled, unsupported, or undetectable hardware
-  is unavailable; Ethernet alone does not qualify. Passing `status` is a
-  hardware preflight, not a guarantee of Wi-Fi Direct driver support.
+- Windows requires an enabled WLAN interface. It checks BLE for diagnostics,
+  but missing, disabled, or unreadable BLE uses the same manual SSID and
+  passphrase flow. Neither path sends data over Bluetooth. Ethernet alone does
+  not qualify. Passing `status` is a hardware preflight, not a guarantee of
+  Wi-Fi Direct driver support.
 - The Windows host uses the [classic Windows Wi-Fi Direct group-owner API](https://learn.microsoft.com/en-us/samples/microsoft/windows-classic-samples/wifi-direct-legacy/).
   It advertises a one-session WPA2 group, gets the peer endpoint from Windows,
   and opens TCP only on that endpoint’s local address for that peer. It stops
@@ -137,12 +138,14 @@ they are not an internet pairing code.
 
 ### Hardware run
 
-The experimental test packages are Desktop Development `0.1.2-dev.1` on
-Windows and Android Alpha `0.2.0-alpha.3`. In each, open **Settings → Updates
-→ Open Nearby Link lab**. The Mac build and ordinary Beta releases omit the lab.
-To build from source rather than use the preview packages:
+The original Windows Development `0.1.2-dev.1` preview still requires BLE.
+The Wi-Fi-only change is prepared for Windows Development `0.1.2-dev.2`.
+It works with the existing Android Alpha `0.2.0-alpha.3` lab protocol; no
+Android update is needed. In preview builds, open **Settings → Updates →
+Open Nearby Link lab**. The Mac build and ordinary Beta releases omit the
+lab. To test the Wi-Fi-only change from source:
 
-1. On a Windows 10/11 test PC with Wi-Fi and BLE, run from the repo root:
+1. On a Windows 10/11 test PC with a Wi-Fi Direct-capable adapter, run from the repo root:
 
    ```powershell
    cargo run --release --locked --manifest-path scripts/nearby-windows/Cargo.toml -- status
@@ -163,7 +166,8 @@ To build from source rather than use the preview packages:
    traffic independently on both. Confirm both receipts, unchanged primary
    connectivity, and release of the temporary link. Repeat on representative
    Windows drivers and Android devices, including rejection, interruption,
-   Android without secondary-STA capability, and Windows without Wi-Fi or BLE.
+   Android without secondary-STA capability, Windows with BLE absent or off
+   (allowed), and Windows without Wi-Fi (rejected).
    Synthetic exchange and cross-compilation do not establish radio
    interoperability, throughput gains, or production readiness.
 
