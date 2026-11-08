@@ -17,6 +17,7 @@ val keystoreProperties = Properties().apply {
     }
 }
 val hasReleaseSigning = keystoreProperties.getProperty("storeFile") != null
+val includeNearbyLab = providers.gradleProperty("dropflowNearbyLab").map(String::toBoolean).orElse(false).get()
 
 // Ship the project's license/notice files with every APK, not only in Git.
 val licenseAssets = layout.buildDirectory.dir("generated/licenseAssets")
@@ -63,7 +64,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("boolean", "NEARBY_LAB", "true")
+        }
         release {
+            require(!includeNearbyLab || defaultConfig.versionName?.contains("-alpha.") == true) {
+                "The Nearby Link lab can only be included in an Android Alpha preview."
+            }
+            buildConfigField("boolean", "NEARBY_LAB", includeNearbyLab.toString())
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -72,6 +80,19 @@ android {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }
+        }
+    }
+
+    sourceSets.named("debug") {
+        manifest.srcFile("src/nearbyLab/AndroidManifest.xml")
+        java.srcDir("src/nearbyLab/java")
+        res.srcDir("src/nearbyLab/res")
+    }
+    if (includeNearbyLab) {
+        sourceSets.named("release") {
+            manifest.srcFile("src/nearbyLab/AndroidManifest.xml")
+            java.srcDir("src/nearbyLab/java")
+            res.srcDir("src/nearbyLab/res")
         }
     }
 

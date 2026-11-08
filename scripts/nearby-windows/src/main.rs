@@ -5,9 +5,20 @@ mod wire;
 
 fn main() {
     #[cfg(windows)]
-    if let Err(error) = windows_host::run() {
-        eprintln!("{error}");
-        std::process::exit(1);
+    {
+        let result = windows_host::run();
+        if let Err(error) = &result {
+            eprintln!("{error}");
+        }
+        // The transfer session has already been torn down. Give app users time
+        // to read diagnostics before the separate Windows console closes.
+        if std::env::var_os("DROPFLOW_NEARBY_CONSOLE").is_some() {
+            println!("Press Enter to close the Nearby Link lab.");
+            let _ = std::io::stdin().read_line(&mut String::new());
+        }
+        if result.is_err() {
+            std::process::exit(1);
+        }
     }
     #[cfg(not(windows))]
     {

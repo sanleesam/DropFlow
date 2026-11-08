@@ -5,7 +5,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.security.MessageDigest
 
-/** Fixed synthetic exchange, never a production file-transfer endpoint. */
+/** Fixed synthetic exchange, not a user file-transfer endpoint. */
 internal object NearbyLabWire {
     const val PORT = 47638
     private val magic = "DFNLAB01".encodeToByteArray()

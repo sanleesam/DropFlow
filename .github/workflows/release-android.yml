@@ -91,7 +91,14 @@ jobs:
         working-directory: ./apps/android
 
       - name: Build Release APK
-        run: ./gradlew :app:assembleRelease --no-daemon
+        env:
+          VERSION: ${{ steps.verify-tag.outputs.VERSION }}
+        run: |
+          ARGS=()
+          if [[ "$VERSION" == "0.2.0-alpha.3" ]]; then
+            ARGS+=(-PdropflowNearbyLab=true :app:lintRelease)
+          fi
+          ./gradlew :app:assembleRelease --no-daemon "${ARGS[@]}"
         working-directory: ./apps/android
 
       - name: Rename Release APK
@@ -123,6 +130,14 @@ jobs:
           test "$ACTUAL_PACKAGE" = "com.dropflow.android"
           test "$ACTUAL_CODE" = "$(node scripts/android-version.mjs code)"
           test "$ACTUAL_VERSION" = "$VERSION"
+          APK_MANIFEST=$("$AAPT" dump xmltree "$APK" AndroidManifest.xml)
+          if [[ "$VERSION" == "0.2.0-alpha.3" ]]; then
+            grep -q 'com.dropflow.android.nearby.NearbyLinkLabActivity' <<< "$APK_MANIFEST"
+            grep -q 'android.permission.CHANGE_NETWORK_STATE' <<< "$APK_MANIFEST"
+          elif grep -q 'com.dropflow.android.nearby.NearbyLinkLabActivity' <<< "$APK_MANIFEST"; then
+            echo "::error::Unexpected Nearby Link lab in a normal Android release"
+            exit 1
+          fi
           for NOTICE_FILE in LICENSE NOTICE THIRD_PARTY_NOTICES.md; do
             unzip -p "$APK" "assets/licenses/$NOTICE_FILE" | cmp - "$NOTICE_FILE"
           done

@@ -43,3 +43,13 @@ test("desktop PR checks exercise both operating systems without publishing", () 
   assert.match(checks,/cargo test --locked/);
   assert.doesNotMatch(checks,/secrets\.|tauri-action|gh release/);
 });
+
+test("the Nearby Link lab is packaged only in the explicit test releases", () => {
+  const android = readFileSync(new URL("../.github/workflows/release-android.yml", import.meta.url), "utf8");
+  const beta = readFileSync(new URL("../.github/workflows/release-beta.yml", import.meta.url), "utf8");
+  assert.ok(workflow.includes("runner.os == 'Windows' && github.ref == 'refs/tags/v0.1.2-dev.1'"));
+  assert.ok(workflow.includes("--config src-tauri/tauri.nearby-lab.json"));
+  assert.ok(workflow.includes("Verify Windows Installer Includes the Nearby Lab"));
+  assert.match(android, /if \[\[ "\$VERSION" == "0\.2\.0-alpha\.3" \]\]; then\n\s+ARGS\+=\(-PdropflowNearbyLab=true/);
+  assert.doesNotMatch(beta, /dropflowNearbyLab|DROPFLOW_NEARBY_LAB|tauri\.nearby-lab/);
+});

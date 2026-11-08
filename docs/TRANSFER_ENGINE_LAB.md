@@ -108,7 +108,7 @@ Only then attach authenticated pairing and the batch engine to the direct link.
 
 ## Windows ↔ Android Nearby Link probe
 
-This is a standalone Windows host plus a debug-only Android screen. It
+This is a standalone Windows host plus an Android lab screen. It
 exchanges and verifies 16 MiB of synthetic data in each direction. No file
 picker, production transfer, BLE discovery, cloud account, or relay is
 involved. Credentials are temporary and entered locally for the hardware test;
@@ -137,6 +137,11 @@ they are not an internet pairing code.
 
 ### Hardware run
 
+The experimental test packages are Desktop Development `0.1.2-dev.1` on
+Windows and Android Alpha `0.2.0-alpha.3`. In each, open **Settings → Updates
+→ Open Nearby Link lab**. The Mac build and ordinary Beta releases omit the lab.
+To build from source rather than use the preview packages:
+
 1. On a Windows 10/11 test PC with Wi-Fi and BLE, run from the repo root:
 
    ```powershell
@@ -149,11 +154,8 @@ they are not an internet pairing code.
 2. Build the Android debug APK with `:app:assembleDebug` and install it on a
    dedicated Android test phone. A debug APK cannot replace a differently
    signed production install; do not remove the production app to run the
-   probe. With that phone connected over ADB, open the lab screen:
-
-   ```sh
-   adb shell am start -n com.dropflow.android/.nearby.NearbyLinkLabActivity
-   ```
+   probe. Open the lab screen from **Settings → Updates**. The lab activity
+   cannot be opened by other apps.
 
    Enter the host’s temporary credentials and approve Android’s secondary
    connection if prompted. Do not join the test SSID from system Wi-Fi settings.
@@ -173,8 +175,8 @@ advertise the Mac cross-platform pairs as Nearby until a supported route exists.
 
 Local validation: the Windows host type-checks for x64 and ARM64; its Rust
 wire tests passed. Android debug assembly, lint, JVM tests, and release Kotlin
-compilation passed. The debug activity and extra network permission are absent
-from the merged release manifest. The Android emulator reported no secondary
+compilation passed. The lab activity and extra network permission are absent
+from the default release manifest. The Android emulator reported no secondary
 Wi-Fi support and correctly disabled the test button. No physical Windows ↔
 Android radio session has been verified.
 

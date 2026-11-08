@@ -4,7 +4,7 @@
     <application>
         <activity
             android:name=".nearby.NearbyLinkLabActivity"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/nearby_lab_title" />
     </application>
 </manifest>

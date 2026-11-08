@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="nearby_lab_title">DropFlow Nearby Link lab</string>
+    <string name="nearby_lab_title">Nearby Link · Experimental</string>
     <string name="nearby_lab_description">Enter the temporary credentials shown by the Windows lab host. Android may ask to add a second, local-only Wi-Fi link. This test exchanges synthetic bytes only.</string>
     <string name="nearby_lab_ssid">DIRECT-DF-… network name</string>
     <string name="nearby_lab_passphrase">Temporary passphrase</string>

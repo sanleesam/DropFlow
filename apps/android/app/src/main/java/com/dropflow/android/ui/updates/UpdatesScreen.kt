@@ -1,5 +1,6 @@
 package com.dropflow.android.ui.updates
 
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectable
@@ -13,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.Role
+import com.dropflow.android.BuildConfig
 import com.dropflow.android.core.update.AndroidUpdateChannel
 import com.dropflow.android.ui.components.*
 import com.dropflow.android.ui.theme.*
@@ -28,6 +30,21 @@ fun UpdatesScreen(viewModel: UpdatesViewModel, modifier: Modifier = Modifier) {
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)) {
         item { PageIntro("SETTINGS", "Updates", "Choose your release channel and keep DropFlow up to date.") }
+        if (BuildConfig.NEARBY_LAB) {
+            item {
+                GlassCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Nearby Link · Experimental", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                        Text("Test a nearby connection with a Windows Development build. Uses test data only; no files are read or sent.",
+                            color = TextSecondary, fontSize = 13.sp)
+                        OutlinedButton(onClick = {
+                            // The activity is compiled into debug and explicitly enabled Alpha APKs only.
+                            context.startActivity(Intent().setClassName(context, "${context.packageName}.nearby.NearbyLinkLabActivity"))
+                        }) { Text("Open Nearby Link lab") }
+                    }
+                }
+            }
+        }
         item { GlassCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Installed version", color = TextSecondary, fontSize = 13.sp)

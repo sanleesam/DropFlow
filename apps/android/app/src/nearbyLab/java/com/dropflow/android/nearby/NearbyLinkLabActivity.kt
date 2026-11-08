@@ -29,7 +29,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.Executors
 
-/** Manual-only, debug-only entry point. No data or network requests arrive via intents. */
+/** Internal lab entry point. No data or network requests arrive via intents. */
 class NearbyLinkLabActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()

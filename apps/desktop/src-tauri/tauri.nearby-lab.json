@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "nearby-lab-bin/dropflow-nearby-windows-lab.exe": "nearby-lab/dropflow-nearby-windows-lab.exe"
+    }
+  }
+}

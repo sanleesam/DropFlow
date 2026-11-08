@@ -7,6 +7,7 @@ pub mod transfer_manager;
 pub mod update_manager;
 mod window_material;
 mod safe_fs;
+mod nearby_lab;
 
 use std::sync::{Arc, Mutex};
 use log::info;
@@ -180,6 +181,7 @@ pub fn run() {
             state_manager::remove_trusted_device,
             state_manager::get_trusted_devices,
             get_release_info,
+            nearby_lab::start_nearby_link_lab,
             fs_browser::get_disk_usage,
             fs_browser::get_user_folders,
             fs_browser::list_directory,

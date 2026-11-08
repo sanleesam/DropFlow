@@ -102,6 +102,19 @@ jobs:
           node --test scripts/desktop-version.test.mjs
           node scripts/desktop-version.mjs set "$DEV_VERSION"
 
+      - name: Build Windows Nearby Link Lab
+        id: nearby
+        if: runner.os == 'Windows' && github.ref == 'refs/tags/v0.1.2-dev.1'
+        shell: bash
+        run: |
+          cargo test --locked --manifest-path scripts/nearby-windows/Cargo.toml
+          cargo build --release --locked --manifest-path scripts/nearby-windows/Cargo.toml --target x86_64-pc-windows-msvc
+          mkdir -p apps/desktop/src-tauri/nearby-lab-bin
+          cp scripts/nearby-windows/target/x86_64-pc-windows-msvc/release/dropflow-nearby-windows-lab.exe apps/desktop/src-tauri/nearby-lab-bin/
+          echo 'DROPFLOW_NEARBY_LAB=1' >> "$GITHUB_ENV"
+          echo 'VITE_DROPFLOW_NEARBY_LAB=1' >> "$GITHUB_ENV"
+          echo 'args=--config src-tauri/tauri.nearby-lab.json' >> "$GITHUB_OUTPUT"
+
       - name: Build and Publish Development Release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -111,7 +124,7 @@ jobs:
           DROPFLOW_RELEASE_TAG: ${{ env.DEV_TAG }}
         with:
           projectPath: ./apps/desktop
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ steps.nearby.outputs.args }}
           tagName: ${{ env.DEV_TAG }}
           releaseCommitish: ${{ github.sha }}
           releaseName: 'DropFlow ${{ env.DEV_VERSION }} Development'
@@ -123,9 +136,23 @@ jobs:
 
             These builds may contain unfinished or unstable changes. For curated
             milestone releases, switch to the **Beta** channel in Settings → About.
+
+            ${{ github.ref == 'refs/tags/v0.1.2-dev.1' && '**Experimental — Windows only:** Settings → Updates → Open Nearby Link lab. Pair with Android Alpha 3. Synthetic test data only; not a file transfer feature. Wi-Fi and BLE are required. Mac does not include the lab.' || '' }}
           prerelease: true
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+
+      - name: Verify Windows Installer Includes the Nearby Lab
+        if: steps.nearby.outcome == 'success'
+        shell: pwsh
+        run: |
+          $bundle = 'apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis'
+          $installer = Get-ChildItem -Path $bundle -Filter '*-setup.exe' -File | Select-Object -First 1
+          if (-not $installer) { throw 'Windows preview installer not found' }
+          $listing = & "$env:ProgramFiles\7-Zip\7z.exe" l $installer.FullName
+          if ($LASTEXITCODE -ne 0 -or -not ($listing -match 'dropflow-nearby-windows-lab\.exe')) {
+            throw 'The preview installer does not contain the Nearby Link lab'
+          }
 
       # Same per-platform manifest protection as the Beta workflow: each matrix
       # job publishes its own latest.json as a uniquely named artifact so
