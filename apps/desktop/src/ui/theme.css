@@ -689,6 +689,12 @@ html[data-platform="mac"] .win[data-sidebar="hidden"] .sb-toggle {
 .search input::placeholder {
   color: var(--label-3);
 }
+/* The capsule carries the focus ring; the bare input inside never draws its own. */
+.search input:focus,
+.search input:focus-visible,
+.field:focus-visible {
+  outline: none;
+}
 .search:focus-within {
   box-shadow: var(--glass-shadow), 0 0 0 3px rgb(var(--accent-rgb) / 0.4);
 }
