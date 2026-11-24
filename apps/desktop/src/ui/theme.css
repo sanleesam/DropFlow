@@ -581,7 +581,7 @@ html.dark .side-lens {
   padding-left: 52px;
 }
 html[data-platform="mac"] .win[data-sidebar="hidden"] .toolbar {
-  padding-left: 122px;
+  padding-left: 134px;
 }
 .sb-toggle {
   position: absolute;
@@ -594,14 +594,15 @@ html[data-platform="mac"] .win[data-sidebar="hidden"] .toolbar {
     transform var(--spring-snappy-ms) var(--spring-snappy);
 }
 html[data-platform="mac"] .sb-toggle {
-  top: calc(var(--inset) + 9px);
+  /* Shares a centre line with the traffic lights (trafficLightPosition y=28 puts their centre at 26px). */
+  top: 12px;
 }
 .win[data-sidebar="hidden"] .sb-toggle {
   top: 12px;
   left: 14px;
 }
 html[data-platform="mac"] .win[data-sidebar="hidden"] .sb-toggle {
-  left: 84px;
+  left: 96px;
 }
 .toolbar-title {
   font: 600 15px/1 var(--font-display);
@@ -1224,7 +1225,8 @@ html.dark .card {
 html.dark .avatar {
   background: linear-gradient(180deg, #6d717b 0%, #4c4f57 100%);
 }
-.avatar.local {
+.avatar.local,
+html.dark .avatar.local {
   background: linear-gradient(180deg, #5aa9ff 0%, #0a74f0 100%);
 }
 .avatar.large {

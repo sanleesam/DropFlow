@@ -134,23 +134,21 @@ export const AppShell: React.FC = () => {
         </div>
 
         <div className="side-foot">
-          <div
-            className="meter"
-            role="meter"
-            aria-label="Disk used"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(usedPct)}
-          >
-            <span style={{ width: `${usedPct}%` }} />
-          </div>
-          <small>
-            {disk
-              ? `${formatBytes(disk.freeBytes)} available`
-              : disk === undefined
-                ? "Checking disk…"
-                : "Storage unavailable"}
-          </small>
+          {disk && (
+            <>
+              <div
+                className="meter"
+                role="meter"
+                aria-label="Disk used"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(usedPct)}
+              >
+                <span style={{ width: `${usedPct}%` }} />
+              </div>
+              <small className="num">{formatBytes(disk.freeBytes)} available</small>
+            </>
+          )}
           <small role="status">
             <i
               className={`dot${discovery === "error" ? " bad" : discovery === "ready" ? "" : " idle"}`}
