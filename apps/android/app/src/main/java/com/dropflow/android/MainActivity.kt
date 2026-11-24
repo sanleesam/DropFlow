@@ -66,7 +66,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val preferences by settingsViewModel.uiState.collectAsState()
-            DropFlowTheme(reduceMotion = preferences.reduceMotion) {
+            DropFlowTheme(themeMode = preferences.themeMode, glassStyle = preferences.glassStyle,
+                reduceMotion = preferences.reduceMotion) {
                 val navController = rememberNavController()
                 DropFlowNavHost(
                     navController = navController,
