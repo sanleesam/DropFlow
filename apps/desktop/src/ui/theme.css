@@ -369,14 +369,13 @@ html:is([data-native-material="vibrancy"], [data-native-material="mica"]) .main 
   border-radius: var(--r-panel);
   display: flex;
   flex-direction: column;
-  padding: 12px 10px 12px;
+  /* The top row holds the sidebar toggle (and the traffic lights on macOS),
+     so navigation always starts below it on every platform. */
+  padding: 46px 10px 12px;
   transition:
     transform var(--spring-smooth-ms) var(--spring-smooth),
     opacity 220ms ease,
     --glass-glow 260ms var(--ease-out);
-}
-html[data-platform="mac"] .sidebar {
-  padding-top: 46px;
 }
 .win[data-sidebar="hidden"] .sidebar {
   transform: translateX(calc(-100% - 2 * var(--inset)));
