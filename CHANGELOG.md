@@ -162,6 +162,13 @@ First desktop milestone intended for real users on Windows and macOS.
 
 - DFP/1 protocol unchanged; desktop remains the reference implementation.
 
+## Android — [0.2.0-alpha.4] — 2026-11-24
+
+- Restyle the app around Liquid Glass to match the desktop redesign: Apple system
+  colours, glass only on navigation and controls, spring motion, shorter copy.
+- Transfer, discovery and approval behaviour is unchanged. No Nearby Link lab in
+  this build. Not yet checked on Android 8–12 or physical devices (install number 21).
+
 ## Android — [0.2.0-alpha.2] — 2026-11-07
 
 - Keep received folder hierarchy and preserve same-name files as separate copies.
