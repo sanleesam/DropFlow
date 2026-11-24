@@ -39,7 +39,8 @@ class TransferEngine(
 
     private val sessionsMap = ConcurrentHashMap<String, TransferSession>()
     private val connectionMap = ConcurrentHashMap<String, TransferConnection>()
-    private val transferSlot = TransferSlot()
+    private val keepAlive = TransferKeepAlive(appContext)
+    private val transferSlot = TransferSlot(onBusy = keepAlive::acquire, onIdle = keepAlive::release)
 
     private val _activeSessions = MutableStateFlow<List<TransferSession>>(emptyList())
     val activeSessions: StateFlow<List<TransferSession>> = _activeSessions.asStateFlow()

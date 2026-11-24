@@ -28,6 +28,10 @@ impl<'a> CancellableStream<'a> {
         // Only retry nonblocking WouldBlock; readiness waits do not consume bytes.
         socket.set_read_timeout(None)?;
         socket.set_write_timeout(None)?;
+        // Control frames are request/response. With Nagle on, a small reply can
+        // wait for the peer's delayed ACK (~40 ms, up to 200 ms on Windows) on
+        // every file. Data frames are already large single writes.
+        socket.set_nodelay(true)?;
         socket.set_nonblocking(true)?;
         let poller = Poller::new()?;
         // SAFETY: the exclusive borrow keeps the socket alive and prevents any

@@ -130,6 +130,20 @@ pub fn write_frame_header<W: Write>(
     Ok(())
 }
 
+/// Writes a whole frame (header + payload) with one write, so a control frame
+/// never leaves as two segments. Same bytes on the wire as header-then-payload.
+pub fn write_frame<W: Write>(writer: &mut W, tag: FrameTag, payload: &[u8]) -> Result<(), String> {
+    let mut frame = Vec::with_capacity(FRAME_HEADER_SIZE + payload.len());
+    frame.extend_from_slice(&encode_frame_header(tag, payload.len() as u32));
+    frame.extend_from_slice(payload);
+    writer
+        .write_all(&frame)
+        .map_err(|e| format!("Failed to write {tag:?} frame: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Failed to flush {tag:?} frame: {e}"))
+}
+
 /// Reads and validates the 10-byte global packet header.
 pub fn read_frame_header<R: Read>(reader: &mut R) -> Result<(FrameTag, u32), String> {
     let mut header = [0u8; FRAME_HEADER_SIZE];
@@ -197,13 +211,7 @@ pub fn perform_incoming_handshake<S: Read + Write>(stream: &mut S) -> Result<(),
 
 fn write_heartbeat<W: Write>(writer: &mut W, message: &str) -> Result<(), String> {
     let payload = message.as_bytes();
-    write_frame_header(writer, FrameTag::Heartbeat, payload.len() as u32)?;
-    writer
-        .write_all(payload)
-        .map_err(|e| format!("Failed to write heartbeat payload: {e}"))?;
-    writer
-        .flush()
-        .map_err(|e| format!("Failed to flush heartbeat: {e}"))
+    write_frame(writer, FrameTag::Heartbeat, payload)
 }
 
 /// Sends a complete JSON `TransferRequest` frame.
@@ -221,15 +229,7 @@ pub fn write_transfer_request<W: Write>(
         ));
     }
 
-    write_frame_header(writer, FrameTag::TransferRequest, json_bytes.len() as u32)?;
-    writer
-        .write_all(&json_bytes)
-        .map_err(|e| format!("Failed to write TransferMetadata payload: {e}"))?;
-    writer
-        .flush()
-        .map_err(|e| format!("Failed to flush stream: {e}"))?;
-
-    Ok(())
+    write_frame(writer, FrameTag::TransferRequest, &json_bytes)
 }
 
 /// Reads a JSON `TransferRequest` frame.
@@ -271,15 +271,7 @@ pub fn write_file_header<W: Write>(
         ));
     }
 
-    write_frame_header(writer, FrameTag::FileHeader, json_bytes.len() as u32)?;
-    writer
-        .write_all(&json_bytes)
-        .map_err(|e| format!("Failed to write FileHeader payload: {e}"))?;
-    writer
-        .flush()
-        .map_err(|e| format!("Failed to flush stream: {e}"))?;
-
-    Ok(())
+    write_frame(writer, FrameTag::FileHeader, &json_bytes)
 }
 
 /// Reads a JSON `FileHeader` frame.
@@ -321,15 +313,7 @@ pub fn write_file_complete<W: Write>(
         ));
     }
 
-    write_frame_header(writer, FrameTag::FileComplete, json_bytes.len() as u32)?;
-    writer
-        .write_all(&json_bytes)
-        .map_err(|e| format!("Failed to write FileComplete payload: {e}"))?;
-    writer
-        .flush()
-        .map_err(|e| format!("Failed to flush stream: {e}"))?;
-
-    Ok(())
+    write_frame(writer, FrameTag::FileComplete, &json_bytes)
 }
 
 /// Reads a JSON `FileComplete` frame.
@@ -363,14 +347,7 @@ pub fn write_response_frame<W: Write>(
     message: &str,
 ) -> Result<(), String> {
     let msg_bytes = message.as_bytes();
-    write_frame_header(writer, tag, msg_bytes.len() as u32)?;
-    writer
-        .write_all(msg_bytes)
-        .map_err(|e| format!("Failed to write response payload: {e}"))?;
-    writer
-        .flush()
-        .map_err(|e| format!("Failed to flush stream: {e}"))?;
-    Ok(())
+    write_frame(writer, tag, msg_bytes)
 }
 
 /// Sends a structured `TransferAckPayload` frame.
@@ -381,15 +358,7 @@ pub fn write_transfer_ack<W: Write>(
     let json_bytes = serde_json::to_vec(payload)
         .map_err(|e| format!("Failed to serialize TransferAckPayload: {e}"))?;
 
-    write_frame_header(writer, FrameTag::TransferAck, json_bytes.len() as u32)?;
-    writer
-        .write_all(&json_bytes)
-        .map_err(|e| format!("Failed to write TransferAck payload: {e}"))?;
-    writer
-        .flush()
-        .map_err(|e| format!("Failed to flush stream: {e}"))?;
-
-    Ok(())
+    write_frame(writer, FrameTag::TransferAck, &json_bytes)
 }
 
 /// Reads a `TransferAckPayload` or legacy response frame.

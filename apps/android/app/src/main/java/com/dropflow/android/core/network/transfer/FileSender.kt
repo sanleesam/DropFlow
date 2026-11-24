@@ -49,6 +49,7 @@ class FileSender {
             }
 
             val frames = BulkFrameWriter()
+            val started = System.nanoTime()
 
             for ((idx, file) in requestPayload.files.withIndex()) {
                 val fileSize = file.sizeBytes
@@ -138,6 +139,7 @@ class FileSender {
                 throw IllegalStateException("Receiver did not confirm transfer completion: $finalStatus")
             }
 
+            Log.i(TAG, TransferPerf.summary("send", requestPayload.totalFiles, requestPayload.totalSizeBytes, System.nanoTime() - started))
             Log.d(TAG, "FileSender (streams) completed session ${requestPayload.sessionId} cleanly")
             null
         } catch (e: TransferCancelledByPeerException) {

@@ -34,6 +34,18 @@ data class FrameHeader(
 
 object FrameUtils {
 
+    /**
+     * Writes header + payload as one write so a control frame never leaves as
+     * two TCP segments. Same bytes on the wire as header-then-payload.
+     */
+    fun writeFrame(outputStream: OutputStream, tag: FrameTag, payload: ByteArray) {
+        val frame = ByteArray(Protocol.HEADER_SIZE + payload.size)
+        encodeHeader(frame, tag, payload.size)
+        payload.copyInto(frame, Protocol.HEADER_SIZE)
+        outputStream.write(frame)
+        outputStream.flush()
+    }
+
     fun writeHeader(outputStream: OutputStream, tag: FrameTag, payloadLength: Int) {
         val header = ByteArray(Protocol.HEADER_SIZE)
         encodeHeader(header, tag, payloadLength)
@@ -107,65 +119,47 @@ object FrameUtils {
 
     fun writeTransferRequest(outputStream: OutputStream, payload: TransferRequestPayload) {
         val jsonBytes = payload.toJsonObject().toString().toByteArray(StandardCharsets.UTF_8)
-        writeHeader(outputStream, FrameTag.TRANSFER_REQUEST, jsonBytes.size)
-        outputStream.write(jsonBytes)
-        outputStream.flush()
+        writeFrame(outputStream, FrameTag.TRANSFER_REQUEST, jsonBytes)
     }
 
     fun writeHeartbeat(outputStream: OutputStream, message: String) {
         val messageBytes = message.toByteArray(StandardCharsets.UTF_8)
-        writeHeader(outputStream, FrameTag.HEARTBEAT, messageBytes.size)
-        outputStream.write(messageBytes)
-        outputStream.flush()
+        writeFrame(outputStream, FrameTag.HEARTBEAT, messageBytes)
     }
 
     fun writeTransferAccept(outputStream: OutputStream, payload: TransferAcceptPayload = TransferAcceptPayload()) {
         val jsonBytes = payload.toJsonObject().toString().toByteArray(StandardCharsets.UTF_8)
-        writeHeader(outputStream, FrameTag.TRANSFER_ACCEPT, jsonBytes.size)
-        outputStream.write(jsonBytes)
-        outputStream.flush()
+        writeFrame(outputStream, FrameTag.TRANSFER_ACCEPT, jsonBytes)
     }
 
     fun writeTransferReject(outputStream: OutputStream, payload: TransferRejectPayload = TransferRejectPayload()) {
         val jsonBytes = payload.toJsonObject().toString().toByteArray(StandardCharsets.UTF_8)
-        writeHeader(outputStream, FrameTag.TRANSFER_REJECT, jsonBytes.size)
-        outputStream.write(jsonBytes)
-        outputStream.flush()
+        writeFrame(outputStream, FrameTag.TRANSFER_REJECT, jsonBytes)
     }
 
     fun writeFileHeader(outputStream: OutputStream, payload: FileHeaderPayload) {
         val jsonBytes = payload.toJsonObject().toString().toByteArray(StandardCharsets.UTF_8)
-        writeHeader(outputStream, FrameTag.FILE_HEADER, jsonBytes.size)
-        outputStream.write(jsonBytes)
-        outputStream.flush()
+        writeFrame(outputStream, FrameTag.FILE_HEADER, jsonBytes)
     }
 
     fun writeTransferAck(outputStream: OutputStream, payload: TransferAckPayload = TransferAckPayload()) {
         val jsonBytes = payload.toJsonObject().toString().toByteArray(StandardCharsets.UTF_8)
-        writeHeader(outputStream, FrameTag.TRANSFER_ACK, jsonBytes.size)
-        outputStream.write(jsonBytes)
-        outputStream.flush()
+        writeFrame(outputStream, FrameTag.TRANSFER_ACK, jsonBytes)
     }
 
     fun writeFileComplete(outputStream: OutputStream, payload: FileCompletePayload) {
         val jsonBytes = payload.toJsonObject().toString().toByteArray(StandardCharsets.UTF_8)
-        writeHeader(outputStream, FrameTag.FILE_COMPLETE, jsonBytes.size)
-        outputStream.write(jsonBytes)
-        outputStream.flush()
+        writeFrame(outputStream, FrameTag.FILE_COMPLETE, jsonBytes)
     }
 
     fun writeTransferComplete(outputStream: OutputStream, sessionId: String) {
         val sessionBytes = sessionId.toByteArray(StandardCharsets.UTF_8)
-        writeHeader(outputStream, FrameTag.TRANSFER_COMPLETE, sessionBytes.size)
-        outputStream.write(sessionBytes)
-        outputStream.flush()
+        writeFrame(outputStream, FrameTag.TRANSFER_COMPLETE, sessionBytes)
     }
 
     fun writeTransferCancel(outputStream: OutputStream, sessionId: String) {
         val sessionBytes = sessionId.toByteArray(StandardCharsets.UTF_8)
-        writeHeader(outputStream, FrameTag.TRANSFER_CANCEL, sessionBytes.size)
-        outputStream.write(sessionBytes)
-        outputStream.flush()
+        writeFrame(outputStream, FrameTag.TRANSFER_CANCEL, sessionBytes)
     }
 
     private fun maxPayloadSize(tag: FrameTag): Int = when (tag) {

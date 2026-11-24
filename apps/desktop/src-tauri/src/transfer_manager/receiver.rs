@@ -640,6 +640,7 @@ fn receive_session(app: &AppHandle, stream: &mut super::transport::CancellableSt
     write_response_frame(stream, FrameTag::TransferAck, "ACK")
         .map_err(|e| format!("Files saved, but failed to send TransferAck: {e}"))?;
     info!("[Receiver] ACK_SENT");
+    info!("{}", super::perf::summary("receive", metadata.files.len(), total_received_bytes, start_time.elapsed()));
     info!("[Receiver] CONNECTION_CLOSED");
 
     crate::state_manager::remove_incomplete_session(app, &metadata.session_id);

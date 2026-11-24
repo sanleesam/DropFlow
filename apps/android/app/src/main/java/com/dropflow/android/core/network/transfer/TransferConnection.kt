@@ -43,6 +43,9 @@ internal class TransferConnection(
     init {
         try {
             socket.soTimeout = Protocol.READ_TIMEOUT_MS
+            // Request/response control frames must not wait on Nagle + delayed ACK
+            // (up to 200 ms per file on Windows peers). Data frames are large writes.
+            socket.tcpNoDelay = true
             inputStream = socket.getInputStream()
             outputStream = socket.getOutputStream()
         } catch (e: Exception) {

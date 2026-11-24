@@ -27,6 +27,7 @@ class FileReceiver(
         val activeTargets = mutableListOf<WritableTarget>()
         val completedTargets = mutableListOf<WritableTarget>()
         val frames = BulkFrameReader()
+        val started = System.nanoTime()
 
         try {
             ReceiveValidation.request(requestPayload)
@@ -111,6 +112,7 @@ class FileReceiver(
             // A sender may report success only after durable output has been published.
             FrameUtils.writeTransferAck(outputStream, TransferAckPayload(status = "ACK"))
             completedTargets.clear()
+            Log.i(TAG, TransferPerf.summary("receive", requestPayload.totalFiles, requestPayload.totalSizeBytes, System.nanoTime() - started))
 
             true
         } catch (e: Exception) {

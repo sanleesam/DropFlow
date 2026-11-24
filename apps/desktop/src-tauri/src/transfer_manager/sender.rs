@@ -318,18 +318,7 @@ pub fn send_files_over_tcp(
         .map_err(|e| format!("Failed to flush TCP stream: {e}"))?;
 
     // 4. Send TransferComplete frame
-    let session_bytes = session_id.as_bytes();
-    write_frame_header(
-        &mut stream,
-        FrameTag::TransferComplete,
-        session_bytes.len() as u32,
-    )?;
-    stream
-        .write_all(session_bytes)
-        .map_err(|e| format!("Failed writing TransferComplete payload: {e}"))?;
-    stream
-        .flush()
-        .map_err(|e| format!("Failed flushing TransferComplete frame: {e}"))?;
+    super::protocol::write_frame(&mut stream, FrameTag::TransferComplete, session_id.as_bytes())?;
     info!("[Sender] TRANSFER_COMPLETE_SENT");
 
     // 5. Wait for TransferAck frame from receiver
@@ -362,6 +351,7 @@ pub fn send_files_over_tcp(
         return Err("Missing final acknowledgement".into());
     }
     info!("[Sender] ACK_RECEIVED");
+    info!("{}", super::perf::summary("send", total_files_count as usize, total_sent_bytes, start_time.elapsed()));
 
     // 6. Graceful shutdown
     stream
