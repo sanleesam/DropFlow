@@ -162,6 +162,14 @@ First desktop milestone intended for real users on Windows and macOS.
 
 - DFP/1 protocol unchanged; desktop remains the reference implementation.
 
+## Android — [0.2.0-alpha.5] — 2026-11-24
+
+- Faster transfers of many files: TCP_NODELAY and single-write control frames
+  remove per-file waits. Wire format unchanged.
+- Keep Wi-Fi and the app awake during a transfer, with a "Transferring files"
+  notification. Adds `[Perf]` timing lines to logcat for benchmarking.
+- Test build for hardware measurement (install number 22).
+
 ## Android — [0.2.0-alpha.4] — 2026-11-24
 
 - Restyle the app around Liquid Glass to match the desktop redesign: Apple system
