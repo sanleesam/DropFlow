@@ -1,54 +1,44 @@
-import { useEffect, useRef } from "react";
-import { AlertCircle, RefreshCw, Wifi } from "lucide-react";
-import { mountDiscoveryMotion } from "../../ui/motion";
+import { AlertCircle, Wifi, WifiOff } from "lucide-react";
+
 export function DiscoveryState({
   state,
   onRetry,
-  reduceMotion = false,
 }: {
   state: "searching" | "empty" | "error" | "ready";
   onRetry: () => void;
+  /** Kept for call-site compatibility; motion follows CSS preferences. */
   reduceMotion?: boolean;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (state !== "searching" || reduceMotion || !ref.current) return;
-    return mountDiscoveryMotion(ref.current);
-  }, [state, reduceMotion]);
   if (state === "ready") return null;
   return (
-    <div ref={ref} className="df-v2-discovery" data-state={state} role="status">
-      {state === "error" ? (
-        <AlertCircle size={26} />
-      ) : state === "searching" ? (
-        <>
-          <span className="df-discovery-edge" aria-hidden="true" />
-          <span className="df-discovery-beacon" aria-hidden="true">
-            <span className="df-discovery-ring" />
-            <span className="df-discovery-ring" />
-            <span className="df-discovery-beacon-core">
-              <Wifi size={21} strokeWidth={1.7} />
-            </span>
+    <div className="discovery" data-state={state} role="status">
+      {state === "searching" ? (
+        <span className="df-discovery-beacon" aria-hidden="true">
+          <span className="df-discovery-ring" />
+          <span className="df-discovery-ring" />
+          <span className="df-discovery-beacon-core">
+            <Wifi size={20} strokeWidth={1.8} />
           </span>
-        </>
+        </span>
       ) : (
-        <Wifi size={26} />
+        <span className="icon" aria-hidden="true">
+          {state === "error" ? <AlertCircle size={22} /> : <WifiOff size={22} />}
+        </span>
       )}
       <strong>
         {state === "error"
           ? "Discovery unavailable"
           : state === "searching"
-            ? "Looking for nearby devices"
-            : "No other devices nearby"}
+            ? "Looking for devices"
+            : "No devices nearby"}
       </strong>
       <p>
         {state === "error"
-          ? "Check your network connection, then try again."
-          : "Open DropFlow on another device connected to the same local network."}
+          ? "Check your network connection."
+          : "Open DropFlow on the same network."}
       </p>
       {state !== "searching" && (
-        <button type="button" className="df-link" onClick={onRetry}>
-          <RefreshCw size={14} />
+        <button type="button" className="btn btn-plain" onClick={onRetry}>
           Search again
         </button>
       )}

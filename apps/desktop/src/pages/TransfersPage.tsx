@@ -2,18 +2,14 @@ import React, { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
+  ArrowDownLeft,
   ArrowLeftRight,
-  Check,
-  Clock,
+  ArrowUpRight,
   FileArchive,
   FileText,
   Folder,
-  Gauge,
   Image as ImageIcon,
-  Info,
   Play,
-  Search,
-  Wifi,
   X,
 } from "lucide-react";
 import { useToast } from "../components/ToastProvider";
@@ -22,8 +18,10 @@ import { friendlyTransferError } from "../ui/artwork";
 import {
   DeviceVisual,
   EmptyState,
-  PageHeader,
+  Page,
   Progress,
+  SearchField,
+  Segmented,
 } from "../components/ui/Desktop";
 import {
   ActiveTransferSession,
@@ -35,90 +33,49 @@ type Filter = "all" | "send" | "receive" | "completed" | "failed";
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "All" },
-  { id: "send", label: "Sending" },
-  { id: "receive", label: "Receiving" },
-  { id: "completed", label: "Completed" },
+  { id: "send", label: "Sent" },
+  { id: "receive", label: "Received" },
   { id: "failed", label: "Failed" },
 ];
 
 function live(session: ActiveTransferSession): boolean {
-  return (
-    session.status === "Preparing..." ||
-    session.status === "Sending..." ||
-    session.status === "Receiving..." ||
-    session.status === "Finishing..."
-  );
+  return ["Preparing...", "Sending...", "Receiving...", "Finishing..."].includes(session.status);
 }
 
-function fileTone(name: string): {
-  bg: string;
-  fg: string;
-  icon: React.ReactNode;
-  label: string;
-} {
+function fileKind(name: string): { tone: string; icon: React.ReactNode; label: string } {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
   if (["zip", "rar", "7z", "tar", "gz"].includes(ext))
-    return {
-      bg: "var(--df-warning-soft)",
-      fg: "var(--df-warning)",
-      icon: <FileArchive size={16} />,
-      label: "Archive",
-    };
+    return { tone: "orange", icon: <FileArchive size={16} />, label: "Archive" };
   if (["png", "jpg", "jpeg", "gif", "webp", "heic", "svg"].includes(ext))
-    return {
-      bg: "var(--df-accent-soft)",
-      fg: "var(--df-text)",
-      icon: <ImageIcon size={16} />,
-      label: "Image",
-    };
+    return { tone: "blue", icon: <ImageIcon size={16} />, label: "Image" };
   if (["mp4", "mov", "mkv", "avi", "webm"].includes(ext))
-    return {
-      bg: "var(--df-accent-soft)",
-      fg: "var(--df-text)",
-      icon: <Play size={16} />,
-      label: "Video",
-    };
-  if (ext === "pdf")
-    return {
-      bg: "var(--df-danger-soft)",
-      fg: "var(--df-danger)",
-      icon: <FileText size={16} />,
-      label: "PDF",
-    };
-  return {
-    bg: "var(--df-accent-soft)",
-    fg: "var(--df-text)",
-    icon: <FileText size={16} />,
-    label: ext ? ext.toUpperCase() : "File",
-  };
+    return { tone: "blue", icon: <Play size={16} />, label: "Video" };
+  if (ext === "pdf") return { tone: "red", icon: <FileText size={16} />, label: "PDF" };
+  return { tone: "", icon: <FileText size={16} />, label: ext && ext !== name.toLowerCase() ? ext.toUpperCase() : "File" };
 }
 
-function AreaSpark({ values, color }: { values: number[]; color: string }) {
-  const width = 220;
-  const height = 32;
-  if (values.length < 2) return null;
-  const nums = values;
-  const max = Math.max(...nums, 1);
-  const pts = nums.map((value, index) => {
-    const x = (index / (nums.length - 1)) * width;
+function Spark({ values }: { values: number[] }) {
+  const width = 240;
+  const height = 34;
+  if (values.length < 2) return <div className="spark" aria-hidden="true" />;
+  const max = Math.max(...values, 1);
+  const pts = values.map((value, index) => {
+    const x = (index / (values.length - 1)) * width;
     const y = height - (value / max) * (height - 6) - 3;
-    return `${x},${y}`;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
   const line = pts.join(" ");
   return (
-    <svg className="df-area" viewBox={`0 0 ${width} ${height}`} aria-hidden>
-      <polygon
-        points={`0,${height} ${line} ${width},${height}`}
-        fill={color}
-        opacity="0.16"
-      />
+    <svg className="spark" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+      <polygon points={`0,${height} ${line} ${width},${height}`} fill="var(--accent)" opacity="0.12" />
       <polyline
         points={line}
         fill="none"
-        stroke={color}
-        strokeWidth="2"
+        stroke="var(--accent)"
+        strokeWidth="1.6"
         strokeLinejoin="round"
         strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
       />
     </svg>
   );
@@ -134,43 +91,23 @@ export const TransfersPage: React.FC = () => {
   const active = Object.values(flow.sessionStore.activeTransfers).filter(live);
   const history = flow.sessionStore.recentTransfers;
 
-  const matches = (
-    direction: string,
-    status: string,
-    name: string,
-    device: string,
-  ) => {
+  const matches = (direction: string, status: string, name: string, device: string) => {
     const q = query.trim().toLowerCase();
     if (q && !`${name} ${device}`.toLowerCase().includes(q)) return false;
     if (filter === "send") return direction === "send";
     if (filter === "receive") return direction === "receive";
-    if (filter === "failed")
-      return (
-        status === "failed" || status === "Failed" || status === "Cancelled"
-      );
-    if (filter === "completed")
-      return status === "completed" || status === "Completed";
+    if (filter === "failed") return ["failed", "Failed", "Cancelled"].includes(status);
+    if (filter === "completed") return status === "completed" || status === "Completed";
     return true;
   };
 
-  const visibleActive = active.filter((session) =>
-    matches(
-      session.direction,
-      session.status,
-      session.fileName,
-      session.deviceName,
-    ),
-  );
-  const visibleHistory = history.filter((item) =>
-    matches(item.direction, item.status, item.fileName, item.deviceName),
-  );
+  const visibleActive = active.filter((s) => matches(s.direction, s.status, s.fileName, s.deviceName));
+  const visibleHistory = history.filter((i) => matches(i.direction, i.status, i.fileName, i.deviceName));
   const pickedHistory = visibleHistory.find((item) => item.id === picked);
   const selectedActive = pickedHistory
     ? undefined
-    : visibleActive.find((session) => session.id === picked) ||
-      visibleActive[0];
-  const selectedHistory =
-    pickedHistory || (!selectedActive ? visibleHistory[0] : undefined);
+    : visibleActive.find((session) => session.id === picked) || visibleActive[0];
+  const selectedHistory = pickedHistory || (!selectedActive ? visibleHistory[0] : undefined);
 
   const openPathSafe = async (path: string) => {
     try {
@@ -184,7 +121,6 @@ export const TransfersPage: React.FC = () => {
       }
     }
   };
-
   const revealSafe = async (path: string) => {
     try {
       await revealItemInDir(path);
@@ -193,202 +129,144 @@ export const TransfersPage: React.FC = () => {
     }
   };
 
-  const cancelAll = () =>
-    visibleActive.forEach((session) => flow.cancelTransfer(session.id));
+  const nothing = active.length === 0 && history.length === 0;
 
   return (
-    <div className="df-page df-transfers">
-      <PageHeader
-        title="Transfers"
-        description="Follow active transfers and revisit your recent files."
-      />
-      <div className="df-v2-toolbar">
-        <div className="df-chips">
-          {FILTERS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              aria-pressed={filter === item.id}
-              className={filter === item.id ? "df-chip active" : "df-chip"}
-              onClick={() => setFilter(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
+    <Page
+      title="Transfers"
+      toolbar={
+        <>
+          <Segmented label="Filter transfers" options={FILTERS} value={filter} onChange={setFilter} />
+          <SearchField value={query} onChange={setQuery} label="Search transfers" width={190} />
+        </>
+      }
+    >
+      {nothing ? (
+        <div className="card">
+          <EmptyState icon={<ArrowLeftRight size={20} />} title="No transfers yet">
+            Sent and received files show up here.
+          </EmptyState>
         </div>
-      </div>
-
-      <div className="df-tx-grid">
-        <div className="df-tx-main">
-          {(active.length > 0 || history.length > 0) && (
-            <section className="df-card df-tx-card">
-              <div className="df-card-head">
-                <h2>Active Transfers ({visibleActive.length})</h2>
-                <div className="df-tx-bulk">
+      ) : (
+        <div className="split">
+          <div>
+            {active.length > 0 && (
+              <section className="section" aria-label="In progress">
+                <div className="section-head">
+                  <h2>In Progress</h2>
+                  <span className="count">{visibleActive.length}</span>
                   <button
                     type="button"
+                    className="btn btn-plain link"
                     disabled={visibleActive.length === 0}
-                    onClick={cancelAll}
+                    onClick={() => visibleActive.forEach((s) => flow.cancelTransfer(s.id))}
                   >
-                    <X size={13} /> Cancel All
+                    Cancel All
                   </button>
                 </div>
-              </div>
-              {visibleActive.length === 0 && (
-                <EmptyState
-                  compact
-                  icon={<ArrowLeftRight size={22} />}
-                  title={
-                    filter === "all"
-                      ? "No active transfers"
-                      : "No matching active transfers"
-                  }
-                >
-                  New transfers will appear here as soon as they start.
-                </EmptyState>
-              )}
-              {visibleActive.map((session) => (
-                <ActiveRow
-                  key={session.id}
-                  session={session}
-                  selected={selectedActive?.id === session.id}
-                  speeds={flow.speedHistory[session.id] || []}
-                  onPick={() => setPicked(session.id)}
-                  onCancel={() => flow.cancelTransfer(session.id)}
-                />
-              ))}
-            </section>
-          )}
-
-          <section className="df-card df-tx-card">
-            <div className="df-card-head">
-              <h2>Recent Transfers</h2>
-              <label className="df-search df-search-sm">
-                <Search size={14} />
-                <input
-                  aria-label="Search transfers"
-                  value={query}
-                  placeholder="Search transfers…"
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-              </label>
-            </div>
-            {visibleHistory.length === 0 && (
-              <EmptyState
-                compact
-                icon={<Folder size={22} />}
-                title={
-                  query || filter !== "all"
-                    ? "No matching transfers"
-                    : "No transfer history yet"
-                }
-              >
-                {query || filter !== "all"
-                  ? "Try another search or filter."
-                  : "Completed and failed transfers will appear here."}
-              </EmptyState>
+                <div className="card list">
+                  {visibleActive.length === 0 && (
+                    <EmptyState compact icon={<ArrowLeftRight size={18} />} title="No matches">
+                      Nothing in progress matches.
+                    </EmptyState>
+                  )}
+                  {visibleActive.map((session) => (
+                    <ActiveRow
+                      key={session.id}
+                      session={session}
+                      selected={selectedActive?.id === session.id}
+                      onPick={() => setPicked(session.id)}
+                      onCancel={() => flow.cancelTransfer(session.id)}
+                    />
+                  ))}
+                </div>
+              </section>
             )}
-            {visibleHistory.map((item) => (
-              <HistoryRow
-                key={item.id}
-                item={item}
-                selected={selectedHistory?.id === item.id}
-                onPick={() => setPicked(item.id)}
+
+            <section className="section" aria-label="History">
+              <div className="section-head">
+                <h2>History</h2>
+                <span className="count">{visibleHistory.length || ""}</span>
+              </div>
+              <div className="card list">
+                {visibleHistory.length === 0 && (
+                  <EmptyState compact icon={<Folder size={18} />} title={query || filter !== "all" ? "No matches" : "No history yet"}>
+                    {query || filter !== "all" ? "Try another search or filter." : "Finished transfers appear here."}
+                  </EmptyState>
+                )}
+                {visibleHistory.map((item) => (
+                  <HistoryRow
+                    key={item.id}
+                    item={item}
+                    selected={selectedHistory?.id === item.id}
+                    onPick={() => setPicked(item.id)}
+                    onReveal={revealSafe}
+                  />
+                ))}
+              </div>
+            </section>
+          </div>
+
+          <aside className="card inspector" aria-label="Transfer details">
+            {selectedActive ? (
+              <ActiveDetail
+                session={selectedActive}
+                speeds={flow.speedHistory[selectedActive.id] || []}
+                onCancel={() => flow.cancelTransfer(selectedActive.id)}
                 onOpen={openPathSafe}
                 onReveal={revealSafe}
               />
-            ))}
-          </section>
+            ) : selectedHistory ? (
+              <HistoryDetail item={selectedHistory} onOpen={openPathSafe} onReveal={revealSafe} />
+            ) : (
+              <EmptyState compact icon={<ArrowLeftRight size={18} />} title="No selection">
+                Pick a transfer.
+              </EmptyState>
+            )}
+          </aside>
         </div>
-
-        <aside className="df-card df-tx-side">
-          {selectedActive ? (
-            <ActiveDetail
-              session={selectedActive}
-              speeds={flow.speedHistory[selectedActive.id] || []}
-              onCancel={() => flow.cancelTransfer(selectedActive.id)}
-              onOpen={openPathSafe}
-              onReveal={revealSafe}
-            />
-          ) : selectedHistory ? (
-            <HistoryDetail
-              item={selectedHistory}
-              onOpen={openPathSafe}
-              onReveal={revealSafe}
-            />
-          ) : (
-            <div className="df-card-pad">
-              <h2>Transfer details</h2>
-              <p className="df-kicker">
-                Select a transfer to see its files, progress, and where it went.
-              </p>
-            </div>
-          )}
-        </aside>
-      </div>
-    </div>
+      )}
+    </Page>
   );
 };
 
 function ActiveRow({
   session,
   selected,
-  speeds,
   onPick,
   onCancel,
 }: {
   session: ActiveTransferSession;
   selected: boolean;
-  speeds: number[];
   onPick: () => void;
   onCancel: () => void;
 }) {
-  const tone = fileTone(session.fileName);
-  const color = "#3B82F6";
+  const kind = fileKind(session.fileName);
   return (
-    <div className={selected ? "df-tx-row picked" : "df-tx-row"}>
-      <button type="button" className="df-tx-hit" onClick={onPick}>
-        <span
-          className="df-tile"
-          style={{ background: tone.bg, color: tone.fg }}
-        >
-          {tone.icon}
-        </span>
-        <span className="df-grow">
-          <strong>
-            {session.totalFiles > 1
-              ? `${session.totalFiles} files`
-              : session.fileName}
-          </strong>
-          <span className="df-xfer-meta">
-            {session.bytesInfo || session.speed} ·{" "}
-            {session.direction === "receive" ? "Receiving from" : "Sending to"}{" "}
-            {session.deviceName}
-          </span>
-          <span className="df-tx-meter">
-            <Progress
-              value={session.progress}
-              label={`Transfer of ${session.fileName}`}
-            />
-            <b>{session.progress}%</b>
-          </span>
-          <span className="df-tx-foot">
-            <span>{session.speed}</span>
-            <AreaSpark values={speeds} color={color} />
-            <span>{session.timeRemaining}</span>
-          </span>
-        </span>
+    <div className="row hit has-leading live-row" aria-selected={selected} onClick={onPick}>
+      <span className={`tile ${kind.tone}`}>{kind.icon}</span>
+      <button type="button" className="grow" style={{ textAlign: "left" }} onClick={onPick}>
+        <div className="row-title ellipsis">
+          {session.totalFiles > 1 ? `${session.totalFiles} files` : session.fileName}
+        </div>
+        <div className="row-sub ellipsis num">
+          {session.direction === "receive" ? "From" : "To"} {session.deviceName} · {session.speed} ·{" "}
+          {session.timeRemaining}
+        </div>
+        <Progress value={session.progress} label={`Transfer of ${session.fileName}`} />
       </button>
-      <span className="df-tx-row-actions">
-        <button
-          type="button"
-          className="df-pause"
-          aria-label="Cancel transfer"
-          onClick={onCancel}
-        >
-          <X size={12} />
-        </button>
-      </span>
+      <span className="row-trail num">{session.progress}%</span>
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label="Cancel transfer"
+        onClick={(event) => {
+          event.stopPropagation();
+          onCancel();
+        }}
+      >
+        <X size={14} />
+      </button>
     </div>
   );
 }
@@ -397,80 +275,56 @@ function HistoryRow({
   item,
   selected,
   onPick,
-  onOpen,
   onReveal,
 }: {
   item: RecentTransfer;
   selected: boolean;
   onPick: () => void;
-  onOpen: (path: string) => void;
   onReveal: (path: string) => void;
 }) {
-  const tone = fileTone(item.fileName);
+  const kind = fileKind(item.fileName);
   const failed = item.status === "failed";
   const path = item.files?.find((file) => file.finalPath)?.finalPath;
   return (
-    <div className={selected ? "df-hist picked" : "df-hist"}>
-      <button type="button" className="df-tx-hit" onClick={onPick}>
-        <span
-          className="df-tile"
-          style={{ background: tone.bg, color: tone.fg }}
-        >
-          {tone.icon}
-        </span>
-        <span className="df-hist-name">
-          <strong>
-            {item.totalFiles > 1 ? `${item.totalFiles} files` : item.fileName}
-          </strong>
-          <small>
-            {item.size}
-            {item.totalFiles > 1 ? ` · ${item.totalFiles} files` : ""}
-          </small>
-        </span>
-        <span className="df-hist-who">
-          {item.direction === "receive" ? "From" : "To"} {item.deviceName}
-        </span>
-        <span className={failed ? "df-done bad" : "df-done"}>
-          {failed ? <X size={13} /> : <Check size={13} />}{" "}
-          {failed ? "Failed" : "Completed"}
-          <small>
-            {item.timestampMs
-              ? formatRelativeTimestamp(item.timestampMs)
-              : item.timestamp}
-          </small>
-        </span>
+    <div className="row hit has-leading" aria-selected={selected} onClick={onPick}>
+      <span className={`tile ${kind.tone}`}>{kind.icon}</span>
+      <button type="button" className="grow" style={{ textAlign: "left" }} onClick={onPick}>
+        <div className="row-title ellipsis">
+          {item.totalFiles > 1 ? `${item.totalFiles} files` : item.fileName}
+        </div>
+        <div className="row-sub ellipsis">
+          {item.direction === "receive" ? (
+            <ArrowDownLeft size={11} style={{ verticalAlign: "-1px" }} />
+          ) : (
+            <ArrowUpRight size={11} style={{ verticalAlign: "-1px" }} />
+          )}{" "}
+          {item.deviceName} · {item.size}
+        </div>
       </button>
-      <span className="df-hist-actions">
+      <span className="row-trail">
         {path && (
-          <button
-            type="button"
-            aria-label="Show in folder"
-            onClick={() => onReveal(path)}
-          >
-            <Folder size={15} />
-          </button>
+          <span className="actions">
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Show in folder"
+              title="Show in folder"
+              onClick={(event) => {
+                event.stopPropagation();
+                onReveal(path);
+              }}
+            >
+              <Folder size={14} />
+            </button>
+          </span>
         )}
-        {failed && (
-          <button
-            type="button"
-            aria-label="Transfer error details"
-            onClick={onPick}
-          >
-            <Info size={15} />
-          </button>
-        )}
-        {path && (
-          <button type="button" aria-label="Open" onClick={() => onOpen(path)}>
-            <MoreDots />
-          </button>
-        )}
+        {failed && <span className="tag bad">Failed</span>}
+        <span className="num">
+          {item.timestampMs ? formatRelativeTimestamp(item.timestampMs) : item.timestamp}
+        </span>
       </span>
     </div>
   );
-}
-
-function MoreDots() {
-  return <span className="df-dots">···</span>;
 }
 
 function ActiveDetail({
@@ -487,116 +341,84 @@ function ActiveDetail({
   onReveal: (path: string) => void;
 }) {
   const flow = useDropFlow();
-  const tone = fileTone(session.fileName);
-  const color = "#3B82F6";
-  const peer = flow.devices.find(
-    (device) => device.name === session.deviceName,
-  );
+  const kind = fileKind(session.fileName);
+  const peer = flow.devices.find((device) => device.name === session.deviceName);
   const path = session.completedFiles.find((file) => file.finalPath)?.finalPath;
-  const from = session.direction === "receive" ? peer : null;
-  const to = session.direction === "receive" ? null : peer;
+  const receiving = session.direction === "receive";
   return (
-    <div className="df-tx-detail">
-      <div className="df-side-hero">
-        <span
-          className="df-tile df-tile-lg"
-          style={{ background: tone.bg, color: tone.fg }}
-        >
-          {tone.icon}
-        </span>
-        <div className="df-grow">
-          <strong>{session.fileName}</strong>
-          <span className="df-xfer-meta">
-            {session.direction === "receive" ? "Receiving from" : "Sending to"}{" "}
-            {session.deviceName}
-          </span>
-          <span className="df-xfer-meta">{session.bytesInfo}</span>
+    <>
+      <div className="hop" aria-label={receiving ? `From ${session.deviceName}` : `To ${session.deviceName}`}>
+        <div className="hop-node">
+          <DeviceVisual type={receiving ? peer?.type : flow.deviceType} local={!receiving} />
+          <span>{receiving ? session.deviceName : "This device"}</span>
         </div>
-        <button
-          type="button"
-          className="df-quiet"
-          aria-label="Dismiss"
-          onClick={() => flow.dismissTransfer(session.id)}
-        >
-          <X size={16} />
-        </button>
-      </div>
-      <div className="df-tx-meter">
-        <Progress
-          value={session.progress}
-          label={`Transfer of ${session.fileName}`}
-        />
-        <b>{session.progress}%</b>
-      </div>
-      <div className="df-tx-foot">
-        <span>{session.speed}</span>
-        <AreaSpark values={speeds} color={color} />
-        <span>{session.timeRemaining}</span>
-      </div>
-      <div className="df-hop">
-        <Hop
-          type={session.direction === "receive" ? from?.type : flow.deviceType}
-          name={
-            session.direction === "receive" ? session.deviceName : "This device"
-          }
-          sub={session.direction === "receive" ? "Sender" : "This device"}
-        />
-        <span className="df-hop-link">
-          <Wifi size={16} />
+        <span className="hop-link" aria-hidden="true">
+          <i />
+          <i />
+          <i />
         </span>
-        <Hop
-          type={session.direction === "receive" ? flow.deviceType : to?.type}
-          name={
-            session.direction === "receive" ? "This device" : session.deviceName
-          }
-          sub="Recipient"
-        />
+        <div className="hop-node">
+          <DeviceVisual type={receiving ? flow.deviceType : peer?.type} local={receiving} />
+          <span>{receiving ? "This device" : session.deviceName}</span>
+        </div>
       </div>
-      <h3>Transfer Details</h3>
-      <DetailRows
-        rows={[
-          ["File name", session.fileName],
-          ["Total size", session.bytesInfo || "—"],
-          ["Files", String(session.totalFiles)],
-          ["Type", tone.label],
-          ["Estimated time", session.timeRemaining],
-          ["Transfer speed", session.speed],
-          ["Status", session.status],
-        ]}
-      />
+      <div>
+        <div className="big-percent">{session.progress}%</div>
+        <div style={{ marginTop: 12 }}>
+          <Progress value={session.progress} label={`Transfer of ${session.fileName}`} />
+        </div>
+        <div className="stat-line">
+          <span>{session.speed}</span>
+          <span>{session.timeRemaining}</span>
+        </div>
+        <Spark values={speeds} />
+      </div>
+      <dl className="facts">
+        <div>
+          <dt>File</dt>
+          <dd className="ellipsis" title={session.fileName}>{session.fileName}</dd>
+        </div>
+        <div>
+          <dt>Size</dt>
+          <dd>{session.bytesInfo || "—"}</dd>
+        </div>
+        <div>
+          <dt>Files</dt>
+          <dd>{session.totalFiles}</dd>
+        </div>
+        <div>
+          <dt>Kind</dt>
+          <dd>{kind.label}</dd>
+        </div>
+        <div>
+          <dt>Status</dt>
+          <dd>{session.status.replace("...", "")}</dd>
+        </div>
+      </dl>
       {session.status === "Failed" && (
-        <p className="df-kicker" style={{ color: "var(--df-danger)" }}>
+        <p className="footnote" style={{ color: "var(--red)" }}>
           {friendlyTransferError(session.error)}
         </p>
       )}
-      <div className="df-tx-end">
-        <button
-          type="button"
-          className="df-btn df-btn-danger"
-          onClick={onCancel}
-        >
-          <X size={14} /> Cancel
+      <div className="inspector-actions">
+        {path && (
+          <>
+            <button type="button" className="btn btn-primary" onClick={() => onOpen(path)}>
+              Open
+            </button>
+            <button type="button" className="btn" onClick={() => onReveal(path)}>
+              Show
+            </button>
+          </>
+        )}
+        <button type="button" className="btn btn-destructive" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="btn" onClick={() => flow.dismissTransfer(session.id)}>
+          Dismiss
         </button>
       </div>
-      {path && (
-        <div className="df-tx-end">
-          <button
-            type="button"
-            className="df-btn df-btn-primary"
-            onClick={() => onOpen(path)}
-          >
-            Open
-          </button>
-          <button
-            type="button"
-            className="df-btn df-btn-soft"
-            onClick={() => onReveal(path)}
-          >
-            Show
-          </button>
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -609,108 +431,68 @@ function HistoryDetail({
   onOpen: (path: string) => void;
   onReveal: (path: string) => void;
 }) {
-  const tone = fileTone(item.fileName);
+  const kind = fileKind(item.fileName);
   const failed = item.status === "failed";
   return (
-    <div className="df-tx-detail">
-      <div className="df-side-hero">
-        <span
-          className="df-tile df-tile-lg"
-          style={{ background: tone.bg, color: tone.fg }}
-        >
-          {tone.icon}
-        </span>
+    <>
+      <div className="inspector-hero">
+        <span className={`tile lg ${kind.tone}`}>{kind.icon}</span>
+        <h2>{item.totalFiles > 1 ? `${item.totalFiles} files` : item.fileName}</h2>
+        <span className={failed ? "tag bad" : "tag ok"}>{failed ? "Failed" : "Delivered"}</span>
+      </div>
+      <dl className="facts">
         <div>
-          <strong>{item.fileName}</strong>
-          <span className={failed ? "df-done bad" : "df-done"}>
-            {failed ? "Failed" : "Completed"}
-          </span>
+          <dt>{item.direction === "receive" ? "From" : "To"}</dt>
+          <dd>{item.deviceName}</dd>
         </div>
-      </div>
-      <h3>Transfer Details</h3>
-      <DetailRows
-        rows={[
-          ["File name", item.fileName],
-          ["Total size", item.size],
-          ["Files", String(item.totalFiles || 1)],
-          ["Type", tone.label],
-          [
-            "Direction",
-            item.direction === "receive"
-              ? `From ${item.deviceName}`
-              : `To ${item.deviceName}`,
-          ],
-          [
-            "When",
-            item.timestampMs
-              ? formatRelativeTimestamp(item.timestampMs)
-              : item.timestamp,
-          ],
-          ["Status", failed ? friendlyTransferError(item.error) : "Completed"],
-        ]}
-      />
-      <div className="df-file-stack">
-        {(item.files || []).map((file, index) => (
-          <div key={`${file.relativePath}-${index}`} className="df-file-row">
-            <span className="df-grow df-ellipsis">{file.relativePath}</span>
-            {file.finalPath && (
-              <button
-                type="button"
-                className="df-btn df-btn-soft df-btn-sm"
-                onClick={() => onOpen(file.finalPath!)}
-              >
-                Open
-              </button>
-            )}
-            {file.finalPath && (
-              <button
-                type="button"
-                className="df-btn df-btn-soft df-btn-sm"
-                onClick={() => onReveal(file.finalPath!)}
-              >
-                Show
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Hop({
-  type,
-  name,
-  sub,
-}: {
-  type?: string;
-  name: string;
-  sub: string;
-}) {
-  return (
-    <div className="df-hop-node">
-      <DeviceVisual type={type} />
-      <strong>{name}</strong>
-      <span>{sub}</span>
-    </div>
-  );
-}
-
-function DetailRows({ rows }: { rows: [string, string][] }) {
-  const icons = [FileText, Gauge, Folder, FileArchive, Clock, Gauge, Check];
-  return (
-    <div>
-      {rows.map(([label, value], index) => {
-        const Icon = icons[index] || FileText;
-        return (
-          <div key={label} className="df-info-row">
-            <span>
-              <Icon size={14} /> {label}
-            </span>
-            <b>{value}</b>
-          </div>
-        );
-      })}
-    </div>
+        <div>
+          <dt>Size</dt>
+          <dd>{item.size}</dd>
+        </div>
+        <div>
+          <dt>Files</dt>
+          <dd>{item.totalFiles || 1}</dd>
+        </div>
+        <div>
+          <dt>Kind</dt>
+          <dd>{kind.label}</dd>
+        </div>
+        <div>
+          <dt>When</dt>
+          <dd>{item.timestampMs ? formatRelativeTimestamp(item.timestampMs) : item.timestamp}</dd>
+        </div>
+      </dl>
+      {failed && (
+        <p className="footnote" style={{ color: "var(--red)" }}>
+          {friendlyTransferError(item.error)}
+        </p>
+      )}
+      {(item.files || []).length > 0 && (
+        <div className="list" style={{ padding: 0 }}>
+          {(item.files || []).map((file, index) => (
+            <div key={`${file.relativePath}-${index}`} className="row" style={{ minHeight: 36, padding: "4px 0" }}>
+              <span className="grow ellipsis" title={file.relativePath}>
+                {file.relativePath}
+              </span>
+              {file.finalPath && (
+                <>
+                  <button type="button" className="btn btn-sm" onClick={() => onOpen(file.finalPath!)}>
+                    Open
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    aria-label={`Show ${file.relativePath} in folder`}
+                    onClick={() => onReveal(file.finalPath!)}
+                  >
+                    <Folder size={14} />
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

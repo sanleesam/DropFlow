@@ -1,125 +1,242 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import { Check, Laptop, Monitor, Smartphone, Tablet } from "lucide-react";
-import { CornerActions } from "../shell/CornerActions";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { Check, Laptop, Monitor, Search, Smartphone, Tablet } from "lucide-react";
 import { deviceKindLabel } from "../../ui/artwork";
+import { Glass } from "../../ui/glass/LiquidGlass";
 
-export function PageHeader({
+/* ---------- page scaffold ---------- */
+
+/**
+ * A page owns its scroll view and its floating toolbar. The large title
+ * dissolves into the toolbar as content scrolls beneath the glass.
+ */
+export function Page({
   title,
-  description,
-  actions,
+  toolbar,
+  children,
+  fill = false,
+  overlay,
 }: {
   title: string;
-  description: string;
-  actions?: ReactNode;
+  toolbar?: ReactNode;
+  children: ReactNode;
+  fill?: boolean;
+  overlay?: ReactNode;
 }) {
+  const [scrolled, setScrolled] = useState(false);
   return (
-    <header className="df-v2-header">
-      <div>
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
-      <div className="df-v2-header-actions">
-        {actions}
-        <CornerActions />
-      </div>
-    </header>
+    <section
+      className={`page${fill ? " page-fill-host" : ""}`}
+      data-scrolled={scrolled || undefined}
+      aria-label={title}
+    >
+      <header className="toolbar" data-tauri-drag-region>
+        <span className="toolbar-title" aria-hidden={!fill && !scrolled}>
+          {title}
+        </span>
+        <span className="toolbar-spacer" data-tauri-drag-region />
+        {toolbar}
+      </header>
+      {fill ? (
+        <div className="page-fill">{children}</div>
+      ) : (
+        <div
+          className="page-scroll"
+          onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 28)}
+        >
+          <div className="page-body">
+            <h1 className="large-title">{title}</h1>
+            {children}
+          </div>
+        </div>
+      )}
+      {overlay}
+    </section>
   );
 }
 
-/** Original vector artwork: no external imagery or platform assumptions. */
+export function ToolGroup({
+  children,
+  tint,
+  label,
+}: {
+  children: ReactNode;
+  tint?: boolean;
+  label?: string;
+}) {
+  return (
+    <Glass className="tool-group" size="sm" tint={tint} role="group" aria-label={label}>
+      {children}
+    </Glass>
+  );
+}
+
+export function SearchField({
+  value,
+  onChange,
+  label,
+  placeholder = "Search",
+  width,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  placeholder?: string;
+  width?: number;
+}) {
+  return (
+    <Glass as="label" size="sm" className="search" style={width ? { width } : undefined}>
+      <Search size={14} strokeWidth={2} />
+      <input
+        aria-label={label}
+        value={value}
+        placeholder={placeholder}
+        spellCheck={false}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") onChange("");
+        }}
+      />
+    </Glass>
+  );
+}
+
+/* ---------- gliding selection ---------- */
+
+/**
+ * Measures the active child and glides a single indicator to it with a spring,
+ * squashing briefly mid-flight like a drop of liquid.
+ */
+export function useGlide<T extends HTMLElement>(
+  activeKey: string | number | undefined,
+  axis: "x" | "y",
+) {
+  const container = useRef<T>(null);
+  const indicator = useRef<HTMLSpanElement>(null);
+  const first = useRef(true);
+  useLayoutEffect(() => {
+    const host = container.current;
+    const lens = indicator.current;
+    if (!host || !lens) return;
+    const place = () => {
+      const target = host.querySelector<HTMLElement>("[data-active='true']");
+      if (!target) {
+        lens.style.opacity = "0";
+        return;
+      }
+      lens.style.opacity = "1";
+      if (axis === "y") {
+        lens.style.transform = `translateY(${target.offsetTop}px)`;
+        lens.style.height = `${target.offsetHeight}px`;
+      } else {
+        lens.style.transform = `translateX(${target.offsetLeft}px)`;
+        lens.style.width = `${target.offsetWidth}px`;
+      }
+    };
+    let done: ReturnType<typeof setTimeout> | undefined;
+    if (first.current) {
+      lens.style.transition = "none";
+      place();
+      void lens.offsetWidth;
+      lens.style.transition = "";
+      first.current = false;
+    } else {
+      lens.classList.add("moving");
+      place();
+      done = setTimeout(() => lens.classList.remove("moving"), 170);
+    }
+    const observer = new ResizeObserver(place);
+    observer.observe(host);
+    return () => {
+      observer.disconnect();
+      if (done) clearTimeout(done);
+    };
+  }, [activeKey, axis]);
+  return { container, indicator };
+}
+
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  label,
+  glass = true,
+}: {
+  options: { id: T; label: ReactNode; title?: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  label: string;
+  glass?: boolean;
+}) {
+  const { container, indicator } = useGlide<HTMLDivElement>(value, "x");
+  const buttons = options.map((option) => (
+    <button
+      key={option.id}
+      type="button"
+      aria-pressed={value === option.id}
+      aria-label={option.title}
+      title={option.title}
+      data-active={value === option.id}
+      onClick={() => onChange(option.id)}
+    >
+      {option.label}
+    </button>
+  ));
+  const thumb = <span ref={indicator} className="seg-thumb" aria-hidden="true" />;
+  if (!glass)
+    return (
+      <div ref={container} className="seg flat" role="group" aria-label={label}>
+        {thumb}
+        {buttons}
+      </div>
+    );
+  return (
+    <Glass ref={container} size="sm" className="seg" role="group" aria-label={label}>
+      {thumb}
+      {buttons}
+    </Glass>
+  );
+}
+
+/* ---------- devices ---------- */
+
+function DeviceGlyph({ kind, size }: { kind: string; size: number }) {
+  const Icon =
+    kind === "Phone"
+      ? Smartphone
+      : kind === "Tablet"
+        ? Tablet
+        : kind === "Desktop"
+          ? Monitor
+          : Laptop;
+  return <Icon size={size} strokeWidth={1.6} />;
+}
+
+/** Monogram-style device avatar. Decorative: adjacent text names the device. */
 export function DeviceVisual({
   type,
   large = false,
+  small = false,
+  medium = false,
+  local = false,
 }: {
   type?: string;
   large?: boolean;
+  small?: boolean;
+  medium?: boolean;
+  local?: boolean;
 }) {
-  const kind = deviceKindLabel(type || "").toLowerCase();
-  const phone = kind === "phone" || kind === "tablet";
+  const kind = deviceKindLabel(type || "");
+  const size = large ? " large" : medium ? " medium" : small ? " small" : "";
   return (
-    <svg
-      className={`df-v2-device-art${large ? " large" : ""}`}
-      viewBox="0 0 160 108"
-      aria-hidden="true"
-    >
-      {phone ? (
-        <>
-          <rect
-            x={kind === "tablet" ? 43 : 57}
-            y="7"
-            width={kind === "tablet" ? 74 : 46}
-            height="92"
-            rx="10"
-            fill="var(--df-art-frame)"
-            stroke="var(--df-art-edge)"
-          />
-          <rect
-            x={kind === "tablet" ? 48 : 62}
-            y="13"
-            width={kind === "tablet" ? 64 : 36}
-            height="79"
-            rx="6"
-            fill="var(--df-art-screen)"
-          />
-          <path
-            d={
-              kind === "tablet" ? "M48 67 112 35v57H48z" : "M62 65 98 42v50H62z"
-            }
-            fill="#3B82F6"
-            opacity=".65"
-          />
-          <rect
-            x="73"
-            y="16"
-            width="14"
-            height="3"
-            rx="1.5"
-            fill="var(--df-art-frame)"
-          />
-        </>
-      ) : (
-        <>
-          <rect
-            x="24"
-            y="12"
-            width="112"
-            height="73"
-            rx="6"
-            fill="var(--df-art-frame)"
-            stroke="var(--df-art-edge)"
-          />
-          <rect
-            x="29"
-            y="17"
-            width="102"
-            height="62"
-            rx="2"
-            fill="var(--df-art-screen)"
-          />
-          <path d="M29 63 131 29v50H29z" fill="#3B82F6" opacity=".6" />
-          <path d="m29 75 102-31v35H29z" fill="#2563EB" opacity=".6" />
-          {kind === "desktop" ? (
-            <>
-              <path d="M74 85h12l3 12H71z" fill="var(--df-art-edge)" />
-              <rect
-                x="57"
-                y="97"
-                width="46"
-                height="3"
-                rx="1.5"
-                fill="var(--df-art-edge)"
-              />
-            </>
-          ) : (
-            <>
-              <path d="M24 85h112l17 10H7z" fill="var(--df-art-edge)" />
-              <path d="M7 95h146l-7 4H14z" fill="var(--df-art-frame)" />
-              <path d="M67 86h26l4 4H63z" fill="var(--df-art-frame)" />
-            </>
-          )}
-        </>
-      )}
-    </svg>
+    <span className={`avatar${size}${local ? " local" : ""}`} aria-hidden="true">
+      <DeviceGlyph kind={kind} size={large ? 38 : medium ? 18 : 24} />
+    </span>
   );
 }
 
@@ -140,44 +257,34 @@ export function DeviceCard({
   onClick: () => void;
   footer?: ReactNode;
 }) {
-  const label = deviceKindLabel(type);
-  const Icon =
-    label === "Phone"
-      ? Smartphone
-      : label === "Tablet"
-        ? Tablet
-        : label === "Desktop"
-          ? Monitor
-          : Laptop;
   return (
     <button
       type="button"
-      className={`df-v2-device-card${selected ? " selected" : ""}`}
+      className="device"
       onClick={onClick}
       aria-pressed={!!selected}
     >
+      <DeviceVisual type={type} local={local} />
       {selected && (
-        <span className="df-v2-check">
-          <Check size={12} />
+        <span className="check" aria-hidden="true">
+          <Check size={12} strokeWidth={3} />
         </span>
       )}
-      <DeviceVisual type={type} />
       <strong title={name}>{name}</strong>
-      <span className="df-status">
-        <i className={`df-dot${status === "Hidden" ? " idle" : ""}`} />
+      <span className="status">
+        <i className={`dot${status === "Hidden" ? " idle" : ""}`} />
         {local
           ? status === "Hidden"
             ? "This device · hidden"
             : "This device"
           : status}
       </span>
-      <span className="df-v2-device-meta">
-        <Icon size={14} />
-        {footer || label}
-      </span>
+      {footer && <span className="meta">{footer}</span>}
     </button>
   );
 }
+
+/* ---------- feedback ---------- */
 
 export function Progress({ value, label }: { value: number; label: string }) {
   const percent = Math.max(
@@ -186,7 +293,7 @@ export function Progress({ value, label }: { value: number; label: string }) {
   );
   return (
     <div
-      className="df-progress"
+      className="progress"
       role="progressbar"
       aria-label={label}
       aria-valuemin={0}
@@ -212,12 +319,32 @@ export function EmptyState({
   compact?: boolean;
 }) {
   return (
-    <div className={`df-v2-empty${compact ? " compact" : ""}`}>
-      <span className="df-v2-empty-icon">{icon}</span>
+    <div className={`empty${compact ? " compact" : ""}`}>
+      <span className="empty-icon">{icon}</span>
       <strong>{title}</strong>
       <p>{children}</p>
       {action}
     </div>
+  );
+}
+
+/* ---------- forms ---------- */
+
+export function FormGroup({
+  title,
+  footer,
+  children,
+}: {
+  title?: string;
+  footer?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="form-group">
+      {title && <h2>{title}</h2>}
+      <div className="card">{children}</div>
+      {footer && <p className="form-foot">{footer}</p>}
+    </section>
   );
 }
 
@@ -227,14 +354,14 @@ export function SettingRow({
   children,
 }: {
   title: string;
-  description: ReactNode;
+  description?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div className="df-setting">
+    <div className="form-row">
       <div>
         <h3>{title}</h3>
-        <p>{description}</p>
+        {description && <p>{description}</p>}
       </div>
       {children}
     </div>
@@ -259,13 +386,15 @@ export function Switch({
       aria-label={label}
       aria-checked={checked}
       disabled={disabled}
-      className={`df-switch${checked ? " on" : ""}`}
+      className={`switch${checked ? " on" : ""}`}
       onClick={onChange}
     >
       <i />
     </button>
   );
 }
+
+/* ---------- sheet ---------- */
 
 export function Modal({
   title,
@@ -278,7 +407,7 @@ export function Modal({
   onEscape?: () => void;
   alert?: boolean;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLElement>(null);
   const escape = useRef(onEscape);
   escape.current = onEscape;
   useEffect(() => {
@@ -326,17 +455,18 @@ export function Modal({
     };
   }, []);
   return (
-    <div className="df-modal-back">
-      <div
+    <div className="scrim">
+      <Glass
         ref={ref}
-        className="df-dialog"
+        size="lg"
+        className="sheet"
         role={alert ? "alertdialog" : "dialog"}
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
       >
         {children}
-      </div>
+      </Glass>
     </div>
   );
 }

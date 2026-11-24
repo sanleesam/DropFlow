@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSettings } from "./SettingsProvider";
-import { DeviceVisual, Modal } from "./ui/Desktop";
+import { DeviceVisual, Modal, Switch } from "./ui/Desktop";
 import { File } from "lucide-react";
 import { useToast } from "./ToastProvider";
 import { formatBytes } from "../utils/formatters";
@@ -57,61 +57,55 @@ export const IncomingTransferModal: React.FC<IncomingTransferModalProps> = ({
     }
   };
 
+  const folder = settings.receiveDirectory
+    ? settings.receiveDirectory.split(/[/\\]/).filter(Boolean).pop()
+    : "Downloads";
   return (
     <Modal
       title="Incoming transfer"
       onEscape={isSubmitting ? undefined : () => handleRespond(false)}
     >
-      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-        <div style={{ width: 72, flexShrink: 0 }}>
-          <DeviceVisual type={request.senderPlatform} />
-        </div>
-        <div>
-          <div className="df-meta">Incoming transfer</div>
-          <h2 className="df-section-title">{request.senderName}</h2>
+      <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+        <DeviceVisual type={request.senderPlatform} />
+        <div className="grow">
+          <h2 className="ellipsis">{request.senderName}</h2>
+          <p className="lede num">
+            {request.totalFiles} {request.totalFiles === 1 ? "file" : "files"} ·{" "}
+            {formatBytes(request.totalSizeBytes)} · to {folder}
+          </p>
         </div>
       </div>
-      <p className="df-kicker" style={{ marginTop: 12 }}>
-        {request.totalFiles} {request.totalFiles === 1 ? "file" : "files"} ·{" "}
-        {formatBytes(request.totalSizeBytes)}
-      </p>
-      <p className="df-meta">
-        Files will be saved on this device
-        {settings.receiveDirectory ? ` in ${settings.receiveDirectory}` : ""}.
-      </p>
-      <div style={{ maxHeight: 160, overflow: "auto", marginTop: 10 }}>
+      <div className="card list">
         {request.files.slice(0, 6).map((file) => (
-          <div key={file.fileIndex} className="df-file-row">
-            <File size={18} />
-            <span className="df-grow df-ellipsis">{file.relativePath}</span>
-            <span className="df-meta">{formatBytes(file.sizeBytes)}</span>
+          <div key={file.fileIndex} className="row">
+            <File size={15} className="tertiary" />
+            <span className="grow ellipsis" title={file.relativePath}>
+              {file.relativePath}
+            </span>
+            <span className="row-trail num">{formatBytes(file.sizeBytes)}</span>
           </div>
         ))}
         {request.files.length > 6 && (
-          <p className="df-meta">+ {request.files.length - 6} more</p>
+          <div className="row footnote">+ {request.files.length - 6} more</div>
         )}
       </div>
-      <label
-        style={{
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-          marginTop: 12,
-          fontSize: 13,
-        }}
-      >
-        <input
-          type="checkbox"
+      <div className="toggle-line">
+        <span>
+          Remember this device
+          <span className="footnote" style={{ display: "block" }}>
+            You'll still be asked each time.
+          </span>
+        </span>
+        <Switch
+          label="Remember this device"
           checked={trustDevice}
-          onChange={(event) => setTrustDevice(event.target.checked)}
+          onChange={() => setTrustDevice((value) => !value)}
         />
-        Remember this device (approval will still be required)
-      </label>
-      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+      </div>
+      <div className="sheet-actions">
         <button
           type="button"
-          className="df-btn df-btn-ghost"
-          style={{ flex: 1 }}
+          className="btn"
           disabled={isSubmitting}
           onClick={() => handleRespond(false)}
         >
@@ -119,12 +113,11 @@ export const IncomingTransferModal: React.FC<IncomingTransferModalProps> = ({
         </button>
         <button
           type="button"
-          className="df-btn df-btn-primary"
-          style={{ flex: 1 }}
+          className="btn btn-primary"
           disabled={isSubmitting}
           onClick={() => handleRespond(true)}
         >
-          {isSubmitting ? "Responding…" : "Accept files"}
+          {isSubmitting ? "Responding…" : "Accept"}
         </button>
       </div>
     </Modal>

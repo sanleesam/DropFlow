@@ -1,15 +1,7 @@
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import {
-  ArrowLeftRight,
-  FolderOpen,
-  Monitor,
-  Palette,
-  RefreshCw,
-  Settings,
-  ShieldCheck,
-} from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { useSettings } from "../components/SettingsProvider";
 import { useToast } from "../components/ToastProvider";
 import { useUpdater } from "../hooks/useUpdater";
@@ -18,20 +10,28 @@ import { UpdatesSettings } from "../components/UpdatesSettings";
 import { NearbyLinkSettings } from "../components/NearbyLinkSettings";
 import {
   EmptyState,
+  FormGroup,
   Modal,
-  PageHeader,
+  Page,
+  Segmented,
   SettingRow,
   Switch,
 } from "../components/ui/Desktop";
 import { platformLabel } from "../ui/artwork";
 import { BrandMark } from "../components/ui/BrandMark";
+import {
+  getGlassPreference,
+  setGlassPreference,
+  useGlassMode,
+  type GlassPreference,
+} from "../ui/glass/LiquidGlass";
 
 const TABS = [
-  { id: "general", label: "General", icon: Settings },
-  { id: "transfers", label: "Transfers", icon: ArrowLeftRight },
-  { id: "devices", label: "Devices", icon: Monitor },
-  { id: "updates", label: "Updates", icon: RefreshCw },
-  { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "general", label: "General" },
+  { id: "transfers", label: "Transfers" },
+  { id: "devices", label: "Devices" },
+  { id: "updates", label: "Updates" },
+  { id: "appearance", label: "Appearance" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
 
@@ -40,11 +40,10 @@ export function SettingsPage() {
   const { addToast } = useToast();
   const flow = useDropFlow();
   const updater = useUpdater();
+  const glassMode = useGlassMode();
+  const [glassPref, setGlassPref] = useState<GlassPreference>(getGlassPreference);
   const [tab, setTab] = useState<Tab>("general");
-  const [release, setRelease] = useState<{
-    display_version?: string;
-    channel?: string;
-  } | null>(null);
+  const [release, setRelease] = useState<{ display_version?: string; channel?: string } | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [loadingVersion, setLoadingVersion] = useState(true);
@@ -56,9 +55,7 @@ export function SettingsPage() {
   }, []);
   const version =
     release?.display_version ||
-    (updater.state.lastCheckedAt
-      ? updater.state.versionInfo.currentVersion
-      : undefined) ||
+    (updater.state.lastCheckedAt ? updater.state.versionInfo.currentVersion : undefined) ||
     (loadingVersion ? "Loading…" : "Not available");
   const browseFolder = async () => {
     try {
@@ -67,8 +64,7 @@ export function SettingsPage() {
         multiple: false,
         defaultPath: settings.receiveDirectory || undefined,
       });
-      if (typeof selected === "string")
-        updateSetting("receiveDirectory", selected);
+      if (typeof selected === "string") updateSetting("receiveDirectory", selected);
     } catch {
       addToast("Couldn't choose a folder.", "error");
     }
@@ -85,324 +81,220 @@ export function SettingsPage() {
       setClearing(false);
     }
   };
-  const tabKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const next =
-      event.key === "ArrowRight"
-        ? (index + 1) % TABS.length
-        : event.key === "ArrowLeft"
-          ? (index + TABS.length - 1) % TABS.length
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? TABS.length - 1
-              : null;
-    if (next === null) return;
-    event.preventDefault();
-    setTab(TABS[next].id);
-    event.currentTarget.parentElement
-      ?.querySelectorAll<HTMLButtonElement>("button")
-      [next].focus();
+  const chooseGlass = (next: GlassPreference) => {
+    setGlassPref(next);
+    setGlassPreference(next);
   };
+
   return (
-    <div className="df-page">
-      <PageHeader
-        title="Settings"
-        description="Make DropFlow fit the way you work."
-      />
-      <div className="df-v2-workspace">
-        <div className="df-v2-stack">
-          <div
-            className="df-v2-tabs"
-            role="tablist"
-            aria-label="Settings sections"
-          >
-            {TABS.map(({ id, label, icon: Icon }, index) => (
-              <button
-                key={id}
-                type="button"
-                id={`settings-tab-${id}`}
-                role="tab"
-                aria-selected={tab === id}
-                aria-controls={`settings-panel-${id}`}
-                tabIndex={tab === id ? 0 : -1}
-                className={tab === id ? "active" : ""}
-                onClick={() => setTab(id)}
-                onKeyDown={(event) => tabKey(event, index)}
-              >
-                <Icon size={16} />
-                {label}
-              </button>
-            ))}
-          </div>
-          <div
-            id={`settings-panel-${tab}`}
-            role="tabpanel"
-            aria-labelledby={`settings-tab-${tab}`}
-            className="df-v2-stack"
-          >
-            {tab === "general" && (
-              <section className="df-card df-card-pad">
-                <h2 className="df-v2-section-title">This device</h2>
-                <p className="df-kicker">
-                  Choose how this device appears to others.
-                </p>
-                <label className="df-v2-name-label" htmlFor="settings-name">
-                  Device name
-                </label>
+    <Page
+      title="Settings"
+      toolbar={<Segmented label="Settings sections" options={[...TABS]} value={tab} onChange={setTab} />}
+    >
+      <div className="settings">
+        {tab === "general" && (
+          <>
+            <FormGroup>
+              <div className="about">
+                <BrandMark className="about-mark" />
+                <div className="grow">
+                  <h3>DropFlow</h3>
+                  <p className="footnote num">
+                    {version}
+                    {release?.channel ? ` · ${release.channel}` : ""} · {platformLabel()}
+                  </p>
+                </div>
+              </div>
+            </FormGroup>
+            <FormGroup title="This Device" footer="Shown to other devices on your network.">
+              <SettingRow title="Name">
                 <input
                   id="settings-name"
-                  className="df-input"
+                  aria-label="Device name"
+                  className="field inline"
                   value={settings.deviceName}
+                  placeholder="This device"
                   onChange={(event) => {
                     updateSetting("deviceName", event.target.value);
                     updateSetting("deviceNameMode", "custom");
                   }}
                 />
-                <SettingRow
-                  title="Visible on this network"
-                  description="Turn this off to stop advertising DropFlow."
-                >
-                  <Switch
-                    label="Visible on this network"
-                    checked={settings.deviceVisibility}
-                    onChange={() =>
-                      updateSetting(
-                        "deviceVisibility",
-                        !settings.deviceVisibility,
-                      )
+              </SettingRow>
+              <SettingRow title="Visible on this network">
+                <Switch
+                  label="Visible on this network"
+                  checked={settings.deviceVisibility}
+                  onChange={() => updateSetting("deviceVisibility", !settings.deviceVisibility)}
+                />
+              </SettingRow>
+            </FormGroup>
+            {import.meta.env.VITE_DROPFLOW_NEARBY_LAB === "1" && <NearbyLinkSettings />}
+          </>
+        )}
+
+        {tab === "transfers" && (
+          <>
+            <FormGroup title="Receiving">
+              <SettingRow
+                title="Save to"
+                description={<span title={settings.receiveDirectory}>{settings.receiveDirectory || "Downloads/DropFlow"}</span>}
+              >
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() =>
+                      invoke<string>("get_receive_dir")
+                        .then((path) => invoke("open_received_file", { path }))
+                        .catch(() => addToast("Couldn't open the receive folder.", "error"))
                     }
-                  />
-                </SettingRow>
-              </section>
+                  >
+                    Open
+                  </button>
+                  <button type="button" className="btn btn-sm" onClick={browseFolder}>
+                    Change…
+                  </button>
+                </div>
+              </SettingRow>
+              <SettingRow title="Show folder when done" description="Files never open on their own.">
+                <Switch
+                  label="Open received folder"
+                  checked={settings.autoOpenCompleted}
+                  onChange={() => updateSetting("autoOpenCompleted", !settings.autoOpenCompleted)}
+                />
+              </SettingRow>
+            </FormGroup>
+            <FormGroup
+              title="Security"
+              footer={
+                settings.requireConfirmation
+                  ? "Remembered names aren't verified, so every transfer still asks."
+                  : "Off: anyone who can reach DropFlow can send you files."
+              }
+            >
+              <SettingRow title="Ask before accepting">
+                <Switch
+                  label="Ask before accepting"
+                  checked={settings.requireConfirmation}
+                  onChange={() => updateSetting("requireConfirmation", !settings.requireConfirmation)}
+                />
+              </SettingRow>
+            </FormGroup>
+            <FormGroup title="History" footer="Clearing history keeps your files.">
+              <SettingRow title="Saved transfers">
+                <span className="secondary num">{flow.sessionStore.recentTransfers.length}</span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-destructive"
+                  disabled={!flow.sessionStore.recentTransfers.length}
+                  onClick={() => setConfirmClear(true)}
+                >
+                  Clear…
+                </button>
+              </SettingRow>
+            </FormGroup>
+          </>
+        )}
+
+        {tab === "devices" && (
+          <FormGroup title="Remembered" footer="For recognition only. Approval still applies.">
+            {settings.trustedDevices.length === 0 && (
+              <EmptyState compact icon={<ShieldCheck size={18} />} title="None yet">
+                Remember a device when you accept a transfer.
+              </EmptyState>
             )}
-            {tab === "general" && import.meta.env.VITE_DROPFLOW_NEARBY_LAB === "1" && <NearbyLinkSettings />}
-            {tab === "transfers" && (
-              <section className="df-card df-card-pad">
-                <h2 className="df-v2-section-title">Receiving files</h2>
-                <SettingRow
-                  title="Download folder"
-                  description={
-                    <span title={settings.receiveDirectory}>
-                      {settings.receiveDirectory || "Downloads / DropFlow"}
-                    </span>
+            {settings.trustedDevices.map((device) => (
+              <SettingRow key={device.deviceId} title={device.deviceName} description={device.platform || "Device"}>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  aria-label={`Forget ${device.deviceName}`}
+                  onClick={() =>
+                    removeTrustedDevice(device.deviceId).catch(() => addToast("Couldn't remove this device.", "error"))
                   }
                 >
-                  <div style={{display: "flex", gap: 8}}>
-                  <button type="button" className="df-btn df-btn-soft df-btn-sm"
-                    onClick={() => invoke<string>("get_receive_dir")
-                      .then((path) => invoke("open_received_file", {path}))
-                      .catch(() => addToast("Couldn't open the receive folder.", "error"))}>
-                    <FolderOpen size={14} /> Open
-                  </button>
-                  <button
-                    type="button"
-                    className="df-btn df-btn-soft df-btn-sm"
-                    onClick={browseFolder}
-                  >
-                    <FolderOpen size={14} />
-                    Change
-                  </button>
-                  </div>
-                </SettingRow>
-                <SettingRow
-                  title="Open received folder"
-                  description="Open the containing folder after a transfer. Received files are never opened automatically."
-                >
-                  <Switch
-                    label="Open received folder"
-                    checked={settings.autoOpenCompleted}
-                    onChange={() =>
-                      updateSetting(
-                        "autoOpenCompleted",
-                        !settings.autoOpenCompleted,
-                      )
-                    }
-                  />
-                </SettingRow>
-                <SettingRow
-                  title="Ask before accepting"
-                  description="Review incoming files before receiving them. Turning this off allows anyone who can reach DropFlow to send files without approval."
-                >
-                  <Switch
-                    label="Ask before accepting"
-                    checked={settings.requireConfirmation}
-                    onChange={() =>
-                      updateSetting(
-                        "requireConfirmation",
-                        !settings.requireConfirmation,
-                      )
-                    }
-                  />
-                </SettingRow>
-                <SettingRow
-                  title="Device verification"
-                  description="Remembered names are not authenticated. Automatic acceptance from remembered devices is disabled; keep incoming approval enabled."
-                >
-                  <span className="df-meta">Approval recommended</span>
-                </SettingRow>
-                <SettingRow
-                  title="Transfer history"
-                  description={`${flow.sessionStore.recentTransfers.length} saved transfers. Clearing history does not delete your files.`}
-                >
-                  <button
-                    type="button"
-                    className="df-btn df-btn-danger df-btn-sm"
-                    disabled={!flow.sessionStore.recentTransfers.length}
-                    onClick={() => setConfirmClear(true)}
-                  >
-                    Clear history
-                  </button>
-                </SettingRow>
-              </section>
-            )}
-            {tab === "devices" && (
-              <section className="df-card df-card-pad">
-                <h2 className="df-v2-section-title">Remembered devices</h2>
-                <p className="df-kicker">
-                  Saved device names are for recognition, not verified identity.
-                  Incoming approval still applies.
-                </p>
-                {settings.trustedDevices.length === 0 && (
-                  <EmptyState
-                    compact
-                    icon={<ShieldCheck size={22} />}
-                    title="No remembered devices yet"
-                  >
-                    Remember a device when accepting a transfer, or from its device
-                    details.
-                  </EmptyState>
-                )}
-                {settings.trustedDevices.map((device) => (
-                  <div key={device.deviceId} className="df-list-row">
-                    <ShieldCheck size={18} />
-                    <div className="df-grow">
-                      <strong>{device.deviceName}</strong>
-                      <p className="df-meta">{device.platform || "Device"}</p>
-                    </div>
-                    <button
-                      type="button"
-                      className="df-btn df-btn-soft df-btn-sm"
-                      aria-label={`Forget ${device.deviceName}`}
-                      onClick={() =>
-                        removeTrustedDevice(device.deviceId).catch(() =>
-                          addToast("Couldn't remove this device.", "error"),
-                        )
-                      }
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </section>
-            )}
-            {tab === "updates" && (
-              <UpdatesSettings installedVersion={version} />
-            )}
-            {tab === "appearance" && (
-              <section className="df-card df-card-pad">
-                <h2 className="df-v2-section-title">Appearance & motion</h2>
-                <SettingRow
-                  title="Dark theme"
-                  description="Use the dark titanium color scheme. Your preference is saved."
-                >
-                  <Switch
-                    label="Dark theme"
-                    checked={settings.darkTheme}
-                    onChange={() =>
-                      updateSetting("darkTheme", !settings.darkTheme)
-                    }
-                  />
-                </SettingRow>
-                <SettingRow
-                  title="Reduce animations"
-                  description="Minimize interface motion. System reduced-motion preferences are always respected."
-                >
-                  <Switch
-                    label="Reduce animations"
-                    checked={settings.reduceAnimations}
-                    onChange={() =>
-                      updateSetting(
-                        "reduceAnimations",
-                        !settings.reduceAnimations,
-                      )
-                    }
-                  />
-                </SettingRow>
-              </section>
-            )}
-          </div>
-        </div>
-        <aside className="df-v2-stack df-v2-rail">
-          <section className="df-card df-card-pad df-v2-context">
-            <h2>About DropFlow</h2>
-            <BrandMark className="df-v2-about-mark" />
-            <h3>DropFlow</h3>
-            <p className="df-v2-installed">
-              Send files. Simply.
-              <br />
-              Version {version}
-              {release?.channel ? ` · ${release.channel}` : ""}
-            </p>
-            <p className="df-v2-installed">
-              A local-first file transfer application for your nearby devices.
-            </p>
-            <dl>
-              <div>
-                <dt>Platform</dt>
-                <dd>{platformLabel()}</dd>
-              </div>
-              <div>
-                <dt>Update channel</dt>
-                <dd>
-                  {settings.updateChannel === "beta" ? "Beta" : "Development"}
-                </dd>
-              </div>
-              <div>
-                <dt>Device name</dt>
-                <dd>{settings.deviceName || "This device"}</dd>
-              </div>
-            </dl>
-          </section>
-          <section className="df-card df-card-pad df-v2-note">
-            <ShieldCheck size={20} />
-            <p>
-              Your files travel directly between devices. Your download folder,
-              trust choices, and appearance settings stay on this device.
-            </p>
-          </section>
-        </aside>
+                  Forget
+                </button>
+              </SettingRow>
+            ))}
+          </FormGroup>
+        )}
+
+        {tab === "updates" && <UpdatesSettings installedVersion={version} />}
+
+        {tab === "appearance" && (
+          <>
+            <FormGroup title="Appearance">
+              <SettingRow title="Theme">
+                <Segmented
+                  glass={false}
+                  label="Theme"
+                  value={settings.darkTheme ? "dark" : "light"}
+                  onChange={(value) => updateSetting("darkTheme", value === "dark")}
+                  options={[
+                    { id: "light", label: "Light" },
+                    { id: "dark", label: "Dark" },
+                  ]}
+                />
+              </SettingRow>
+              <SettingRow
+                title="Glass"
+                description={
+                  glassMode === "refract"
+                    ? "Refracting"
+                    : glassMode === "frost"
+                      ? glassPref === "frost"
+                        ? "Frosted, no refraction"
+                        : "Frosted · this web view can't refract yet"
+                      : "Opaque surfaces"
+                }
+              >
+                <Segmented
+                  glass={false}
+                  label="Glass"
+                  value={glassPref}
+                  onChange={chooseGlass}
+                  options={[
+                    { id: "auto", label: "Liquid" },
+                    { id: "frost", label: "Frosted" },
+                    { id: "solid", label: "Solid" },
+                  ]}
+                />
+              </SettingRow>
+            </FormGroup>
+            <FormGroup title="Motion" footer="System Reduce Motion is always respected.">
+              <SettingRow title="Reduce motion">
+                <Switch
+                  label="Reduce animations"
+                  checked={settings.reduceAnimations}
+                  onChange={() => updateSetting("reduceAnimations", !settings.reduceAnimations)}
+                />
+              </SettingRow>
+            </FormGroup>
+          </>
+        )}
       </div>
+
       {confirmClear && (
-        <Modal
-          title="Clear transfer history"
-          alert
-          onEscape={clearing ? undefined : () => setConfirmClear(false)}
-        >
-          <h2 className="df-section-title">Clear transfer history?</h2>
-          <p className="df-kicker">
-            This removes the saved list on this device. Your files and settings
-            stay.
-          </p>
-          <div className="df-v2-dialog-actions">
-            <button
-              type="button"
-              className="df-btn df-btn-soft"
-              disabled={clearing}
-              onClick={() => setConfirmClear(false)}
-            >
+        <Modal title="Clear transfer history" alert onEscape={clearing ? undefined : () => setConfirmClear(false)}>
+          <h2>Clear history?</h2>
+          <p className="lede">Removes the list on this device. Your files stay.</p>
+          <div className="sheet-actions">
+            <button type="button" className="btn" disabled={clearing} onClick={() => setConfirmClear(false)}>
               Cancel
             </button>
             <button
               type="button"
-              className="df-btn df-btn-danger"
+              className="btn btn-primary"
+              style={{ background: "var(--red)" }}
               disabled={clearing}
               onClick={clearHistory}
             >
-              {clearing ? "Clearing…" : "Clear history"}
+              {clearing ? "Clearing…" : "Clear"}
             </button>
           </div>
         </Modal>
       )}
-    </div>
+    </Page>
   );
 }

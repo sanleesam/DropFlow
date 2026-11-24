@@ -1,10 +1,10 @@
-import React, { useLayoutEffect, useRef } from "react";
-import { useSettings } from "../SettingsProvider";
-import { mountPageMotion } from "../../ui/motion";
+import React, { useEffect, useState } from "react";
 import {
   ArrowLeftRight,
   Folder,
-  Home,
+  House,
+  PanelLeft,
+  Plus,
   Settings,
   Smartphone,
 } from "lucide-react";
@@ -18,45 +18,18 @@ import { FilesPage } from "../../pages/FilesPage";
 import { SettingsPage } from "../../pages/SettingsPage";
 import { useDiskUsage } from "../../ui/useDisk";
 import { formatBytes } from "../../utils/formatters";
-import { BrandMark } from "../ui/BrandMark";
+import { DeviceVisual, useGlide } from "../ui/Desktop";
+import { Glass, installGlassLight } from "../../ui/glass/LiquidGlass";
 
-const NAV: {
-  id: AppPage;
-  label: string;
-  icon: (active: boolean) => React.ReactNode;
-}[] = [
-  {
-    id: "home",
-    label: "Home",
-    icon: (active) => (
-      <Home
-        size={18}
-        strokeWidth={1.75}
-        fill={active ? "currentColor" : "none"}
-      />
-    ),
-  },
-  {
-    id: "devices",
-    label: "Devices",
-    icon: () => <Smartphone size={18} strokeWidth={1.75} />,
-  },
-  {
-    id: "transfers",
-    label: "Transfers",
-    icon: () => <ArrowLeftRight size={18} strokeWidth={1.75} />,
-  },
-  {
-    id: "files",
-    label: "Files",
-    icon: () => <Folder size={18} strokeWidth={1.75} />,
-  },
-  {
-    id: "settings",
-    label: "Settings",
-    icon: () => <Settings size={18} strokeWidth={1.75} />,
-  },
+const NAV: { id: AppPage; label: string; icon: React.ElementType }[] = [
+  { id: "home", label: "Home", icon: House },
+  { id: "devices", label: "Devices", icon: Smartphone },
+  { id: "transfers", label: "Transfers", icon: ArrowLeftRight },
+  { id: "files", label: "Files", icon: Folder },
+  { id: "settings", label: "Settings", icon: Settings },
 ];
+
+const LIVE = ["Preparing...", "Sending...", "Receiving...", "Finishing..."];
 
 export const AppShell: React.FC = () => {
   const {
@@ -66,111 +39,158 @@ export const AppShell: React.FC = () => {
     closeIncoming,
     discovery,
     devices,
+    selectedDeviceId,
+    selectDevice,
     sessionStore,
+    droppedOver,
   } = useDropFlow();
   const running = Object.values(sessionStore.activeTransfers).filter((item) =>
-    ["Preparing...", "Sending...", "Receiving...", "Finishing..."].includes(
-      item.status,
-    ),
+    LIVE.includes(item.status),
   ).length;
   const disk = useDiskUsage();
-  const { settings } = useSettings();
-  const contentRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    if (settings.reduceAnimations || !contentRef.current) return;
-    return mountPageMotion(contentRef.current);
-  }, [page, settings.reduceAnimations]);
+  const [sidebar, setSidebar] = useState(true);
+  const { container, indicator } = useGlide<HTMLElement>(page, "y");
+
+  useEffect(installGlassLight, []);
+
+  // ⌃⌘S toggles the sidebar (macOS); Ctrl+Shift+S elsewhere. ⌘1–5 switch sections.
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod) return;
+      if (event.key.toLowerCase() === "s" && (event.metaKey ? event.ctrlKey : event.shiftKey)) {
+        event.preventDefault();
+        setSidebar((open) => !open);
+        return;
+      }
+      const index = Number(event.key) - 1;
+      if (!event.shiftKey && !event.altKey && index >= 0 && index < NAV.length) {
+        event.preventDefault();
+        setPage(NAV[index].id);
+      }
+      if (event.key === ",") {
+        event.preventDefault();
+        setPage("settings");
+      }
+    };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, [setPage]);
+
   const usedPct =
     disk && disk.totalBytes > 0
-      ? Math.min(
-          100,
-          ((disk.totalBytes - disk.freeBytes) / disk.totalBytes) * 100,
-        )
+      ? Math.min(100, ((disk.totalBytes - disk.freeBytes) / disk.totalBytes) * 100)
       : 0;
-  const storageLine = disk
-    ? `${formatBytes(disk.totalBytes - disk.freeBytes)} of ${formatBytes(disk.totalBytes)} used`
-    : disk === undefined ? "Checking this disk" : "Storage info unavailable";
 
   return (
-    <div className="df-shell">
-      <div className="df-native-titlebar" data-tauri-drag-region aria-hidden="true" />
-      <aside className="df-sidebar">
-        <div className="df-brand">
-          <BrandMark />
-          <div>
-            <strong>DropFlow</strong>
-            <small>Send files. Simply.</small>
-          </div>
-        </div>
-        <nav className="df-nav" aria-label="Main">
-          {NAV.map((item) => (
+    <div className="win" data-sidebar={sidebar ? "shown" : "hidden"}>
+      <Glass as="aside" size="lg" className="sidebar" aria-label="Sidebar">
+        <div className="sidebar-drag" data-tauri-drag-region aria-hidden="true" />
+        <nav ref={container} className="side-nav" aria-label="Main">
+          <span ref={indicator} className="side-lens" aria-hidden="true" />
+          {NAV.map(({ id, label, icon: Icon }) => (
             <button
-              key={item.id}
+              key={id}
               type="button"
-              aria-label={item.label}
-              className={
-                page === item.id ? "df-nav-item active" : "df-nav-item"
-              }
-              aria-current={page === item.id ? "page" : undefined}
-              onClick={() => setPage(item.id)}
+              className="side-item"
+              data-active={page === id}
+              aria-current={page === id ? "page" : undefined}
+              onClick={() => setPage(id)}
             >
-              {item.icon(page === item.id)}
-              <span>{item.label}</span>
-              {item.id === "transfers" && running > 0 && (
-                <span className="df-nav-count">{running}</span>
+              <Icon size={16} strokeWidth={1.9} />
+              <span>{label}</span>
+              {id === "transfers" && running > 0 && (
+                <span className="badge" aria-label={`${running} active`}>
+                  {running}
+                </span>
               )}
             </button>
           ))}
         </nav>
-        <div className="df-storage-side">
-          <div className="df-storage-label">
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden>
-              <rect
-                x="1.5"
-                y="3"
-                width="13"
-                height="10"
-                rx="2"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-              />
-              <path d="M1.5 6.2h13" stroke="currentColor" strokeWidth="1.4" />
-            </svg>
-            Local Storage
-          </div>
-          <div className="df-storage-track">
+
+        <h2 className="side-heading">Nearby</h2>
+        <div className="side-devices">
+          {devices.map((device) => (
+            <button
+              key={device.id}
+              type="button"
+              className="side-device"
+              aria-pressed={selectedDeviceId === device.id}
+              title={`Send to ${device.name}`}
+              onClick={() => {
+                selectDevice(device.id);
+                setPage("home");
+              }}
+            >
+              <DeviceVisual type={device.type} small />
+              <span>{device.name}</span>
+            </button>
+          ))}
+          {devices.length === 0 && (
+            <p className="side-empty">
+              {discovery === "error" ? "Discovery unavailable" : "Searching…"}
+            </p>
+          )}
+        </div>
+
+        <div className="side-foot">
+          <div
+            className="meter"
+            role="meter"
+            aria-label="Disk used"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(usedPct)}
+          >
             <span style={{ width: `${usedPct}%` }} />
           </div>
-          <div className="df-storage-meta">{storageLine}</div>
-        </div>
-        <div className="df-v2-network" role="status">
-          <i
-            className={`df-dot${discovery === "error" ? " bad" : discovery === "ready" ? "" : " idle"}`}
-          />
-          <div>
+          <small>
+            {disk
+              ? `${formatBytes(disk.freeBytes)} available`
+              : disk === undefined
+                ? "Checking disk…"
+                : "Storage unavailable"}
+          </small>
+          <small role="status">
+            <i
+              className={`dot${discovery === "error" ? " bad" : discovery === "ready" ? "" : " idle"}`}
+            />
             {discovery === "error"
-              ? "Discovery unavailable"
-              : discovery === "ready"
-                ? "Devices nearby"
-                : "Discovering devices"}
-            <small>
-              {devices.length
-                ? `${devices.length} nearby on your network`
-                : "Local network only"}
-            </small>
+              ? "Offline"
+              : devices.length
+                ? `${devices.length} on this network`
+                : "Local network"}
+          </small>
+        </div>
+      </Glass>
+
+      <button
+        type="button"
+        className="sb-toggle icon-btn"
+        aria-label={sidebar ? "Hide sidebar" : "Show sidebar"}
+        aria-expanded={sidebar}
+        title={sidebar ? "Hide sidebar" : "Show sidebar"}
+        onClick={() => setSidebar((open) => !open)}
+      >
+        <PanelLeft size={16} strokeWidth={1.8} />
+      </button>
+
+      <main className="main">
+        {page === "home" && <HomePage key="home" />}
+        {page === "devices" && <DevicesPage key="devices" />}
+        {page === "transfers" && <TransfersPage key="transfers" />}
+        {page === "files" && <FilesPage key="files" />}
+        {page === "settings" && <SettingsPage key="settings" />}
+        {droppedOver && (
+          <div className="drop-overlay" aria-live="polite">
+            <Glass size="md">
+              <Plus size={18} strokeWidth={2.2} />
+              Drop to add files
+            </Glass>
           </div>
-        </div>
-      </aside>
-      <div className="df-stage">
-        <div className="df-scroll" ref={contentRef}>
-          {page === "home" && <HomePage />}
-          {page === "devices" && <DevicesPage />}
-          {page === "transfers" && <TransfersPage />}
-          {page === "files" && <FilesPage />}
-          {page === "settings" && <SettingsPage />}
-        </div>
-      </div>
+        )}
+      </main>
+
       {incoming && (
         <IncomingTransferModal key={incoming.sessionId} request={incoming} onClose={closeIncoming} />
       )}

@@ -2,8 +2,7 @@ import { SettingsProvider } from "./components/SettingsProvider";
 import { ToastProvider } from "./components/ToastProvider";
 import { AppShell } from "./components/shell/AppShell";
 import { DropFlowProvider } from "./session/DropFlowProvider";
-import "./App.css";
-import "./ui/desktop.css";
+import "./ui/theme.css";
 
 function App() {
   return (

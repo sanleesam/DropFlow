@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
-import { SettingRow, Switch } from "./ui/Desktop";
+import { FormGroup, SettingRow, Switch } from "./ui/Desktop";
 
 type Snapshot = {
   phase: "unavailable" | "off" | "starting" | "ready" | "testing" | "stopping" | "verified" | "error";
@@ -57,12 +57,11 @@ export function NearbyLinkSettings() {
   };
 
   return (
-    <section className="df-card df-card-pad">
-      <h2 className="df-v2-section-title">Nearby Link · Experimental</h2>
-      <SettingRow
-        title="Windows-to-Android link test"
-        description="Start a temporary Wi-Fi session. Bluetooth is optional. Only test data is sent."
-      >
+    <FormGroup
+      title="Nearby Link · Experimental"
+      footer="Windows ↔ Android test. Temporary Wi-Fi session; only test data is sent."
+    >
+      <SettingRow title="Link test" description={snapshot?.message ?? "Checking availability…"}>
         <Switch
           label="Nearby Link"
           checked={checked}
@@ -70,15 +69,27 @@ export function NearbyLinkSettings() {
           onChange={toggle}
         />
       </SettingRow>
-      <p role="status" className="df-meta">{snapshot?.message ?? "Checking availability…"}</p>
-      {error && <p role="alert">{error}</p>}
+      <span role="status" className="sr-only">{snapshot?.message ?? ""}</span>
+      {error && (
+        <p role="alert" className="footnote" style={{ color: "var(--red)", padding: "0 0 10px" }}>
+          {error}
+        </p>
+      )}
       {snapshot?.phase === "ready" && (
-        <div className="df-v2-stack">
-          <p>On Android, open Nearby Link in Settings and enter these temporary credentials. Don’t join the network from system settings.</p>
-          <div><strong>Network name</strong> <code>{snapshot.ssid}</code></div>
-          <div><strong>Passphrase</strong> <code>{snapshot.passphrase}</code></div>
+        <div className="form-row">
+          <div className="creds">
+            <p className="footnote">On Android, open Nearby Link in Settings and enter these. Don't join from system Wi-Fi.</p>
+            <div>
+              <span className="secondary">Network </span>
+              <code>{snapshot.ssid}</code>
+            </div>
+            <div>
+              <span className="secondary">Passphrase </span>
+              <code>{snapshot.passphrase}</code>
+            </div>
+          </div>
         </div>
       )}
-    </section>
+    </FormGroup>
   );
 }

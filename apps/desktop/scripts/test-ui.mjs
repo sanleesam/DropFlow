@@ -16,6 +16,7 @@ try {
         entry: {
           lifecycle: "src/utils/transferSessionManager.test.ts",
           primitives: "src/components/ui/Desktop.test.tsx",
+          lens: "src/ui/glass/displacement.test.ts",
         },
         formats: ["es"],
         fileName: (_format, entry) => `${entry}.mjs`,
@@ -24,7 +25,7 @@ try {
       emptyOutDir: false,
     },
   });
-  for (const suite of ["lifecycle", "primitives"]) {
+  for (const suite of ["lifecycle", "primitives", "lens"]) {
     const url = pathToFileURL(join(output, `${suite}.mjs`)).href;
     // Browser React's scheduler can keep Node alive after synchronous assertions.
     execFileSync(

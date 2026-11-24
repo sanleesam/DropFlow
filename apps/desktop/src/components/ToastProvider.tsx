@@ -34,15 +34,9 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
   return (
     <ToastContext.Provider value={{ addToast, removeToast }}>
       {children}
-      {/* Toast container - fixed top-right */}
-      <div
-        aria-label="Notifications"
-        className="pointer-events-none fixed right-4 top-4 z-50 flex flex-col gap-2"
-      >
+      <div aria-label="Notifications" className="toasts">
         {toasts.map((toast) => (
-          <div key={toast.id} className="pointer-events-auto">
-            <Toast toast={toast} onDismiss={removeToast} />
-          </div>
+          <Toast key={toast.id} toast={toast} onDismiss={removeToast} />
         ))}
       </div>
     </ToastContext.Provider>

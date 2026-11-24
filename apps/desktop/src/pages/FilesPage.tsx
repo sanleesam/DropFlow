@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
+  AlertCircle,
+  ArrowUp,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -10,25 +12,32 @@ import {
   FileArchive,
   FileText,
   Folder,
-  Home,
+  FolderOpen,
+  FolderPlus,
+  House,
   Image as ImageIcon,
   LayoutGrid,
   List,
-  MoreHorizontal,
+  LoaderCircle,
+  Monitor,
   Music,
-  Plus,
-  Search,
-  Send,
-  Star,
+  Pencil,
+  SquareArrowOutUpRight,
   Trash2,
   Video,
-  AlertCircle,
-  LoaderCircle,
 } from "lucide-react";
 import { useSettings } from "../components/SettingsProvider";
 import { useToast } from "../components/ToastProvider";
 import { useDropFlow } from "../session/DropFlowProvider";
-import { DeviceVisual, EmptyState, PageHeader } from "../components/ui/Desktop";
+import {
+  DeviceVisual,
+  EmptyState,
+  Page,
+  SearchField,
+  Segmented,
+  ToolGroup,
+} from "../components/ui/Desktop";
+import { Glass } from "../ui/glass/LiquidGlass";
 import { formatBytes } from "../utils/formatters";
 
 interface ListedEntry {
@@ -114,7 +123,6 @@ export const FilesPage: React.FC = () => {
   const [renaming, setRenaming] = useState(false);
   const [nextName, setNextName] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deviceOpen, setDeviceOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -324,273 +332,166 @@ export const FilesPage: React.FC = () => {
     }
   };
 
+  const goBack = () => {
+    const prev = back[back.length - 1];
+    setBack((stack) => stack.slice(0, -1));
+    if (cwd) setForward((stack) => [cwd, ...stack]);
+    setCwd(prev);
+    setScope("browse");
+  };
+  const goForward = () => {
+    const next = forward[0];
+    setForward((stack) => stack.slice(1));
+    if (cwd) setBack((stack) => [...stack, cwd]);
+    setCwd(next);
+    setScope("browse");
+  };
+  const browsing = local && scope !== "recent";
+  const title = !local ? peer?.name || "Files" : scope === "browse" ? crumb[crumb.length - 1] || "Files" : SCOPE_LABEL[scope];
+
   return (
-    <div className="df-page df-files-page">
-      <PageHeader
-        title="Files"
-        description="Browse local folders and files exchanged with your devices."
-      />
-      <div className="df-v2-toolbar df-v2-files-toolbar">
-        <div className="df-page-tools">
-          <label className="df-search df-search-wide">
-            <Search size={15} />
-            <input
-              aria-label="Search files and folders"
-              value={query}
-              placeholder="Search files and folders…"
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
-          <button
-            type="button"
-            className={!grid ? "df-icon-btn on" : "df-icon-btn"}
-            aria-label="List view"
-            aria-pressed={!grid}
-            onClick={() => setGrid(false)}
-          >
-            <List size={16} />
-          </button>
-          <button
-            type="button"
-            className={grid ? "df-icon-btn on" : "df-icon-btn"}
-            aria-label="Grid view"
-            aria-pressed={grid}
-            onClick={() => setGrid(true)}
-          >
-            <LayoutGrid size={16} />
-          </button>
-          <div className="df-new">
-            <button
-              type="button"
-              className="df-btn df-btn-primary"
-              onClick={() => setMaking((open) => !open)}
-            >
-              <Plus size={16} /> New
+    <Page
+      fill
+      title={title}
+      toolbar={
+        <>
+          <ToolGroup label="History">
+            <button type="button" className="tool-btn" aria-label="Back" disabled={back.length === 0} onClick={goBack}>
+              <ChevronLeft size={17} strokeWidth={2} />
             </button>
+            <button type="button" className="tool-btn" aria-label="Forward" disabled={forward.length === 0} onClick={goForward}>
+              <ChevronRight size={17} strokeWidth={2} />
+            </button>
+          </ToolGroup>
+          <Segmented
+            label="View"
+            value={grid ? "grid" : "list"}
+            onChange={(value) => setGrid(value === "grid")}
+            options={[
+              { id: "list", label: <List size={15} />, title: "List view" },
+              { id: "grid", label: <LayoutGrid size={15} />, title: "Grid view" },
+            ]}
+          />
+          <SearchField value={query} onChange={setQuery} label="Search files and folders" width={190} />
+          <div style={{ position: "relative" }}>
+            <ToolGroup label="Create">
+              <button
+                type="button"
+                className="tool-btn"
+                aria-label="New folder"
+                title="New folder"
+                aria-expanded={making}
+                disabled={!browsing}
+                onClick={() => setMaking((open) => !open)}
+              >
+                <FolderPlus size={16} strokeWidth={1.9} />
+              </button>
+            </ToolGroup>
             {making && (
-              <div className="df-new-menu">
+              <Glass size="md" className="new-menu">
                 <input
-                  className="df-input"
+                  className="field"
                   aria-label="New folder name"
                   placeholder="Folder name"
+                  autoFocus
                   value={folderName}
                   onChange={(event) => setFolderName(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") createFolder();
+                    if (event.key === "Escape") setMaking(false);
                   }}
                 />
-                <button
-                  type="button"
-                  className="df-btn df-btn-primary df-btn-sm"
-                  onClick={createFolder}
-                >
-                  Create folder
+                <button type="button" className="btn btn-primary" disabled={!folderName.trim()} onClick={createFolder}>
+                  Create Folder
                 </button>
-                <button
-                  type="button"
-                  className="df-btn df-btn-soft df-btn-sm"
-                  onClick={flow.browseFiles}
-                >
-                  Send files
-                </button>
-              </div>
+              </Glass>
             )}
           </div>
-        </div>
-      </div>
-
-      <div className="df-files-layout">
-        <aside className="df-card df-files-side">
+        </>
+      }
+    >
+      <nav className="card source-list" aria-label="Locations">
+        <h3>Devices</h3>
+        <button
+          type="button"
+          className="source"
+          aria-current={local && scope === "browse"}
+          onClick={() => {
+            flow.focusDeviceFiles("this");
+            setScope("browse");
+          }}
+        >
+          <DeviceVisual type={flow.deviceType} small local />
+          <span>{settings.deviceName || "This device"}</span>
+        </button>
+        {flow.devices.map((device) => (
           <button
+            key={device.id}
             type="button"
-            className="df-files-label"
-            aria-expanded={deviceOpen}
-            onClick={() => setDeviceOpen((open) => !open)}
+            className="source"
+            aria-current={flow.filesDeviceId === device.id}
+            onClick={() => flow.focusDeviceFiles(device.id)}
           >
-            My Devices <span>{deviceOpen ? "▾" : "▸"}</span>
+            <DeviceVisual type={device.type} small />
+            <span>{device.name}</span>
           </button>
-          {deviceOpen && (
-            <div className="df-files-devices">
-              <button
-                type="button"
-                className={local ? "on" : ""}
-                onClick={() => {
-                  flow.focusDeviceFiles("this");
-                  setScope("browse");
-                }}
-              >
-                <DeviceVisual type={flow.deviceType} />
-                <span>{settings.deviceName || "This device"}</span>
+        ))}
+        <h3>Locations</h3>
+        <SourceButton icon={<Clock size={15} />} label="Recent" on={local && scope === "recent"} onClick={() => { flow.focusDeviceFiles("this"); setScope("recent"); }} />
+        <SourceButton
+          icon={<Download size={15} />}
+          label="Downloads"
+          on={local && cwd === (settings.receiveDirectory || roots?.downloads) && scope === "browse"}
+          onClick={() => roots && go(settings.receiveDirectory || roots.downloads)}
+        />
+        <SourceButton icon={<Monitor size={15} />} label="Desktop" on={local && cwd === roots?.desktop && scope === "browse"} onClick={() => roots && go(roots.desktop)} />
+        <SourceButton icon={<FileText size={15} />} label="Documents" on={local && cwd === roots?.documents && scope === "browse"} onClick={() => roots && go(roots.documents)} />
+        <h3>Kinds</h3>
+        <SourceButton icon={<ImageIcon size={15} />} label="Images" on={scope === "images"} onClick={() => setScope("images")} />
+        <SourceButton icon={<Video size={15} />} label="Videos" on={scope === "videos"} onClick={() => setScope("videos")} />
+        <SourceButton icon={<FileText size={15} />} label="Documents" on={scope === "documents"} onClick={() => setScope("documents")} />
+        <SourceButton icon={<Music size={15} />} label="Music" on={scope === "music"} onClick={() => setScope("music")} />
+        <SourceButton icon={<FileArchive size={15} />} label="Archives" on={scope === "archives"} onClick={() => setScope("archives")} />
+      </nav>
+
+      <section className="card browser" aria-label="Files">
+        <div className="pathbar">
+          {browsing ? (
+            <>
+              <button type="button" className="crumb" aria-label="Home folder" onClick={() => roots && go(roots.home)}>
+                <House size={13} />
               </button>
-              {flow.devices.map((device) => (
-                <button
-                  key={device.id}
-                  type="button"
-                  className={flow.filesDeviceId === device.id ? "on" : ""}
-                  onClick={() => flow.focusDeviceFiles(device.id)}
-                >
-                  <DeviceVisual type={device.type} />
-                  <span>{device.name}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          <p className="df-files-label">Locations</p>
-          <NavButton
-            icon={<Clock size={15} />}
-            label="Recent"
-            on={scope === "recent"}
-            onClick={() => setScope("recent")}
-          />
-          <NavButton
-            icon={<Star size={15} />}
-            label="Downloads"
-            on={
-              cwd === (settings.receiveDirectory || roots?.downloads) &&
-              scope === "browse"
-            }
-            onClick={() =>
-              roots && go(settings.receiveDirectory || roots.downloads)
-            }
-          />
-          <NavButton
-            icon={<ImageIcon size={15} />}
-            label="Images"
-            on={scope === "images"}
-            onClick={() => setScope("images")}
-          />
-          <NavButton
-            icon={<Video size={15} />}
-            label="Videos"
-            on={scope === "videos"}
-            onClick={() => setScope("videos")}
-          />
-          <NavButton
-            icon={<FileText size={15} />}
-            label="Documents"
-            on={scope === "documents"}
-            onClick={() => setScope("documents")}
-          />
-          <NavButton
-            icon={<Music size={15} />}
-            label="Music"
-            on={scope === "music"}
-            onClick={() => setScope("music")}
-          />
-          <NavButton
-            icon={<FileArchive size={15} />}
-            label="Archives"
-            on={scope === "archives"}
-            onClick={() => setScope("archives")}
-          />
-        </aside>
-
-        <section className="df-card df-files-main">
-          <div className="df-crumb">
-            <button
-              type="button"
-              aria-label="Back"
-              disabled={back.length === 0}
-              onClick={() => {
-                const prev = back[back.length - 1];
-                setBack((stack) => stack.slice(0, -1));
-                if (cwd) setForward((stack) => [cwd, ...stack]);
-                setCwd(prev);
-                setScope("browse");
-              }}
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <button
-              type="button"
-              aria-label="Forward"
-              disabled={forward.length === 0}
-              onClick={() => {
-                const next = forward[0];
-                setForward((stack) => stack.slice(1));
-                if (cwd) setBack((stack) => [...stack, cwd]);
-                setCwd(next);
-                setScope("browse");
-              }}
-            >
-              <ChevronRight size={16} />
-            </button>
-            <button
-              type="button"
-              aria-label="Home"
-              onClick={() => roots && go(roots.desktop || roots.home)}
-            >
-              <Home size={15} />
-            </button>
-            {local && scope !== "recent" ? (
-              crumb.map((part, index) => (
-                <button
-                  key={`${part}-${index}`}
-                  type="button"
-                  onClick={() => go(buildPath(cwd, index))}
-                >
-                  {part}
-                </button>
-              ))
-            ) : (
-              <span>{peer ? peer.name : "Recent"}</span>
-            )}
-          </div>
-
-          {!local && (
-            <p className="df-kicker df-files-note">
-              Files exchanged with {peer?.name}. DropFlow can't browse folders
-              on the other device.
-            </p>
-          )}
-
-          {scope !== "recent" &&
-            local &&
-            !loading &&
-            !loadError &&
-            folders.length > 0 && (
-              <div className="df-folder-strip">
-                {folders.slice(0, 8).map((folder) => (
-                  <button
-                    key={folder.path}
-                    type="button"
-                    className="df-folder-tile"
-                    onDoubleClick={() => go(folder.path)}
-                    onClick={() => setPicked(folder.path)}
-                  >
-                    <Folder size={28} />
-                    <strong>{folder.name}</strong>
+              {crumb.map((part, index) => (
+                <span key={`${part}-${index}`} style={{ display: "contents" }}>
+                  <ChevronRight size={12} className="chev" />
+                  <button type="button" className="crumb" onClick={() => go(buildPath(cwd, index))}>
+                    {part}
                   </button>
-                ))}
-              </div>
-            )}
-
-          {local && scope !== "recent" && loading ? (
-            <EmptyState
-              icon={<LoaderCircle size={22} />}
-              title="Loading this folder"
-            >
-              Reading your local files…
+                </span>
+              ))}
+            </>
+          ) : (
+            <span className="crumb" style={{ color: "var(--label)", fontWeight: 600 }}>
+              {peer ? `Exchanged with ${peer.name}` : "Recent transfers"}
+            </span>
+          )}
+        </div>
+        <div className="browser-body">
+          {browsing && loading ? (
+            <EmptyState icon={<LoaderCircle size={20} />} title="Loading">
+              Reading this folder…
             </EmptyState>
-          ) : local && scope !== "recent" && loadError ? (
+          ) : browsing && loadError ? (
             <EmptyState
-              icon={<AlertCircle size={22} />}
+              icon={<AlertCircle size={20} />}
               title="Folder unavailable"
               action={
                 cwd ? (
-                  <button
-                    type="button"
-                    className="df-btn df-btn-soft"
-                    onClick={reload}
-                  >
-                    Try again
+                  <button type="button" className="btn" onClick={reload}>
+                    Try Again
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    className="df-btn df-btn-soft"
-                    onClick={() => flow.setPage("home")}
-                  >
+                  <button type="button" className="btn" onClick={() => flow.setPage("home")}>
                     Back to Home
                   </button>
                 )
@@ -598,274 +499,258 @@ export const FilesPage: React.FC = () => {
             >
               {loadError}
             </EmptyState>
-          ) : scope === "recent" || !local ? (
+          ) : !browsing ? (
             visibleHistory.length === 0 ? (
               <Empty query={query} recent />
             ) : grid ? (
-              <div className="df-file-grid">
+              <div className="icon-grid">
                 {visibleHistory.map((row) => (
-                  <button
-                    key={row.key}
-                    type="button"
-                    className={picked === row.key ? "on" : ""}
-                    onClick={() => setPicked(row.key)}
-                  >
-                    <FileText size={22} />
-                    <strong>{row.name}</strong>
+                  <button key={row.key} type="button" aria-selected={picked === row.key} onClick={() => setPicked(row.key)}>
+                    <FileIcon name={row.name} size={30} />
+                    <strong title={row.name}>{row.name}</strong>
                     <small>{row.size}</small>
                   </button>
                 ))}
               </div>
             ) : (
-              <table className="df-table">
+              <table className="table">
                 <thead>
                   <tr>
                     <th>Name</th>
                     <th>Size</th>
-                    <th>Type</th>
+                    <th>Kind</th>
                     <th>Device</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibleHistory.map((row) => (
-                    <tr
-                      key={row.key}
-                      className={picked === row.key ? "picked" : ""}
-                      onClick={() => setPicked(row.key)}
-                    >
+                    <tr key={row.key} aria-selected={picked === row.key} onClick={() => setPicked(row.key)}>
                       <td>
-                        <button
-                          type="button"
-                          className="df-v2-file-name"
-                          title={row.name}
-                          onClick={() => setPicked(row.key)}
-                        >
-                          <FileText size={15} />
+                        <button type="button" className="name-cell" title={row.name} onClick={() => setPicked(row.key)}>
+                          <FileIcon name={row.name} size={15} />
                           <span>{row.name}</span>
                         </button>
                       </td>
                       <td>{row.size}</td>
                       <td>{typeLabel(row.name, false)}</td>
                       <td>
-                        {row.direction === "receive" ? "From" : "To"}{" "}
-                        {row.deviceName}
+                        {row.direction === "receive" ? "From" : "To"} {row.deviceName}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             )
-          ) : files.length === 0 && folders.length === 0 ? (
+          ) : visibleEntries.length === 0 ? (
             <Empty query={query} />
           ) : grid ? (
-            <div className="df-file-grid">
+            <div className="icon-grid">
               {visibleEntries.map((entry) => (
                 <button
                   key={entry.path}
                   type="button"
-                  className={picked === entry.path ? "on" : ""}
+                  aria-selected={picked === entry.path}
                   onClick={() => setPicked(entry.path)}
                   onDoubleClick={() => entry.isDir && go(entry.path)}
                 >
-                  {entry.isDir ? <Folder size={22} /> : <FileText size={22} />}
-                  <strong>{entry.name}</strong>
-                  <small>
-                    {entry.isDir ? "Folder" : formatBytes(entry.sizeBytes)}
-                  </small>
+                  {entry.isDir ? <Folder size={30} fill="currentColor" fillOpacity={0.18} /> : <FileIcon name={entry.name} size={30} />}
+                  <strong title={entry.name}>{entry.name}</strong>
+                  <small>{entry.isDir ? "Folder" : formatBytes(entry.sizeBytes)}</small>
                 </button>
               ))}
             </div>
           ) : (
-            <table className="df-table">
+            <table className="table">
               <thead>
                 <tr>
                   <th>Name</th>
                   <th>Size</th>
-                  <th>Type</th>
+                  <th>Kind</th>
                   <th>Modified</th>
                 </tr>
               </thead>
               <tbody>
-                {files.map((entry) => (
+                {[...folders, ...files].map((entry) => (
                   <tr
                     key={entry.path}
-                    className={picked === entry.path ? "picked" : ""}
+                    aria-selected={picked === entry.path}
                     onClick={() => setPicked(entry.path)}
                     onDoubleClick={() => entry.isDir && go(entry.path)}
                   >
                     <td>
                       <button
                         type="button"
-                        className="df-v2-file-name"
-                        title={entry.name}
+                        className="name-cell"
+                        title={entry.isDir ? `${entry.name} — double-click to open` : entry.name}
                         onClick={() => setPicked(entry.path)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && entry.isDir) go(entry.path);
+                        }}
                       >
-                        <FileText size={15} />
+                        {entry.isDir ? <Folder size={15} fill="currentColor" fillOpacity={0.18} /> : <FileIcon name={entry.name} size={15} />}
                         <span>{entry.name}</span>
                       </button>
                     </td>
-                    <td>{formatBytes(entry.sizeBytes)}</td>
-                    <td>{typeLabel(entry.name, false)}</td>
+                    <td>{entry.isDir ? "—" : formatBytes(entry.sizeBytes)}</td>
+                    <td>{typeLabel(entry.name, entry.isDir)}</td>
                     <td>{whenLabel(entry.modifiedMs)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </section>
+        </div>
+      </section>
 
-        <aside className="df-card df-files-detail">
-          {currentName ? (
-            <>
-              {preview ? (
-                <img className="df-preview" src={preview} alt="" />
-              ) : (
-                <div className="df-preview df-preview-empty">
-                  <FileText size={28} />
+      <aside className="card file-inspector" aria-label="File details">
+        {currentName ? (
+          <>
+            {preview ? (
+              <img className="preview" src={preview} alt="" />
+            ) : (
+              <div className="preview preview-empty">
+                {currentEntry?.isDir ? <Folder size={40} strokeWidth={1.4} /> : <FileIcon name={currentName} size={40} />}
+              </div>
+            )}
+            <div>
+              <h2 style={{ font: "700 15px/1.3 var(--font-display)", overflowWrap: "anywhere" }}>{currentName}</h2>
+              <p className="footnote" style={{ marginTop: 3 }}>
+                {typeLabel(currentName, !!currentEntry?.isDir)}
+                {currentEntry && !currentEntry.isDir ? ` · ${formatBytes(currentEntry.sizeBytes)}` : ""}
+                {currentHistory ? ` · ${currentHistory.size}` : ""}
+              </p>
+            </div>
+            <div className="quick-actions">
+              <button type="button" disabled={!currentPath || !!currentEntry?.isDir} onClick={sendCurrent}>
+                <ArrowUp size={16} />
+                Send
+              </button>
+              <button
+                type="button"
+                disabled={!currentPath}
+                onClick={() => currentPath && openPath(currentPath).catch(() => addToast("Couldn't open that file.", "error"))}
+              >
+                <SquareArrowOutUpRight size={16} />
+                Open
+              </button>
+              <button
+                type="button"
+                disabled={!currentPath}
+                onClick={() => currentPath && revealItemInDir(currentPath).catch(() => addToast("Couldn't show that file.", "error"))}
+              >
+                <FolderOpen size={16} />
+                Show
+              </button>
+              <button type="button" disabled={!currentPath} onClick={copyPath}>
+                <Copy size={16} />
+                Copy
+              </button>
+            </div>
+            <dl className="facts">
+              <div>
+                <dt>Kind</dt>
+                <dd>{typeLabel(currentName, !!currentEntry?.isDir)}</dd>
+              </div>
+              {currentEntry && !currentEntry.isDir && (
+                <div>
+                  <dt>Size</dt>
+                  <dd>{currentEntry.sizeBytes.toLocaleString()} bytes</dd>
                 </div>
               )}
-              <h2>{currentName}</h2>
-              <p className="df-kicker">
-                {currentEntry
-                  ? currentEntry.isDir
-                    ? "Folder"
-                    : formatBytes(currentEntry.sizeBytes)
-                  : currentHistory?.size}{" "}
-                · {typeLabel(currentName, !!currentEntry?.isDir)}
-              </p>
-              <div className="df-side-actions df-side-actions-4">
-                <button type="button" onClick={sendCurrent}>
-                  <Send size={16} />
-                  <span>Send</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={!currentPath}
-                  onClick={() =>
-                    currentPath &&
-                    revealItemInDir(currentPath).catch(() =>
-                      addToast("Couldn't show that file.", "error"),
-                    )
-                  }
-                >
-                  <Folder size={16} />
-                  <span>Show</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={!currentPath}
-                  onClick={() =>
-                    currentPath &&
-                    openPath(currentPath).catch(() =>
-                      addToast("Couldn't open that file.", "error"),
-                    )
-                  }
-                >
-                  <Download size={16} />
-                  <span>Open</span>
-                </button>
-                <button type="button" onClick={copyPath}>
-                  <MoreHorizontal size={16} />
-                  <span>Copy path</span>
-                </button>
-              </div>
-              <h3>File Information</h3>
-              <div className="df-info-row">
-                <span>Name</span>
-                <b>{currentName}</b>
-              </div>
-              <div className="df-info-row">
-                <span>Type</span>
-                <b>{typeLabel(currentName, !!currentEntry?.isDir)}</b>
-              </div>
-              <div className="df-info-row">
-                <span>Size</span>
-                <b>
-                  {currentEntry
-                    ? currentEntry.isDir
-                      ? "—"
-                      : `${formatBytes(currentEntry.sizeBytes)} (${currentEntry.sizeBytes.toLocaleString()} bytes)`
-                    : currentHistory?.size}
-                </b>
-              </div>
-              <div className="df-info-row">
-                <span>Location</span>
-                <b className="df-ellipsis">
-                  {currentEntry ? cwd : currentHistory?.deviceName}
-                </b>
+              <div>
+                <dt>{currentEntry ? "Where" : "Device"}</dt>
+                <dd className="ellipsis" title={currentEntry ? cwd : currentHistory?.deviceName}>
+                  {currentEntry ? crumb[crumb.length - 1] || cwd : currentHistory?.deviceName}
+                </dd>
               </div>
               {currentEntry && (
-                <div className="df-info-row">
-                  <span>Modified</span>
-                  <b>{whenLabel(currentEntry.modifiedMs)}</b>
+                <div>
+                  <dt>Modified</dt>
+                  <dd>{whenLabel(currentEntry.modifiedMs)}</dd>
                 </div>
               )}
-              <h3>Quick Actions</h3>
-              {renaming ? (
-                <div className="df-rename">
-                  <input
-                    className="df-input"
-                    aria-label="Rename file"
-                    value={nextName}
-                    onChange={(event) => setNextName(event.target.value)}
-                  />
+            </dl>
+            {currentEntry && (
+              <div className="menu-list">
+                {renaming ? (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      className="field"
+                      aria-label="Rename file"
+                      autoFocus
+                      value={nextName}
+                      onChange={(event) => setNextName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") rename();
+                        if (event.key === "Escape") setRenaming(false);
+                      }}
+                    />
+                    <button type="button" className="btn btn-primary" onClick={rename}>
+                      Save
+                    </button>
+                  </div>
+                ) : (
                   <button
                     type="button"
-                    className="df-btn df-btn-primary df-btn-sm"
-                    onClick={rename}
+                    className="menu-item"
+                    onClick={() => {
+                      setNextName(currentName);
+                      setRenaming(true);
+                    }}
                   >
-                    Save
+                    <Pencil size={14} /> Rename
                   </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="df-action"
-                  disabled={!currentPath}
-                  onClick={() => {
-                    setNextName(currentName);
-                    setRenaming(true);
-                  }}
-                >
-                  <span>Rename</span>
-                </button>
-              )}
-              <button type="button" className="df-action" onClick={copyPath}>
-                <Copy size={14} /> Copy path
-              </button>
-              {confirmDelete ? (
-                <button
-                  type="button"
-                  className="df-action danger"
-                  onClick={remove}
-                >
-                  Confirm delete
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="df-action danger"
-                  disabled={!currentPath}
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  <Trash2 size={14} /> Delete
-                </button>
-              )}
-            </>
-          ) : (
-            <EmptyState
-              compact
-              icon={<FileText size={22} />}
-              title="File details"
-            >
-              Select a file to view its information and available actions.
-            </EmptyState>
-          )}
-        </aside>
-      </div>
-    </div>
+                )}
+                {confirmDelete ? (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button type="button" className="menu-item confirm grow" onClick={remove}>
+                      <Trash2 size={14} /> Delete “{currentName}”
+                    </button>
+                    <button type="button" className="btn" onClick={() => setConfirmDelete(false)}>
+                      Keep
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" className="menu-item destructive" onClick={() => setConfirmDelete(true)}>
+                    <Trash2 size={14} /> Delete…
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <EmptyState compact icon={<FileText size={18} />} title="No selection">
+            Select an item to see details.
+          </EmptyState>
+        )}
+      </aside>
+    </Page>
   );
 };
+
+const SCOPE_LABEL: Record<Scope, string> = {
+  browse: "Files",
+  recent: "Recent",
+  images: "Images",
+  videos: "Videos",
+  documents: "Documents",
+  music: "Music",
+  archives: "Archives",
+};
+
+function FileIcon({ name, size }: { name: string; size: number }) {
+  const ext = extOf(name);
+  const Icon = KINDS.images.includes(ext)
+    ? ImageIcon
+    : KINDS.videos.includes(ext)
+      ? Video
+      : KINDS.music.includes(ext)
+        ? Music
+        : KINDS.archives.includes(ext)
+          ? FileArchive
+          : FileText;
+  return <Icon size={size} strokeWidth={size > 20 ? 1.4 : 1.8} />;
+}
 
 function buildPath(cwd: string, index: number): string {
   const raw = cwd.split(/[/\\]/);
@@ -877,7 +762,7 @@ function buildPath(cwd: string, index: number): string {
   return kept.join("/") || "/";
 }
 
-function NavButton({
+function SourceButton({
   icon,
   label,
   on,
@@ -889,12 +774,9 @@ function NavButton({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      className={on ? "df-loc on" : "df-loc"}
-      onClick={onClick}
-    >
-      {icon} {label}
+    <button type="button" className="source" aria-current={on} onClick={onClick}>
+      {icon}
+      <span>{label}</span>
     </button>
   );
 }
@@ -902,20 +784,14 @@ function NavButton({
 function Empty({ query, recent }: { query: string; recent?: boolean }) {
   return (
     <EmptyState
-      icon={<Folder size={22} />}
-      title={
-        query
-          ? "No matching files"
-          : recent
-            ? "No files yet"
-            : "This folder is empty"
-      }
+      icon={<Folder size={20} />}
+      title={query ? "No matches" : recent ? "No files yet" : "Empty folder"}
     >
       {query
         ? `Nothing matches “${query}”.`
         : recent
-          ? "Send or receive a file and it will show up here."
-          : "Open another folder, or create one."}
+          ? "Sent and received files appear here."
+          : "Nothing in here yet."}
     </EmptyState>
   );
 }

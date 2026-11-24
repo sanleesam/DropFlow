@@ -2,6 +2,16 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 
+// Platform hint for chrome-dependent spacing (traffic lights, scrollbars).
+{
+  const probe = `${navigator.userAgent} ${navigator.platform}`;
+  document.documentElement.dataset.platform = /Mac/i.test(probe)
+    ? "mac"
+    : /Win/i.test(probe)
+      ? "windows"
+      : "linux";
+}
+
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { message: string | null }
@@ -16,12 +26,12 @@ class AppErrorBoundary extends React.Component<
   render() {
     if (this.state.message) {
       return (
-        <div className="df-v2-fatal" role="alert">
+        <div className="fatal" role="alert">
           <h1>Let's try that again.</h1>
           <p>{this.state.message}</p>
           <button
             type="button"
-            className="df-btn df-btn-primary"
+            className="btn btn-primary"
             onClick={() => window.location.reload()}
           >
             Reload DropFlow
@@ -33,10 +43,17 @@ class AppErrorBoundary extends React.Component<
   }
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <AppErrorBoundary>
-      <App />
-    </AppErrorBoundary>
-  </React.StrictMode>,
-);
+async function boot() {
+  // Design preview: plain browser on the dev server only. Stripped from builds.
+  if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) {
+    (await import("./dev/preview")).installPreview();
+  }
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <AppErrorBoundary>
+        <App />
+      </AppErrorBoundary>
+    </React.StrictMode>,
+  );
+}
+void boot();

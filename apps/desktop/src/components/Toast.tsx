@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Glass } from "../ui/glass/LiquidGlass";
 import {
   AlertCircle,
   CheckCircle2,
@@ -33,20 +34,21 @@ export default function Toast({ toast, onDismiss }: ToastProps) {
     return () => clearTimeout(timer);
   }, [id, duration, onDismiss]);
   return (
-    <div
+    <Glass
+      size="md"
       role={variant === "error" || variant === "warning" ? "alert" : "status"}
-      className={`df-toast ${variant}`}
+      className={`toast ${variant}`}
     >
-      <Icon size={20} aria-hidden="true" />
-      <p className="df-grow">{message}</p>
+      <Icon size={17} aria-hidden="true" />
+      <p>{message}</p>
       <button
         type="button"
-        className="df-quiet"
+        className="icon-btn"
         onClick={() => onDismiss(id)}
         aria-label="Dismiss notification"
       >
-        <X size={16} />
+        <X size={14} />
       </button>
-    </div>
+    </Glass>
   );
 }
