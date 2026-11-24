@@ -23,7 +23,9 @@ data class UserPreferences(
     val autoOpenCompleted: Boolean,
     val accentColor: String,
     val reduceMotion: Boolean = false,
-    val updateChannel: String = "alpha"
+    val updateChannel: String = "alpha",
+    val themeMode: String = "system",
+    val glassStyle: String = "liquid"
 )
 
 class UserPreferencesRepository(private val context: Context) {
@@ -38,6 +40,8 @@ class UserPreferencesRepository(private val context: Context) {
         val ACCENT_COLOR = stringPreferencesKey("accent_color")
         val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
         val UPDATE_CHANNEL = stringPreferencesKey("android_update_channel")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
+        val GLASS_STYLE = stringPreferencesKey("glass_style")
     }
 
     val userPreferencesFlow: Flow<UserPreferences> = context.dataStore.data.map { preferences ->
@@ -55,7 +59,9 @@ class UserPreferencesRepository(private val context: Context) {
             accentColor = preferences[PreferencesKeys.ACCENT_COLOR] ?: "blue",
             reduceMotion = preferences[PreferencesKeys.REDUCE_MOTION] ?: false,
             updateChannel = preferences[PreferencesKeys.UPDATE_CHANNEL]
-                ?: defaultChannel
+                ?: defaultChannel,
+            themeMode = preferences[PreferencesKeys.THEME_MODE] ?: "system",
+            glassStyle = preferences[PreferencesKeys.GLASS_STYLE] ?: "liquid"
         )
     }
 
@@ -106,6 +112,14 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun updateReduceMotion(value: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.REDUCE_MOTION] = value }
+    }
+
+    suspend fun updateThemeMode(value: String) {
+        context.dataStore.edit { it[PreferencesKeys.THEME_MODE] = value }
+    }
+
+    suspend fun updateGlassStyle(value: String) {
+        context.dataStore.edit { it[PreferencesKeys.GLASS_STYLE] = value }
     }
 
     suspend fun updateChannel(value: String) {

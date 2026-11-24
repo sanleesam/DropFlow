@@ -1,5 +1,8 @@
 package com.dropflow.android.ui.settings
 
+import com.dropflow.android.ui.glass.GlassStyle
+import com.dropflow.android.ui.theme.ThemeMode
+
 data class SettingsUiState(
     val deviceName: String = "",
     val requireConfirmation: Boolean = true,
@@ -7,5 +10,7 @@ data class SettingsUiState(
     val autoOpenCompleted: Boolean = false,
     val accentColor: String = "blue",
     val reduceMotion: Boolean = false,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val glassStyle: GlassStyle = GlassStyle.LIQUID,
     val downloadDirectory: String = "/storage/emulated/0/Download/DropFlow"
 )

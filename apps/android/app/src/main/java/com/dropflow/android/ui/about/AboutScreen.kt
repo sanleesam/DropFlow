@@ -1,57 +1,67 @@
 package com.dropflow.android.ui.about
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.dropflow.android.R
-import com.dropflow.android.ui.components.*
-import com.dropflow.android.ui.theme.*
+import com.dropflow.android.ui.components.IconTile
+import com.dropflow.android.ui.components.ListCard
+import com.dropflow.android.ui.components.ListRow
+import com.dropflow.android.ui.components.Page
+import com.dropflow.android.ui.components.RowDivider
+import com.dropflow.android.ui.components.SectionFooter
+import com.dropflow.android.ui.components.Tag
+import com.dropflow.android.ui.components.Tone
+import com.dropflow.android.ui.components.sectionGap
+import com.dropflow.android.ui.navigation.Screen
+import com.dropflow.android.ui.theme.DropFlowType
+import com.dropflow.android.ui.theme.Palette
 
 @Composable
 fun AboutScreen(viewModel: AboutViewModel, modifier: Modifier = Modifier) {
     val state by viewModel.uiState.collectAsState()
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        item { PageIntro("ANDROID", "About DropFlow", "Send files. Simply.") }
-        item {
-            GlassCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Image(painterResource(R.drawable.ic_dropflow_logo), "DropFlow", Modifier.size(96.dp))
-                    Text("DropFlow", color = TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
-                    StatusPill("ANDROID · ${state.appVersion}")
-                    Text(state.buildChannel, color = TextMuted, fontSize = 12.sp)
+    val colors = Palette
+    Page(Screen.About.title, modifier) {
+        item("identity") {
+            ListCard {
+                Column(Modifier.fillMaxWidth().padding(vertical = 22.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Image(painterResource(R.drawable.ic_dropflow_logo), "DropFlow", Modifier.size(84.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Text("DropFlow", style = DropFlowType.title, color = colors.label)
+                    Tag("Android ${state.appVersion}", tone = Tone.Accent)
+                    Text(state.buildChannel, style = DropFlowType.caption, color = colors.label3)
                 }
             }
         }
-        item { AboutFeature(Icons.Default.Wifi, "Your network. Your files.",
-            "Send directly to DropFlow on Android, macOS and Windows over the same Wi-Fi. No accounts or cloud uploads.") }
-        item { AboutFeature(Icons.Default.VerifiedUser, "Checked on arrival.",
-            "Incoming files are verified before they appear in Downloads / DropFlow. You choose which transfers to accept.") }
-        item { Text("Local-first sharing. Thoughtfully simple.", color = TextMuted, fontSize = 12.sp) }
-    }
-}
-
-@Composable
-private fun AboutFeature(icon: ImageVector, title: String, description: String) {
-    GlassCard(Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(18.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            IconTile(icon)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(title, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text(description, color = TextSecondary, fontSize = 13.sp, lineHeight = 21.sp)
+        sectionGap("gap-features")
+        item("features") {
+            ListCard {
+                ListRow("Your network, your files", subtitle = "Straight to Android, macOS and Windows on your Wi‑Fi. No accounts, no cloud.",
+                    subtitleMaxLines = 2, leading = { IconTile(Icons.Rounded.Wifi, tone = Tone.Accent) })
+                RowDivider()
+                ListRow("Checked on arrival", subtitle = "Verified before it reaches Downloads/DropFlow. You choose what to accept.",
+                    subtitleMaxLines = 2, leading = { IconTile(Icons.Rounded.VerifiedUser, tone = Tone.Green) })
             }
+        }
+        item("foot") {
+            SectionFooter("Local-first sharing.", Modifier.padding(top = 10.dp), color = colors.label3)
         }
     }
 }

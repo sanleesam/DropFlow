@@ -6,6 +6,8 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
 import com.dropflow.android.storage.UserPreferencesRepository
+import com.dropflow.android.ui.glass.GlassStyle
+import com.dropflow.android.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,7 +30,9 @@ class SettingsViewModel(
                     askBeforeOverwrite = prefs.askBeforeOverwrite,
                     autoOpenCompleted = prefs.autoOpenCompleted,
                     accentColor = prefs.accentColor,
-                    reduceMotion = prefs.reduceMotion
+                    reduceMotion = prefs.reduceMotion,
+                    themeMode = ThemeMode.fromId(prefs.themeMode),
+                    glassStyle = GlassStyle.fromId(prefs.glassStyle)
                 )
             }
         }
@@ -66,6 +70,14 @@ class SettingsViewModel(
 
     fun updateReduceMotion(value: Boolean) {
         viewModelScope.launch { userPreferencesRepository.updateReduceMotion(value) }
+    }
+
+    fun updateThemeMode(value: ThemeMode) {
+        viewModelScope.launch { userPreferencesRepository.updateThemeMode(value.id) }
+    }
+
+    fun updateGlassStyle(value: GlassStyle) {
+        viewModelScope.launch { userPreferencesRepository.updateGlassStyle(value.id) }
     }
 
     companion object {

@@ -1,30 +1,63 @@
 package com.dropflow.android.ui.settings
 
 import android.content.Intent
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Science
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
-import com.dropflow.android.ui.components.*
-import com.dropflow.android.ui.theme.*
 import com.dropflow.android.BuildConfig
+import com.dropflow.android.ui.components.ButtonStyle
+import com.dropflow.android.ui.components.CapsuleButton
+import com.dropflow.android.ui.components.IconTile
+import com.dropflow.android.ui.components.ListCard
+import com.dropflow.android.ui.components.ListRow
+import com.dropflow.android.ui.components.Page
+import com.dropflow.android.ui.components.RowDivider
+import com.dropflow.android.ui.components.SectionFooter
+import com.dropflow.android.ui.components.SectionHeader
+import com.dropflow.android.ui.components.Segmented
+import com.dropflow.android.ui.components.Tag
+import com.dropflow.android.ui.components.ToggleSwitch
+import com.dropflow.android.ui.components.Tone
+import com.dropflow.android.ui.components.sectionGap
+import com.dropflow.android.ui.glass.GlassMode
+import com.dropflow.android.ui.glass.GlassStyle
+import com.dropflow.android.ui.glass.LocalGlassMode
+import com.dropflow.android.ui.navigation.Screen
+import com.dropflow.android.ui.theme.DropFlowType
+import com.dropflow.android.ui.theme.Palette
+import com.dropflow.android.ui.theme.ThemeMode
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, onUpdates: () -> Unit, modifier: Modifier = Modifier) {
@@ -32,103 +65,125 @@ fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, onUpdates:
     var draft by rememberSaveable(state.deviceName) { mutableStateOf(state.deviceName) }
     val keyboard = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
+    val colors = Palette
+    val glassMode = LocalGlassMode.current
     val canSave = draft.trim().isNotEmpty() && draft.trim() != state.deviceName
     val save = { if (canSave) { viewModel.updateDeviceName(draft); keyboard?.hide() }; Unit }
-    LazyColumn(modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        item { PageIntro("PREFERENCES", "Settings", "Make DropFlow fit the way you work.") }
-        item {
-            SettingsGroup(Icons.Default.Badge, "Device identity") {
-                Text("This is how you appear on nearby devices.", color = TextSecondary, fontSize = 13.sp)
-                OutlinedTextField(value = draft, onValueChange = { if (it.length <= 60) draft = it },
-                    label = { Text("Device name") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { save() }),
-                    supportingText = { if (draft.isBlank()) Text("Enter a name to save.") }, isError = draft.isBlank())
-                PrimaryAction("Save name", Icons.Default.Check, save, enabled = canSave)
+    Page(Screen.Settings.title, modifier) {
+        item("device-head") { SectionHeader("This Device") }
+        item("device") {
+            ListCard {
+                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 10.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Name", style = DropFlowType.body, fontWeight = FontWeight.Medium, color = colors.label)
+                    BasicTextField(draft, { if (it.length <= 60) draft = it }, singleLine = true,
+                        textStyle = DropFlowType.body.copy(color = colors.label2, textAlign = TextAlign.End),
+                        cursorBrush = SolidColor(colors.accent),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { save() }),
+                        modifier = Modifier.weight(1f).semantics { contentDescription = "Device name" })
+                    if (canSave) CapsuleButton("Save", save, style = ButtonStyle.Accent)
+                }
             }
+        }
+        item("device-foot") {
+            SectionFooter(if (draft.isBlank()) "Enter a name to save." else "Shown to nearby devices.",
+                Modifier.padding(top = 6.dp), color = if (draft.isBlank()) colors.red else colors.label2)
+        }
+        sectionGap("gap-receiving")
+        item("receiving-head") { SectionHeader("Receiving") }
+        item("receiving") {
+            ListCard {
+                ListRow("Ask before accepting", trailing = {
+                    ToggleSwitch(state.requireConfirmation, viewModel::updateRequireConfirmation, "Ask before accepting")
+                })
+                RowDivider(12.dp)
+                ListRow("Save to", trailing = {
+                    Text("Downloads/DropFlow", style = DropFlowType.body, color = colors.label2)
+                })
+            }
+        }
+        item("receiving-foot") {
+            SectionFooter(if (state.requireConfirmation) "Verified files keep their folders. Same names save as copies."
+                else "Anyone who can reach this device can send without asking.",
+                Modifier.padding(top = 6.dp), color = if (state.requireConfirmation) colors.label2 else colors.orange)
         }
         if (BuildConfig.NEARBY_LAB) {
-            item {
-                SettingsGroup(Icons.Default.Wifi, "Nearby Link · Experimental") {
-                    Text("Test a direct link to Windows with synthetic data. Open the lab to choose the connection mode and turn the test on or off.",
-                        color = TextSecondary, fontSize = 13.sp)
-                    OutlinedButton(onClick = {
-                        context.startActivity(Intent().setClassName(context, "${context.packageName}.nearby.NearbyLinkLabActivity"))
-                    }) { Text("Open Nearby Link lab") }
+            sectionGap("gap-nearby")
+            item("nearby-head") { SectionHeader("Nearby Link", badge = { Tag("Experimental", tone = Tone.Orange) }) }
+            item("nearby") {
+                ListCard {
+                    ListRow("Open Lab", subtitle = "Direct link to Windows · synthetic data",
+                        leading = { IconTile(Icons.Rounded.Science, tone = Tone.Orange) },
+                        trailing = { Chevron() },
+                        onClick = {
+                            context.startActivity(Intent().setClassName(context, "${context.packageName}.nearby.NearbyLinkLabActivity"))
+                        })
                 }
             }
-        }
-        item {
-            SettingsGroup(Icons.Default.Shield, "Receiving files") {
-                SettingSwitch("Ask before receiving",
-                    if (state.requireConfirmation) "Review each incoming transfer before it starts."
-                    else "Anyone who can reach this device can send files without asking.",
-                    state.requireConfirmation, viewModel::updateRequireConfirmation)
+            item("nearby-foot") {
+                SectionFooter("Choose the mode and turn the test on inside the lab.", Modifier.padding(top = 6.dp))
             }
         }
-        item {
-            SettingsGroup(Icons.Default.FolderOpen, "Downloads") {
-                StatusPill("Downloads / DropFlow")
-                Text("Verified files keep their folders here. Files with the same name are saved as separate copies.",
-                    color = TextSecondary, fontSize = 13.sp, lineHeight = 20.sp)
-            }
-        }
-        item {
-            GlassCard(Modifier.fillMaxWidth()) {
-                TextButton(onClick = onUpdates, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
-                    Icon(Icons.Default.SystemUpdate, null, tint = IcyBlue)
-                    Spacer(Modifier.width(12.dp))
-                    Text("Updates", modifier = Modifier.weight(1f), color = TextPrimary)
-                    Icon(Icons.Default.ChevronRight, null, tint = TextMuted)
+        sectionGap("gap-appearance")
+        item("appearance-head") { SectionHeader("Appearance") }
+        item("appearance") {
+            ListCard {
+                SegmentRow("Theme", null) {
+                    Segmented(ThemeMode.entries.map { it to it.label }, state.themeMode, viewModel::updateThemeMode,
+                        Modifier.width(204.dp), label = "Theme")
                 }
-            }
-        }
-        item {
-            SettingsGroup(Icons.Default.Palette, "Appearance") {
-                SettingSwitch("Reduce animations", "Keep discovery calm and still.", state.reduceMotion, viewModel::updateReduceMotion)
-            }
-        }
-        item {
-            GlassCard(Modifier.fillMaxWidth()) {
-                TextButton(onClick = onAbout, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
-                    Icon(Icons.Default.Info, null, tint = IcyBlue)
-                    Spacer(Modifier.width(12.dp))
-                    Text("About DropFlow", modifier = Modifier.weight(1f), color = TextPrimary)
-                    Icon(Icons.Default.ChevronRight, null, tint = TextMuted)
+                RowDivider(12.dp)
+                SegmentRow("Glass", glassDescription(glassMode, state.glassStyle)) {
+                    Segmented(GlassStyle.entries.map { it to it.label }, state.glassStyle, viewModel::updateGlassStyle,
+                        Modifier.width(204.dp), label = "Glass")
                 }
+                RowDivider(12.dp)
+                ListRow("Reduce motion", trailing = {
+                    ToggleSwitch(state.reduceMotion, viewModel::updateReduceMotion, "Reduce motion")
+                })
             }
         }
-        item {
-            Text("Keep DropFlow open while sharing. Devices must be connected to the same Wi-Fi network.",
-                color = TextMuted, fontSize = 12.sp, lineHeight = 19.sp)
+        item("appearance-foot") {
+            SectionFooter("Android's animation settings are always respected.", Modifier.padding(top = 6.dp))
+        }
+        sectionGap("gap-more")
+        item("more") {
+            ListCard {
+                ListRow("Updates", leading = { IconTile(Icons.Rounded.SystemUpdate, tone = Tone.Accent) },
+                    trailing = { Chevron() }, onClick = onUpdates)
+                RowDivider()
+                ListRow("About DropFlow", leading = { IconTile(Icons.Rounded.Info, tone = Tone.Neutral) },
+                    trailing = { Chevron() }, onClick = onAbout)
+            }
+        }
+        item("foot") {
+            SectionFooter("Keep DropFlow open while sharing. Both devices need the same Wi‑Fi.",
+                Modifier.padding(top = 10.dp), color = colors.label3)
         }
     }
 }
 
 @Composable
-private fun SettingsGroup(icon: ImageVector, title: String, content: @Composable ColumnScope.() -> Unit) {
-    GlassCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(icon, null, tint = IcyBlue, modifier = Modifier.size(20.dp))
-                Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            }
-            content()
-        }
-    }
+private fun Chevron() {
+    Icon(Icons.Rounded.ChevronRight, null, tint = Palette.label3, modifier = Modifier.size(20.dp))
 }
 
 @Composable
-private fun SettingSwitch(title: String, description: String, checked: Boolean,
-    onChange: (Boolean) -> Unit, enabled: Boolean = true) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text(description, color = TextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
+private fun SegmentRow(title: String, description: String?, control: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = DropFlowType.body, fontWeight = FontWeight.Medium, color = Palette.label)
+            if (description != null) Text(description, style = DropFlowType.caption, color = Palette.label2)
         }
-        Switch(checked, onCheckedChange = onChange, enabled = enabled,
-            modifier = Modifier.minimumInteractiveComponentSize().semantics { contentDescription = title },
-            colors = SwitchDefaults.colors(checkedThumbColor = BackgroundDark, checkedTrackColor = IcyBlue))
+        control()
     }
+}
+
+private fun glassDescription(mode: GlassMode, style: GlassStyle): String = when (mode) {
+    GlassMode.LENS -> "Refracting"
+    GlassMode.BLUR -> if (style == GlassStyle.FROSTED) "Frosted" else "Frosted · lens needs Android 13"
+    GlassMode.FROST -> "Tinted · blur needs Android 12"
+    GlassMode.SOLID -> if (style == GlassStyle.SOLID) "Opaque" else "Opaque · high contrast"
 }
