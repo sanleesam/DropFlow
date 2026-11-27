@@ -11,8 +11,34 @@ changes the user's Wi-Fi or adds a relay.
 | 0 | Measure: datasets, `[Perf]` logs, device matrix, link baseline | Tooling done; hardware runs pending |
 | 1 | Wire-compatible quick wins | Done (below) |
 | 2 | DFP/1.1: batch streaming, resume, large manifests, peer notices ([spec](TRANSFER_PROTOCOL.md#7-dfp11-negotiated-features)) | Desktop done and tested end to end on one Mac; Android in progress |
-| 3 | Raise the ceiling: direct links (Nearby lab), best-path selection, slow-band hint | Planned; depends on Nearby hardware proof |
+| 3 | Raise the ceiling: a direct Wi-Fi link that bypasses a slow router ([spec](TRANSFER_PROTOCOL.md#75-direct-a-private-link-between-the-two-devices)) | Engine done and tested over loopback. Windows host and Android joiner being built; **no radio has been tested** |
 | 4 | Promote to Beta once the device matrix passes | See [RELEASE_PLAN.md](RELEASE_PLAN.md) |
+
+## Bypassing a slow router (direct link)
+
+Through a router every byte crosses the air twice, and a weak or distant router
+caps both hops. The only real fix is to take the router out of the data path.
+With **Direct link** turned on (off by default, experimental):
+
+1. The two devices find each other and agree on the transfer over the normal
+   network, as always. That part is a few kilobytes, so a slow router is fine.
+2. One device creates a private 5 GHz Wi-Fi network and the other joins it as
+   a second connection, keeping its normal Wi-Fi.
+3. The files move over that link. If it cannot be set up within about a
+   minute, the transfer carries on over the router instead.
+
+| Pair | Wireless direct link | State |
+| --- | --- | --- |
+| Windows ↔ Android | Windows hosts, the phone joins (Android 12+ with dual Wi-Fi) | Being built; untested on hardware |
+| Android ↔ Android | One phone hosts a local-only hotspot | Not built |
+| Mac ↔ Mac | Apple peer-to-peer (AWDL) | Probe only |
+| Mac ↔ Android, Mac ↔ Windows | macOS gives apps no Wi-Fi Direct. The Mac would have to leave its own Wi-Fi to join the other device's network, so it must be an explicit choice each time | Not built |
+
+What it cannot do: it still needs the two devices to see each other on some
+shared network first. Finding devices with no network at all needs Bluetooth
+discovery, which is not built.
+
+Expected, not measured: 30–80 MB/s on Wi-Fi 5 hardware at close range.
 
 ## What "faster" means here
 

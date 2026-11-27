@@ -83,8 +83,10 @@ still interoperate (unencrypted, clearly labelled) for one MINOR.
 - A Stable update channel next to Beta and Development.
 - Accessibility pass (keyboard, VoiceOver/Narrator/TalkBack, contrast).
 - Play Store or a documented direct-install path for Android.
-- Direct device-to-device link only if the hardware probes pass; it does not
-  block 1.0.
+- Direct link (a private Wi-Fi link that bypasses a slow router) stays an
+  opt-in experiment until it has passed on real Windows and Android
+  hardware; it does not block 1.0. Mac pairs need an explicit "Direct mode"
+  because a Mac has to leave its own Wi-Fi to join another device's network.
 
 ### 1.0: stable
 
