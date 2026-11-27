@@ -6,9 +6,16 @@ pub fn validate_request(meta: &TransferMetadata) -> Result<(), String> {
     if meta.session_id.is_empty() || meta.session_id.len() > 128 || meta.total_files == 0 || meta.total_files as usize != meta.files.len() {
         return Err("Invalid transfer session or file count".into());
     }
+    // These reach the window and the history file; a request may be megabytes.
+    if meta.sender_id.len() > 128 || meta.sender_name.len() > 256 || meta.sender_platform.len() > 64 {
+        return Err("Invalid sender details".into());
+    }
     let mut total = 0u64;
     let mut paths = HashSet::new();
     for (index, file) in meta.files.iter().enumerate() {
+        if file.relative_path.len() > 1024 {
+            return Err("A file path is too long".into());
+        }
         let path = sanitize_relative_path(&file.relative_path)?;
         // Received files never land in the folder that holds unfinished ones.
         let top = path.components().next().map(|part| part.as_os_str().to_string_lossy().to_lowercase());
@@ -49,6 +56,18 @@ mod tests {
         m.files[0].relative_path="../escape".into(); assert!(validate_request(&m).is_err());
         m=fixture(); m.files.push(m.files[0].clone()); m.total_files=2; m.total_size_bytes=6;
         m.files[1].file_index=1; assert!(validate_request(&m).is_err());
+    }
+    #[test]
+    fn oversized_names_are_rejected_before_they_reach_the_window() {
+        let mut m = fixture();
+        m.sender_name = "n".repeat(257);
+        assert!(validate_request(&m).is_err());
+        m = fixture();
+        m.sender_id = "i".repeat(129);
+        assert!(validate_request(&m).is_err());
+        m = fixture();
+        m.files[0].relative_path = format!("{}.txt", "p".repeat(1024));
+        assert!(validate_request(&m).is_err());
     }
     #[test]
     fn nothing_may_be_addressed_into_the_staging_folder() {

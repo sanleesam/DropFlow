@@ -248,10 +248,12 @@ impl Read for CancellableStream<'_> {
             if buffer.len() >= READ_BUFFER {
                 return self.read_socket(buffer);
             }
+            // Empty first: a failed fill must not make the previous one readable again.
+            self.read_start = 0;
+            self.read_end = 0;
             let mut own = std::mem::take(&mut self.read_buffer);
             let filled = self.read_socket(&mut own);
             self.read_buffer = own;
-            self.read_start = 0;
             self.read_end = filled?;
             if self.read_end == 0 {
                 return Ok(0);
@@ -527,6 +529,23 @@ mod tests {
         thread::sleep(Duration::from_millis(60));
         assert!(stream.pending_input().unwrap()); // a closed peer is also "something to read"
         assert_eq!(stream.read(&mut small).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_failed_read_never_replays_bytes_that_were_already_consumed() {
+        let (mut client, mut peer) = pair();
+        let mut stream =
+            CancellableStream::new(&mut client, Arc::new(AtomicBool::new(false))).unwrap();
+        stream.set_read_timeout(Some(Duration::from_millis(120))).unwrap();
+        peer.write_all(b"0123456789").unwrap();
+        let mut bytes = [0; 10];
+        stream.read_exact(&mut bytes).unwrap();
+        assert_eq!(stream.read(&mut bytes).unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert!(!stream.pending_input().unwrap());
+        peer.write_all(b"ab").unwrap();
+        let mut next = [0; 2];
+        stream.read_exact(&mut next).unwrap();
+        assert_eq!(&next, b"ab");
     }
 
     #[test]

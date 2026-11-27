@@ -151,6 +151,11 @@ byte for byte. Reference implementation: `apps/desktop/src-tauri/src/transfer_ma
 
 The sender never puts local paths in the request. `finalPath` is not sent.
 
+A request is read before anyone approves it, so receivers bound it while
+parsing: at most 16 feature names of at most 32 bytes, `senderId` ≤ 128 bytes,
+`senderName` ≤ 256, `senderPlatform` ≤ 64, each `relativePath` ≤ 1024. A
+request outside these limits is dropped.
+
 ### 7.2 Large manifests
 
 A request JSON over 64 KB is sent with tag `0x0C` instead of `0x01`. Its
@@ -198,6 +203,11 @@ then waits for the final `TRANSFER_ACK` (`ACK`). Differences from DFP/1:
 - Senders may group small frames into one socket write. Frame contents do not
   change.
 
+Destination folders are created when a file's header arrives, so a name
+conflict stops the transfer before anything is saved. Once every file is
+verified, saving is not interruptible: a cancel or a lost connection at that
+point no longer stops it, because stopping would leave the transfer half saved.
+
 Completion is unchanged: the receiver verifies every file, saves all of them,
 and only then sends the final `TRANSFER_ACK`. The sender reports success only
 after reading it. Nothing is published to the destination before the whole
@@ -228,6 +238,11 @@ same files again. A retry is a new session with a new session id.
 - The receiver accepts `resumeOffset` only if it is `0` or exactly the `o` it
   offered for that file. For `0` it discards what it had for that file. For `o`
   it appends, continuing the hash from the state it computed for the offer.
+
+Known limit until devices are authenticated (planned with encryption): the
+sender id is not verified, so an approved device that claims another sender's
+id and the same file names and sizes is told how much of that transfer is
+staged and the hash of it. It gains nothing it could not already send.
 
 Resume never trusts stored state: both sides hash the actual bytes they hold,
 and the whole-file digest is still verified at the end.

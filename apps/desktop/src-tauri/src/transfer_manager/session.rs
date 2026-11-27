@@ -461,8 +461,17 @@ fn send_inner(
 
     // Do not apply the short streaming timeout while a person is deciding.
     timeouts(stream, APPROVAL_TIMEOUT)?;
+    const NEEDS_UPDATE: &str =
+        "The other device needs a newer version of DropFlow to receive this many files at once.";
     let large = write_transfer_request(stream, &meta).map_err(|error| {
-        if error.starts_with("Too many files") { Fail::local(error) } else { Fail::network(error) }
+        if error.starts_with("Too many files") {
+            Fail::local(error)
+        } else if error.contains("TransferRequestLarge") {
+            // A peer that predates large manifests closes while we are still writing.
+            Fail::peer(NEEDS_UPDATE)
+        } else {
+            Fail::network(error)
+        }
     })?;
     let asked = Instant::now();
     on_event(SessionEvent::RequestSent);
@@ -470,7 +479,7 @@ fn send_inner(
     let (tag, payload) = read_reply(stream).map_err(|fail| {
         // A peer that predates large manifests drops the connection at once.
         if large && asked.elapsed() < Duration::from_secs(5) {
-            Fail::peer("The other device needs a newer version of DropFlow to receive this many files at once.")
+            Fail::peer(NEEDS_UPDATE)
         } else {
             fail
         }
@@ -511,9 +520,20 @@ fn send_inner(
     let mut session_bytes = 0u64;
     let mut resumed = 0u64;
     let mut last_peer_check = Instant::now();
+    let watch_peer = negotiated.batch;
+
+    // Has the receiver cancelled or failed? Cheap, and at most ten times a second.
+    let mut peer_check = move |stream: &mut CancellableStream<'_>| -> Result<(), Fail> {
+        if watch_peer && last_peer_check.elapsed() >= PEER_CHECK_EVERY {
+            last_peer_check = Instant::now();
+            check_peer(stream)?;
+        }
+        Ok(())
+    };
 
     for (index, file) in job.files.iter().enumerate() {
         check_cancel(cancel)?;
+        peer_check(stream)?;
         let name = file.relative_path.as_str();
         let mut source = File::open(&file.path).map_err(|e| {
             Fail::local(format!("Failed to open file for reading {}: {e}", file.path.display()))
@@ -526,6 +546,7 @@ fn send_inner(
             if entry.offset > 0 && entry.offset <= file.size_bytes {
                 let ours = hash_prefix(&mut source, entry.offset, chunks.payload(), || {
                     check_cancel(cancel)?;
+                    peer_check(stream)?;
                     out.keepalive(stream)
                 })?;
                 match ours {
@@ -580,10 +601,7 @@ fn send_inner(
 
         while file_bytes < file.size_bytes {
             check_cancel(cancel)?;
-            if negotiated.batch && last_peer_check.elapsed() >= PEER_CHECK_EVERY {
-                last_peer_check = Instant::now();
-                check_peer(stream)?;
-            }
+            peer_check(stream)?;
             let buffer = chunks.payload();
             let limit = (file.size_bytes - file_bytes).min(buffer.len() as u64) as usize;
             let count = source
@@ -793,6 +811,15 @@ impl<'a> Staging<'a> {
 
     fn part(&self, index: u32) -> PathBuf {
         self.dir.join(format!("{index}.part"))
+    }
+
+    /// True when `folder` really is the staging root or lies inside it,
+    /// however its path was spelled.
+    fn contains(&self, folder: &Path) -> bool {
+        match (folder.canonicalize(), self.root.canonicalize()) {
+            (Ok(folder), Ok(root)) => folder.starts_with(root),
+            _ => true, // cannot tell: refuse
+        }
     }
 
     fn discard(&self) {
@@ -1035,6 +1062,25 @@ fn receive_inner(
 
         let relative = sanitize_relative_path(&header.relative_path).map_err(Fail::protocol)?;
         let target = verify_safe_target_path(receive_dir, &relative).map_err(Fail::protocol)?;
+        // Make the destination folder now, so a name conflict stops the
+        // transfer before anything is saved rather than half-way through saving.
+        if let Some(parent) = target.parent() {
+            // Compare real locations, not spellings: filesystems fold case and
+            // some Unicode, and Windows has short names. Checked on the part
+            // of the path that already exists, before anything is created.
+            let mut existing = parent;
+            while fs::symlink_metadata(existing).is_err() {
+                match existing.parent() {
+                    Some(up) => existing = up,
+                    None => break,
+                }
+            }
+            if stage.contains(existing) {
+                return Err(Fail::protocol("A file path uses a reserved folder name"));
+            }
+            fs::create_dir_all(parent)
+                .map_err(|e| Fail::disk("Failed to create the destination folder", e))?;
+        }
         let part = stage.part(index as u32);
 
         let offer = staged.remove(&(index as u32));
@@ -1150,11 +1196,18 @@ fn receive_inner(
             speed_bytes_per_sec: speed,
         }));
     }
+    // Last point at which this transfer can still be called off.
+    check_cancel(cancel)?;
     on_event(SessionEvent::Finishing);
 
-    // Acknowledge only after every verified file has been saved.
+    // Every file is verified. From here the transfer is finished as far as
+    // this device is concerned: a cancel or a vanished sender must not leave
+    // half of it saved, so neither is consulted again.
     for (index, target) in targets.iter().enumerate() {
-        keepalive(stream)?;
+        if negotiated.batch && last_write.elapsed() >= HEARTBEAT_EVERY {
+            let _ = stream.notify_peer(&frame_bytes(FrameTag::Heartbeat, b""));
+            last_write = Instant::now();
+        }
         // Recheck ancestors before publishing; never follow a destination link.
         let relative = target.strip_prefix(receive_dir).map_err(|e| Fail::local(e.to_string()))?;
         verify_safe_target_path(receive_dir, relative).map_err(Fail::protocol)?;
@@ -1165,10 +1218,10 @@ fn receive_inner(
         let saved = publish_received_file(&stage.part(index as u32), target).map_err(Fail::local)?;
         received[index].final_path = saved.to_string_lossy().into_owned();
     }
-    // The files are verified and saved. If the confirmation cannot be sent the
-    // sender will report a failure, but nothing is missing on this device.
-    if let Err(error) = write_response_frame(stream, FrameTag::TransferAck, "ACK") {
-        log::warn!("[Receiver] Files saved, but the confirmation was not sent: {error}");
+    // The files are saved. If the confirmation cannot be sent the sender will
+    // report a failure, but nothing is missing on this device.
+    if !stream.notify_peer(&frame_bytes(FrameTag::TransferAck, b"ACK")) {
+        log::warn!("[Receiver] Files saved, but the confirmation was not sent");
     }
 
     Ok(ReceiveSummary {

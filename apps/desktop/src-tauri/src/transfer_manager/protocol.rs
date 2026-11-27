@@ -85,8 +85,34 @@ pub struct TransferMetadata {
     pub total_size_bytes: u64,
     pub files: Vec<FileMetadata>,
     /// DFP/1.1 capabilities the sender offers. Older peers ignore the field.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "bounded_features")]
     pub features: Vec<String>,
+}
+
+pub const MAX_FEATURES: usize = 16;
+pub const MAX_FEATURE_NAME: usize = 32;
+
+/// A request is parsed before anyone approves it, so the capability list is
+/// bounded while it is read instead of after it has been allocated.
+fn bounded_features<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    struct Features;
+    impl<'de> serde::de::Visitor<'de> for Features {
+        type Value = Vec<String>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a short list of feature names")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<String>, A::Error> {
+            let mut features = Vec::new();
+            while let Some(name) = seq.next_element::<std::borrow::Cow<'de, str>>()? {
+                if features.len() == MAX_FEATURES || name.len() > MAX_FEATURE_NAME {
+                    return Err(serde::de::Error::custom("too many or too long feature names"));
+                }
+                features.push(name.into_owned());
+            }
+            Ok(features)
+        }
+    }
+    deserializer.deserialize_seq(Features)
 }
 
 /// JSON `TransferAccept` payload. Older receivers send the text `ACCEPTED`
@@ -585,6 +611,19 @@ mod tests {
         assert!(write_transfer_request(&mut large, &meta).unwrap());
         assert_eq!(large[5], FrameTag::TransferRequestLarge as u8);
         assert_eq!(read_transfer_request(&mut std::io::Cursor::new(large)).unwrap(), meta);
+    }
+
+    #[test]
+    fn a_request_cannot_inflate_memory_through_its_feature_list() {
+        let request = |features: String| {
+            format!(r#"{{"sessionId":"s","senderId":"d","senderName":"T","totalFiles":0,"totalSizeBytes":0,"files":[],"features":[{features}]}}"#)
+        };
+        let ok = request(r#""batch","resume""#.into());
+        assert_eq!(serde_json::from_str::<TransferMetadata>(&ok).unwrap().features, ["batch", "resume"]);
+        let many = request(vec![r#""""#; 5_000_000].join(","));
+        assert!(serde_json::from_str::<TransferMetadata>(&many).is_err());
+        let long = request(format!(r#""{}""#, "x".repeat(MAX_FEATURE_NAME + 1)));
+        assert!(serde_json::from_str::<TransferMetadata>(&long).is_err());
     }
 
     #[test]

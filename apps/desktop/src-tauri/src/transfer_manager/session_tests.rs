@@ -161,11 +161,20 @@ struct Options<'a> {
     /// Cancel the sender / receiver once this many session bytes have moved.
     cancel_sender_at: Option<u64>,
     cancel_receiver_at: Option<u64>,
+    /// Cancel the receiver once every file is verified and saving has begun.
+    cancel_receiver_while_saving: bool,
 }
 
 impl<'a> Options<'a> {
     fn new(registry: &'a StagingRegistry) -> Self {
-        Self { allow_features: true, link: Link::Direct, registry, cancel_sender_at: None, cancel_receiver_at: None }
+        Self {
+            allow_features: true,
+            link: Link::Direct,
+            registry,
+            cancel_sender_at: None,
+            cancel_receiver_at: None,
+            cancel_receiver_while_saving: false,
+        }
     }
 }
 
@@ -184,7 +193,11 @@ fn run(job: &SendJob, dst: &Path, options: Options<'_>) -> Run {
                 staging: options.registry,
             };
             let limit = options.cancel_receiver_at;
+            let while_saving = options.cancel_receiver_while_saving;
             receive_session(&mut stream, &meta, &setup, &cancel, &mut |event| {
+                if while_saving && matches!(event, SessionEvent::Finishing) {
+                    cancel.store(true, Ordering::Relaxed);
+                }
                 if let (SessionEvent::Progress(progress), Some(limit)) = (&event, limit) {
                     if progress.session_bytes >= limit {
                         cancel.store(true, Ordering::Relaxed);
@@ -398,22 +411,34 @@ fn thousands_of_files_fit_in_one_transfer() {
 #[test]
 fn a_peer_that_predates_large_manifests_gets_a_clear_explanation() {
     let sandbox = Sandbox::new();
-    let names: Vec<String> = (0..3000).map(|i| format!("IMG_{i:05}.jpg")).collect();
-    let files: Vec<(&str, Vec<u8>)> = names.iter().map(|name| (name.as_str(), vec![1])).collect();
-    let job = sandbox.job(&files, true);
-    let (mut sender_socket, mut socket) = connect(Link::Direct);
-    let peer = thread::spawn(move || {
-        perform_incoming_handshake(&mut socket).unwrap();
-        let mut header = [0u8; 10];
-        socket.read_exact(&mut header).unwrap();
-        assert_eq!(header[5], 0x0C); // an original peer fails here: unknown frame tag
-        let _ = socket.shutdown(Shutdown::Both);
-    });
-    let cancel = Arc::new(AtomicBool::new(false));
-    let mut stream = CancellableStream::new(&mut sender_socket, cancel.clone()).unwrap();
-    let error = send_session(&mut stream, &job, &cancel, &mut |_| {}).unwrap_err();
-    assert!(error.contains("newer version"), "{error}");
-    peer.join().unwrap();
+    // The second size is larger than the socket buffers, so the sender is
+    // still writing the request when the peer goes away.
+    for count in [3000usize, 40_000] {
+        let files: Vec<SendFile> = (0..count)
+            .map(|i| SendFile { path: sandbox.src().join("x"), relative_path: format!("Album/IMG_{i:06}.jpg"), size_bytes: 1 })
+            .collect();
+        let job = SendJob {
+            session_id: "tx-large".into(),
+            sender_id: "sender-device".into(),
+            sender_name: "Sender".into(),
+            sender_platform: "Test".into(),
+            files,
+            offer_features: true,
+        };
+        let (mut sender_socket, mut socket) = connect(Link::Direct);
+        let peer = thread::spawn(move || {
+            perform_incoming_handshake(&mut socket).unwrap();
+            let mut header = [0u8; 10];
+            socket.read_exact(&mut header).unwrap();
+            assert_eq!(header[5], 0x0C); // an original peer fails here: unknown frame tag
+            drop(socket);
+        });
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut stream = CancellableStream::new(&mut sender_socket, cancel.clone()).unwrap();
+        let error = send_session(&mut stream, &job, &cancel, &mut |_| {}).unwrap_err();
+        assert!(error.contains("newer version"), "{count} files: {error}");
+        peer.join().unwrap();
+    }
 }
 
 #[test]
@@ -536,6 +561,85 @@ fn existing_files_are_never_overwritten() {
     assert_eq!(fs::read(sandbox.dst().join("a.txt")).unwrap(), b"mine");
     assert_eq!(fs::read(&received.files[0].final_path).unwrap(), b"theirs");
     assert!(received.files[0].final_path.ends_with("a (1).txt"));
+}
+
+#[test]
+fn a_cancel_after_verification_cannot_leave_a_transfer_half_saved() {
+    for offer in [true, false] {
+        let sandbox = Sandbox::new();
+        let registry = StagingRegistry::default();
+        let names: Vec<String> = (0..400).map(|i| format!("set/IMG_{i:04}.jpg")).collect();
+        let files: Vec<(&str, Vec<u8>)> =
+            names.iter().enumerate().map(|(i, name)| (name.as_str(), bytes(64, i as u8))).collect();
+        let job = sandbox.job(&files, offer);
+        let mut options = Options::new(&registry);
+        options.cancel_receiver_while_saving = true;
+        let result = run(&job, &sandbox.dst(), options);
+        // Verified means delivered: every file is there and the sender is told so.
+        assert_eq!(result.received.unwrap().files.len(), 400, "offer={offer}");
+        result.sent.unwrap();
+        sandbox.assert_received(&files);
+    }
+}
+
+#[test]
+fn a_name_that_is_both_a_file_and_a_folder_is_resolved_not_half_saved() {
+    let sandbox = Sandbox::new();
+    let registry = StagingRegistry::default();
+    let files = vec![
+        ("first.txt", b"1".to_vec()),
+        ("notes", b"a file called notes".to_vec()),
+        ("notes/inner.txt", b"inside the folder".to_vec()),
+    ];
+    // The sender's own validation would allow this manifest too.
+    let job = sandbox.job(&[("first.txt", b"1".to_vec()), ("n", b"a file called notes".to_vec()), ("notes/inner.txt", b"inside the folder".to_vec())], true);
+    let mut job = job;
+    job.files[1].relative_path = "notes".into();
+    let received = run(&job, &sandbox.dst(), Options::new(&registry)).received.unwrap();
+    assert_eq!(fs::read(sandbox.dst().join("notes/inner.txt")).unwrap(), files[2].1);
+    assert!(received.files[1].final_path.ends_with("notes (1)"));
+    assert_eq!(fs::read(&received.files[1].final_path).unwrap(), files[1].1);
+}
+
+#[test]
+fn a_destination_blocked_by_an_existing_file_fails_before_anything_is_saved() {
+    let sandbox = Sandbox::new();
+    let registry = StagingRegistry::default();
+    fs::write(sandbox.dst().join("Photos"), b"not a folder").unwrap();
+    let job = sandbox.job(&[("a.txt", b"a".to_vec()), ("Photos/1.jpg", b"jpg".to_vec())], true);
+    for _ in 0..2 {
+        let result = run(&job, &sandbox.dst(), Options::new(&registry));
+        assert!(result.sent.is_err());
+        assert!(!result.received.unwrap_err().resumable);
+        let left: Vec<_> = fs::read_dir(sandbox.dst()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left, ["Photos"], "a retry must not pile up copies");
+    }
+}
+
+#[test]
+fn look_alike_spellings_of_the_staging_folder_are_refused_where_they_alias_it() {
+    // Plain case differences are already refused when the request is validated.
+    for spelling in [".dropflow-\u{17f}taging", ".dropflow-\u{fb06}aging"] {
+        let sandbox = Sandbox::new();
+        let registry = StagingRegistry::default();
+        let staging = sandbox.dst().join(".dropflow-staging");
+        fs::create_dir_all(&staging).unwrap();
+        let aliases = fs::metadata(sandbox.dst().join(spelling)).is_ok();
+        let name = format!("{spelling}/k/0.part");
+        let mut job = sandbox.job(&[("placeholder", b"data".to_vec())], true);
+        job.files[0].relative_path = name.clone();
+        let result = run(&job, &sandbox.dst(), Options::new(&registry));
+        if aliases {
+            // This filesystem treats the spelling as the staging folder itself.
+            assert!(result.sent.is_err(), "{spelling} reached the staging folder");
+            assert!(result.received.is_err());
+        } else {
+            // A genuinely different folder is an ordinary destination.
+            result.sent.unwrap();
+            assert_eq!(fs::read(sandbox.dst().join(&name)).unwrap(), b"data");
+        }
+        assert!(!staging.join("k").exists());
+    }
 }
 
 #[test]
