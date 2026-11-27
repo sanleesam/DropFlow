@@ -1,18 +1,67 @@
 # Transfer speed: plan, measurement and results
 
-Branch `perf/transfer-quick-wins`. Goal: get DropFlow close to what the network
-link can actually carry, without weakening integrity checks, approval, or
-verified completion. Nothing here changes the user's Wi-Fi or adds a relay.
+Goal: get DropFlow close to what the network link can actually carry, without
+weakening integrity checks, approval, or verified completion. Nothing here
+changes the user's Wi-Fi or adds a relay.
 
 ## Phases
 
 | Phase | What | Status |
 | --- | --- | --- |
 | 0 | Measure: datasets, `[Perf]` logs, device matrix, link baseline | Tooling done; hardware runs pending |
-| 1 | Wire-compatible quick wins | Done on this branch (below) |
-| 2 | Negotiated protocol v2: batch stream, parallel streams for big files, optional compression, Android resume | Planned |
+| 1 | Wire-compatible quick wins | Done (below) |
+| 2 | DFP/1.1: batch streaming, resume, large manifests, peer notices ([spec](TRANSFER_PROTOCOL.md#7-dfp11-negotiated-features)) | Desktop done and tested end to end on one Mac; Android in progress |
 | 3 | Raise the ceiling: direct links (Nearby lab), best-path selection, slow-band hint | Planned; depends on Nearby hardware proof |
-| 4 | Roll out behind a Development toggle, then Beta | Planned |
+| 4 | Promote to Beta once the device matrix passes | See [RELEASE_PLAN.md](RELEASE_PLAN.md) |
+
+## What "faster" means here
+
+Two different limits, and only one of them was the software:
+
+- **Many files.** The original protocol stops after every file header and waits
+  for the receiver to answer. On Wi-Fi each wait is a round trip of several
+  milliseconds, plus whatever the receiver does before answering. A thousand
+  photos paid that a thousand times. DFP/1.1 `batch` removes the wait.
+- **One large file.** This was already limited by the link, not by DropFlow.
+  It gets no faster on the same Wi-Fi. Only a better link (Phase 3, Ethernet,
+  or a faster router) raises it.
+
+There was also a hard stop: the file list had to fit in 64 KB, which is roughly
+400 files. Larger selections failed outright. That limit is gone between
+DFP/1.1 peers.
+
+## Phase 2 results (one Mac, no radio involved)
+
+Measured 27 November 2026 on an Apple Silicon MacBook Pro, optimized build.
+These show what the software no longer costs. They are **not** Wi-Fi results.
+
+| Test | Before | After |
+| --- | ---: | ---: |
+| 500 files × 48 KiB, link with 2 ms latency each way | 3,334 ms | 123 ms (27×) |
+| Same, 5 ms each way | 7,039 ms | 142 ms (49×) |
+| Same, no added latency | 165 ms | 108 ms (1.5×) |
+| 1,000 files × 200 KiB, loopback, to disk | 210 MiB/s | 930 MiB/s |
+| 1 GiB file, loopback, to disk | 501 MiB/s | 2,125 MiB/s |
+| SHA-256 on Apple Silicon | 566 MiB/s | 2,991 MiB/s |
+
+The latency rows come from `cargo test --release --lib many_small_files_over_a_slow_link -- --ignored --nocapture`,
+which puts a delay between the two real engines. The delay does not limit
+bandwidth, so a real link adds the time it needs to carry the bytes to both
+columns. Expected on Wi-Fi: the per-file part (several ms × number of files)
+disappears; the bytes still take as long as the link needs. For a folder of
+photos on a 30 MB/s link that is roughly 4× faster; for thousands of small
+files it is more; for one big file it is unchanged.
+
+The large-file and hashing rows come from using the CPU's SHA-256 instructions
+on Apple Silicon. That matters on wired and very fast links, and for how long a
+resume takes to check what it already has.
+
+End-to-end check through the real desktop app (debug build, isolated profile,
+sender `examples/dfp_peer`): 1,000 + 100 files and a 1 GiB file received in
+both protocol modes and verified by SHA-256; a 1 GiB send killed part-way kept
+419 MiB and the retry sent only the remaining 605 MiB.
+
+Still unmeasured: every pair in the device matrix below, on real hardware.
 
 ## Phase 1 changes (no protocol change; old and new builds interoperate)
 
@@ -34,7 +83,7 @@ verified completion. Nothing here changes the user's Wi-Fi or adds a relay.
    platforms, in the same format. Timing starts after approval, so a person's
    decision time is never counted.
 
-Not done in Phase 1, on purpose: a sender read-ahead thread and a receiver
+Not done, on purpose: a sender read-ahead thread and a receiver
 write-behind thread. At Wi-Fi rates, the OS socket buffer already overlaps disk
 and hashing with the network. Reading and hashing 256 KiB takes well under 1 ms,
 while sending it at 50 MB/s takes about 5 ms. Add these only if Phase 0 shows the
@@ -104,8 +153,10 @@ Score = DropFlow MiB/s ÷ iperf3 MiB/s. Target for `large`: at least 80%.
 python3 scripts/transfer-bench.py perf dropflow.log android.log
 ```
 
-Run each case 3 times with the **current release** and with this branch, and
-keep the median. Record the Wi-Fi band (2.4/5/6 GHz) and link rate shown by the OS.
+Run each case 3 times with the **previous release** (`0.1.2-beta.21`, Android
+`0.2.0-alpha.5`) and with the new build, and keep the median. To compare on
+the same build, turn **Settings → Transfers → Faster transfers** off on either
+desktop: that forces the original exchange. Record the Wi-Fi band (2.4/5/6 GHz) and link rate shown by the OS.
 
 ### Results
 

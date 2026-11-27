@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Dropflow"
-version = "0.1.2-beta.21"
+version = "0.2.0-beta.22"
 dependencies = [
  "chrono",
  "flume",

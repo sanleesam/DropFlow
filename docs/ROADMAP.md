@@ -1,25 +1,24 @@
 # DropFlow Roadmap
 
-## Version 0.1
-- macOS app
-- Android app
-- Device discovery
-- Send files
-- Receive files
-- Transfer progress
+The plan, versions and dates are in [RELEASE_PLAN.md](RELEASE_PLAN.md).
 
-## Version 0.2
-- Folder transfers
-- Better UI
-- Better notifications
+## Done
+- macOS, Windows and Android apps; device discovery on the local network
+- Send and receive files and folders, with approval and verified completion
+- Transfer history, file browser, update channels
 
-## Version 0.3
-- Note transfer workflow
-- Custom folder names
-- Transfer history
+## 0.2 (in testing)
+- Liquid Glass interface
+- Faster engine (DFP/1.1): batch streaming, resume, large folders
 
-## Future
-- Mini PC server
-- Windows support
-- Clipboard sync
-- Resume interrupted transfers
+## 0.3
+- Encrypted connections and device pairing
+- Resume when receiving on Android
+
+## 0.4 and 1.0
+- Signed installers, Stable channel, accessibility pass
+- Stable 1.0
+
+## Later
+- Direct device-to-device link (no shared network)
+- Clipboard and note sharing
