@@ -11,10 +11,11 @@ See [the current policy](docs/VERSIONING.md). Published versions are not renamed
 Android's numeric `versionCode` only increases, including when moving from the
 legacy beta label to the next alpha product version.
 
-## Desktop — [0.2.0-dev.1] — 2026-11-27
+## Desktop — [0.2.0-dev.2] — 2026-11-27
 
 Development build. Not yet tested on physical devices; see
 `docs/RELEASE_PLAN.md` for what must pass before this becomes a Beta.
+(`0.2.0-dev.1` was tagged but not published: its Windows tests failed.)
 
 - DFP/1.1 engine with devices that support it: files stream without a pause
   between them, interrupted transfers continue, and a transfer is no longer
