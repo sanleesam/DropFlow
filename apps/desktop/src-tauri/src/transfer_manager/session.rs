@@ -42,7 +42,7 @@ const SPEED_WINDOW: Duration = Duration::from_secs(3);
 const FLUSH_AT: usize = 64 * 1024;
 const SMALL_FRAME: usize = 32 * 1024;
 const MAX_RESUME_ENTRIES: usize = 100_000;
-const STAGING_DIR: &str = ".dropflow-staging";
+pub const STAGING_DIR: &str = ".dropflow-staging";
 /// Interrupted data is kept this long for a retry, then removed.
 pub const STAGING_MAX_AGE: Duration = Duration::from_secs(3 * 24 * 60 * 60);
 

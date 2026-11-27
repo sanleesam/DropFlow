@@ -10,6 +10,11 @@ pub fn validate_request(meta: &TransferMetadata) -> Result<(), String> {
     let mut paths = HashSet::new();
     for (index, file) in meta.files.iter().enumerate() {
         let path = sanitize_relative_path(&file.relative_path)?;
+        // Received files never land in the folder that holds unfinished ones.
+        let top = path.components().next().map(|part| part.as_os_str().to_string_lossy().to_lowercase());
+        if top.as_deref() == Some(super::session::STAGING_DIR) {
+            return Err("A file path uses a reserved folder name".into());
+        }
         // Windows filesystem paths are case insensitive. Reject collisions on
         // every platform so the same request has consistent safe semantics.
         if file.file_index as usize != index || !paths.insert(path.to_string_lossy().to_lowercase()) {
@@ -44,6 +49,17 @@ mod tests {
         m.files[0].relative_path="../escape".into(); assert!(validate_request(&m).is_err());
         m=fixture(); m.files.push(m.files[0].clone()); m.total_files=2; m.total_size_bytes=6;
         m.files[1].file_index=1; assert!(validate_request(&m).is_err());
+    }
+    #[test]
+    fn nothing_may_be_addressed_into_the_staging_folder() {
+        for path in [".dropflow-staging/k/0.part", ".DropFlow-Staging/x", ".dropflow-staging"] {
+            let mut m = fixture();
+            m.files[0].relative_path = path.into();
+            assert!(validate_request(&m).is_err(), "{path}");
+        }
+        let mut m = fixture();
+        m.files[0].relative_path = "Folder/.dropflow-staging-notes.txt".into();
+        assert!(validate_request(&m).is_ok());
     }
     #[test]
     fn rejects_unapproved_file_headers() {

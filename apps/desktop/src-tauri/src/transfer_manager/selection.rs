@@ -18,6 +18,10 @@ pub fn expand_selection(paths: &[String]) -> Result<Vec<(PathBuf, String)>, Stri
             return Ok(());
         }
         if meta.is_dir() {
+            // Unfinished incoming data is not the person's content; never send it.
+            if path.file_name().is_some_and(|name| name == super::session::STAGING_DIR) {
+                return Ok(());
+            }
             let mut children = std::fs::read_dir(path)
                 .map_err(|e| format!("Cannot read folder {}: {e}", path.display()))?
                 .map(|entry| entry.map(|e| e.path()))
@@ -79,6 +83,9 @@ mod tests {
         let single =
             expand_selection(&[folder.join("a.txt").to_string_lossy().into_owned()]).unwrap();
         assert_eq!(single[0].1, "a.txt");
+        std::fs::create_dir_all(folder.join(".dropflow-staging/abc")).unwrap();
+        std::fs::write(folder.join(".dropflow-staging/abc/0.part"), b"partial").unwrap();
+        assert_eq!(expand_selection(&[folder.to_string_lossy().into_owned()]).unwrap().len(), 2);
         std::fs::create_dir_all(root.join("empty")).unwrap();
         assert!(expand_selection(&[root.join("empty").to_string_lossy().into_owned()]).is_err());
         #[cfg(unix)]
