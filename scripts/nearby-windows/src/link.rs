@@ -8,6 +8,9 @@
 //! lost\t<reason>                 Windows took the network down
 //! error\t<reason>                failed; the process exits non-zero
 //! ```
+//!
+//! `status` prints one more line for the app, among its text for people:
+//! `direct\t<finding>`, see `Readiness`.
 use std::net::Ipv4Addr;
 #[cfg(windows)]
 use std::time::Duration;
@@ -34,6 +37,34 @@ pub fn private_pair(local: &str, remote: &str) -> Option<(Ipv4Addr, Ipv4Addr)> {
     let local: Ipv4Addr = local.parse().ok()?;
     let remote: Ipv4Addr = remote.parse().ok()?;
     (local.is_private() && remote.is_private() && local != remote).then_some((local, remote))
+}
+
+/// Whether this PC could host, as far as can be told without starting
+/// anything. The app shows it in Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Readiness {
+    Ready,
+    NoWifi,
+    WifiOff,
+    NoWifiDirect,
+}
+
+impl Readiness {
+    pub fn line(self) -> &'static str {
+        match self {
+            Readiness::Ready => "direct\tok",
+            Readiness::NoWifi => "direct\tno-wifi",
+            Readiness::WifiOff => "direct\twifi-off",
+            Readiness::NoWifiDirect => "direct\tno-wifi-direct",
+        }
+    }
+}
+
+/// Windows sets up a "Microsoft Wi-Fi Direct Virtual Adapter" for a Wi-Fi
+/// driver that supports Wi-Fi Direct; this recognises its description.
+pub fn names_wifi_direct(adapter_description: &str) -> bool {
+    let name = adapter_description.to_lowercase();
+    name.contains("wi-fi direct") || name.contains("wifi direct")
 }
 
 pub enum Event<'a> {
@@ -88,6 +119,23 @@ mod tests {
             ("", ""),
         ] {
             assert_eq!(private_pair(local, remote), None, "{local} {remote}");
+        }
+    }
+
+    #[test]
+    fn the_status_line_for_the_app_has_one_fixed_finding() {
+        use Readiness::*;
+        let lines: Vec<_> = [Ready, NoWifi, WifiOff, NoWifiDirect].map(Readiness::line).into();
+        assert_eq!(lines, ["direct\tok", "direct\tno-wifi", "direct\twifi-off", "direct\tno-wifi-direct"]);
+    }
+
+    #[test]
+    fn the_wifi_direct_adapter_is_recognised_by_its_description() {
+        for name in ["Microsoft Wi-Fi Direct Virtual Adapter", "Microsoft Wi-Fi Direct Virtual Adapter #2", "microsoft wifi direct virtual adapter"] {
+            assert!(names_wifi_direct(name), "{name}");
+        }
+        for name in ["Intel(R) Wi-Fi 6 AX201 160MHz", "Microsoft Hosted Network Virtual Adapter", "Realtek PCIe GbE Family Controller", ""] {
+            assert!(!names_wifi_direct(name), "{name}");
         }
     }
 

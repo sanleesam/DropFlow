@@ -173,6 +173,7 @@ pub fn run() {
             transfer_manager::engine::get_receiver_port,
             transfer_manager::engine::open_received_file,
             transfer_manager::engine::respond_transfer_request,
+            transfer_manager::engine::direct_link_status,
             state_manager::get_app_state,
             state_manager::save_settings,
             state_manager::save_history,

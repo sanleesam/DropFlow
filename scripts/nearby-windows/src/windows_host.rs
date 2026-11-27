@@ -22,6 +22,9 @@ use windows::Foundation::TypedEventHandler;
 use windows::Networking::Connectivity::{NetworkConnectivityLevel, NetworkInformation};
 use windows::Security::Credentials::PasswordCredential;
 use windows::Win32::Foundation::HANDLE;
+use windows::Win32::NetworkManagement::IpHelper::{
+    GetAdaptersAddresses, GAA_FLAG_INCLUDE_ALL_INTERFACES, IP_ADAPTER_ADDRESSES_LH,
+};
 use windows::Win32::NetworkManagement::WiFi::{
     wlan_interface_state_connected, WlanCloseHandle, WlanEnumInterfaces, WlanFreeMemory,
     WlanOpenHandle, WLAN_INTERFACE_INFO, WLAN_INTERFACE_INFO_LIST,
@@ -115,10 +118,7 @@ pub(crate) fn wait_for<T: windows::core::RuntimeType>(
     result
 }
 
-pub(crate) fn check_wifi(wlan: &Wlan) -> Result<()> {
-    if !wlan.snapshot()?.0 {
-        return Err("no usable Wi-Fi adapter was found".into());
-    }
+fn wifi_radio_on() -> Result<bool> {
     let deadline = Instant::now() + Duration::from_secs(5);
     let radios = wait_for(Radio::GetRadiosAsync()?, deadline, || Ok(()))?;
     let mut wifi_on = false;
@@ -126,10 +126,77 @@ pub(crate) fn check_wifi(wlan: &Wlan) -> Result<()> {
         let radio = radios.GetAt(index)?;
         wifi_on |= radio.Kind()? == RadioKind::WiFi && radio.State()? == RadioState::On;
     }
-    if !wifi_on {
+    Ok(wifi_on)
+}
+
+pub(crate) fn check_wifi(wlan: &Wlan) -> Result<()> {
+    if !wlan.snapshot()?.0 {
+        return Err("no usable Wi-Fi adapter was found".into());
+    }
+    if !wifi_radio_on()? {
         return Err("Wi-Fi is off or its radio is unavailable".into());
     }
     Ok(())
+}
+
+/// Whether Windows has set up a Wi-Fi Direct virtual adapter, which it does
+/// for a Wi-Fi driver that supports Wi-Fi Direct. `None` when Windows would
+/// not list its adapters. Looks only.
+fn wifi_direct_adapter() -> Option<bool> {
+    const ERROR_BUFFER_OVERFLOW: u32 = 111;
+    let mut size: u32 = 32 * 1024;
+    for _ in 0..3 {
+        // Whole u64s keep the records aligned.
+        let mut buffer = vec![0u64; (size as usize).div_ceil(8)];
+        let first = buffer.as_mut_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
+        // Any address family (0); hidden and disconnected adapters included.
+        let code = unsafe {
+            GetAdaptersAddresses(0, GAA_FLAG_INCLUDE_ALL_INTERFACES, None, Some(first), &mut size)
+        };
+        match code {
+            0 => {
+                // On success Windows filled the buffer with a linked list that
+                // ends in a null `Next`; `buffer` outlives this walk.
+                let mut adapter = first;
+                while !adapter.is_null() {
+                    let entry = unsafe { &*adapter };
+                    if !entry.Description.is_null() {
+                        let description = unsafe { entry.Description.to_string() };
+                        if description.is_ok_and(|text| link::names_wifi_direct(&text)) {
+                            return Some(true);
+                        }
+                    }
+                    adapter = entry.Next;
+                }
+                return Some(false);
+            }
+            // `size` now holds what Windows needs; adapters may still change.
+            ERROR_BUFFER_OVERFLOW => size = size.saturating_add(4 * 1024),
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// What the desktop app shows in Settings. Nothing is started or changed.
+fn readiness(wlan: &Wlan) -> Result<link::Readiness> {
+    if !wlan.snapshot()?.0 {
+        return Ok(link::Readiness::NoWifi);
+    }
+    if !wifi_radio_on()? {
+        return Ok(link::Readiness::WifiOff);
+    }
+    // Not being able to tell is not a "no": hosting itself is the real test.
+    Ok(match wifi_direct_adapter() {
+        Some(false) => link::Readiness::NoWifiDirect,
+        Some(true) | None => link::Readiness::Ready,
+    })
+}
+
+/// The line of `status` output that the desktop app reads.
+fn tell_app(found: link::Readiness) {
+    println!("{}", found.line());
+    let _ = io::stdout().flush();
 }
 
 fn check_ble() -> Result<bool> {
@@ -427,11 +494,21 @@ pub fn run(ipc: bool) -> Result<()> {
             cancelled.store(true, Ordering::Relaxed);
         });
     }
-    let wlan = Wlan::open()
-        .map_err(|err| format!("Nearby Link unavailable: Windows WLAN is unavailable: {err}"))?;
+    let wlan = Wlan::open().map_err(|err| {
+        if command == "status" {
+            tell_app(link::Readiness::NoWifi);
+        }
+        format!("Nearby Link unavailable: Windows WLAN is unavailable: {err}")
+    })?;
     if let Some((ssid, passphrase)) = link {
         check_wifi(&wlan).map_err(|err| format!("Wi-Fi Direct unavailable: {err}"))?;
         return crate::windows_link::host(&wlan, &ssid, &passphrase, &cancelled);
+    }
+    if command == "status" {
+        // First, so the app has its answer before the lab's own checks run.
+        if let Ok(found) = readiness(&wlan) {
+            tell_app(found);
+        }
     }
     let bluetooth = preflight(check_wifi(&wlan), check_ble)
         .map_err(|err| format!("Nearby Link unavailable: {err}"))?;

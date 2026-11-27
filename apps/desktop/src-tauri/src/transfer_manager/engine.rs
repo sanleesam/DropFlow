@@ -94,6 +94,48 @@ fn windows_link(_helper: std::path::PathBuf, _device_id: &str) -> Option<Box<dyn
     None
 }
 
+/// What this device could do for a direct link, for the Settings screen.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectLinkStatus {
+    /// `host` creates the private network, `join` joins one, `none` neither.
+    role: &'static str,
+    ready: bool,
+    /// Why not, in words for a person; empty when ready.
+    detail: String,
+}
+
+/// Looks only: it never starts or joins a network, and answers the same
+/// whether or not the Direct Link setting is on. Checked afresh every call.
+#[tauri::command]
+pub async fn direct_link_status(app: AppHandle) -> Result<DirectLinkStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || direct_link_capability(&app))
+        .await
+        .map_err(|e| format!("The direct link check did not finish: {e}"))
+}
+
+/// A Mac joins, which takes a Wi-Fi interface and nothing else.
+#[cfg(target_os = "macos")]
+fn direct_link_capability(_app: &AppHandle) -> DirectLinkStatus {
+    let ready = super::direct_macos::MacJoinLink::new().is_some();
+    DirectLinkStatus { role: "join", ready, detail: String::new() }
+}
+
+/// A Windows PC hosts, when its build has the helper and the helper's own
+/// check of the Wi-Fi adapter passes.
+#[cfg(windows)]
+fn direct_link_capability(app: &AppHandle) -> DirectLinkStatus {
+    use super::direct_windows::{readiness, Readiness};
+    let helper = app.path().resolve(DIRECT_HELPER, tauri::path::BaseDirectory::Resource);
+    let found = helper.map_or(Readiness::NotBundled, |helper| readiness(&helper));
+    DirectLinkStatus { role: "host", ready: found.ready(), detail: found.detail().into() }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn direct_link_capability(_app: &AppHandle) -> DirectLinkStatus {
+    DirectLinkStatus { role: "none", ready: false, detail: String::new() }
+}
+
 /// Lends a session the link for its duration; the caller closes it after.
 pub(crate) fn lend(
     link: &mut Option<Box<dyn super::session::DirectLink>>,
@@ -235,4 +277,18 @@ pub fn open_received_file(app: AppHandle, path: String) -> Result<(), String> {
 
     app.opener().open_path(canonical.to_string_lossy().into_owned(), None::<&str>)
         .map_err(|e| format!("Failed to open received item: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_direct_link_status_has_the_shape_the_settings_screen_reads() {
+        let status = DirectLinkStatus { role: "host", ready: false, detail: "Wi-Fi is turned off".into() };
+        assert_eq!(
+            serde_json::to_string(&status).unwrap(),
+            r#"{"role":"host","ready":false,"detail":"Wi-Fi is turned off"}"#
+        );
+    }
 }

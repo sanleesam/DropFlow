@@ -4,17 +4,21 @@
 //! as long as its stdin stays open, and reports on stdout who joined. This
 //! file starts it, reads those reports, and opens the one connection to the
 //! device that joined. Windows only ever connects out, so no firewall rule is
-//! needed, and nothing about the PC's own network is touched. Any failure
-//! here leaves the transfer on the network it started on.
+//! needed, and nothing about the PC's own network is touched. A failure
+//! here leaves the transfer on the network it started on, unless the other
+//! device had to leave that network to join (`connect_joined`).
+//!
+//! `readiness` answers "could this PC host?" for the Settings screen by
+//! running the helper's `status` command, which only looks.
 //!
 //! Compiled for Windows. The tests run the same code anywhere, against a
 //! stand-in for the helper.
 use std::io::{self, BufRead, BufReader};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -34,6 +38,16 @@ const TICK_EVERY: Duration = Duration::from_millis(200);
 /// How long Windows gets to report the joined device's addresses.
 const PEER_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a device that left its own network gets to join this one. The
+/// protocol's limit for the host; a phone may ask its owner first.
+const JOIN_WAIT: Duration = Duration::from_secs(75);
+/// Once it has joined it may still be getting its address or not listening
+/// yet, so the connection is retried for this long. It waits 30 s for us.
+const RETRY_FOR: Duration = Duration::from_secs(25);
+/// One try. Short, so a lost first packet costs little and a cancel is seen.
+const ATTEMPT_TIMEOUT: Duration = Duration::from_millis(750);
+/// The helper's `status` normally answers well within a second.
+const STATUS_TIMEOUT: Duration = Duration::from_secs(6);
 /// How long the helper gets to take the network down before it is killed.
 const EXIT_GRACE: Duration = Duration::from_secs(2);
 const MAX_PAIRS: usize = 8;
@@ -119,10 +133,24 @@ fn dial(local: Option<Ipv4Addr>, remote: SocketAddrV4, timeout: Duration) -> io:
 
 // ─── The helper process ──────────────────────────────────────────────────────
 
+/// The helper, set up so that no console window appears.
+fn helper_command(helper_path: &Path) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(helper_path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 #[derive(Default)]
 struct Seen {
     ready: bool,
     pairs: Vec<(Ipv4Addr, Ipv4Addr)>,
+    /// When the newest pair was reported.
+    pair_at: Option<Instant>,
     /// The helper's `error` or `lost`: the network is not there.
     failed: Option<String>,
     /// The helper's output ended.
@@ -162,6 +190,7 @@ impl Helper {
                                 seen.pairs.remove(0);
                             }
                             seen.pairs.push((local, remote));
+                            seen.pair_at = Some(Instant::now());
                         }
                         Report::Note(note) => log::info!("[Link] Wi-Fi Direct helper: {note}"),
                         Report::Lost(reason) | Report::Error(reason) => {
@@ -238,6 +267,29 @@ impl Helper {
         )?
     }
 
+    /// The devices Windows saw join, newest first, and when the newest was
+    /// reported. Waits up to `wait` for the first one.
+    #[allow(clippy::type_complexity)]
+    fn joined(&self, wait: Duration) -> Result<Option<(Vec<(Ipv4Addr, Ipv4Addr)>, Instant)>, String> {
+        self.watch(
+            wait,
+            |seen| seen.failed.is_some() || seen.ended || !seen.pairs.is_empty(),
+            |seen| match (&seen.failed, seen.pair_at) {
+                (Some(reason), _) => Err(reason.clone()),
+                (None, _) if seen.ended => Err("the private network is no longer up".into()),
+                (None, Some(at)) if !seen.pairs.is_empty() => {
+                    Ok(Some((seen.pairs.iter().rev().copied().collect(), at)))
+                }
+                (None, _) => Ok(None),
+            },
+        )?
+    }
+
+    /// Waits `wait`, or less if the network goes away.
+    fn pause(&self, wait: Duration) -> Result<(), String> {
+        self.watch(wait, |seen| seen.failed.is_some() || seen.ended, |_| ())
+    }
+
     /// Closing stdin asks the helper to take the network down and exit.
     fn stop(&mut self) {
         drop(self.stdin.take());
@@ -279,13 +331,8 @@ impl WindowsHostLink {
 
     /// No shell, no PATH lookup; both arguments are generated in this file.
     fn command(&self, passphrase: &str) -> Command {
-        let mut command = Command::new(&self.helper_path);
+        let mut command = helper_command(&self.helper_path);
         command.args(["host-link", &self.ssid, passphrase]);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
         command
     }
 
@@ -334,6 +381,47 @@ impl WindowsHostLink {
         dial(local, SocketAddrV4::new(remote, port), CONNECT_TIMEOUT)
             .map_err(|e| format!("could not connect over the private network: {e}"))
     }
+
+    /// Finds the device that joined by what Windows reports, never by what
+    /// the device said, and connects to it on `port`. Waits `join_wait` for a
+    /// device to appear, then keeps trying until `retry_for` after the newest
+    /// one did. `attempt(local, remote)` makes one try.
+    fn reach_joined(
+        &self,
+        port: u16,
+        tick: &mut dyn FnMut() -> Result<(), String>,
+        join_wait: Duration,
+        retry_for: Duration,
+        attempt: &mut dyn FnMut(Ipv4Addr, SocketAddrV4) -> io::Result<TcpStream>,
+    ) -> Result<TcpStream, String> {
+        if port == 0 {
+            return Err("the other device gave no port to connect to".into());
+        }
+        let helper = self.helper.as_ref().ok_or("the private network is not up")?;
+        let started = Instant::now();
+        loop {
+            tick()?;
+            let Some((pairs, newest_at)) = helper.joined(TICK_EVERY)? else {
+                if started.elapsed() >= join_wait {
+                    return Err("Windows did not report the device that joined the private network".into());
+                }
+                continue;
+            };
+            let mut refusal = String::new();
+            for (local, remote) in pairs {
+                tick()?;
+                match attempt(local, SocketAddrV4::new(remote, port)) {
+                    Ok(socket) => return Ok(socket),
+                    Err(error) if refusal.is_empty() => refusal = error.to_string(),
+                    Err(_) => {}
+                }
+            }
+            if newest_at.elapsed() >= retry_for || started.elapsed() >= join_wait + retry_for {
+                return Err(format!("the device that joined the private network did not answer: {refusal}"));
+            }
+            helper.pause(TICK_EVERY)?;
+        }
+    }
 }
 
 impl DirectLink for WindowsHostLink {
@@ -363,6 +451,20 @@ impl DirectLink for WindowsHostLink {
         self.connect_within(address, port, PEER_TIMEOUT)
     }
 
+    fn accepts_leaving(&self) -> bool {
+        true
+    }
+
+    fn connect_joined(
+        &mut self,
+        port: u16,
+        tick: &mut dyn FnMut() -> Result<(), String>,
+    ) -> Result<TcpStream, String> {
+        self.reach_joined(port, tick, JOIN_WAIT, RETRY_FOR, &mut |local, remote| {
+            dial(Some(local), remote, ATTEMPT_TIMEOUT)
+        })
+    }
+
     fn close(&mut self) {
         if let Some(mut helper) = self.helper.take() {
             helper.stop();
@@ -377,6 +479,84 @@ impl Drop for WindowsHostLink {
     fn drop(&mut self) {
         self.close();
     }
+}
+
+// ─── Could this PC host? ─────────────────────────────────────────────────────
+
+/// What the helper's `status` command found. It only looks: no network is
+/// started and nothing is changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Readiness {
+    Ready,
+    /// This build has no helper.
+    NotBundled,
+    NoWifi,
+    WifiOff,
+    NoWifiDirect,
+    /// The helper did not answer, or not in a way this version understands.
+    Unknown,
+}
+
+impl Readiness {
+    pub fn ready(self) -> bool {
+        self == Readiness::Ready
+    }
+
+    /// A short reason for a person; empty when ready.
+    pub fn detail(self) -> &'static str {
+        match self {
+            Readiness::Ready => "",
+            Readiness::NotBundled => "Not included in this build",
+            Readiness::NoWifi => "This PC has no Wi-Fi adapter",
+            Readiness::WifiOff => "Wi-Fi is turned off",
+            Readiness::NoWifiDirect => "This PC's Wi-Fi adapter does not support Wi-Fi Direct",
+            Readiness::Unknown => "Could not check this PC's Wi-Fi",
+        }
+    }
+}
+
+/// The one line of `status` output meant for the app: `direct\t<finding>`.
+/// The rest is the lab's text for a person at a console.
+fn parse_status(line: &str) -> Option<Readiness> {
+    match line.strip_prefix("direct\t")? {
+        "ok" => Some(Readiness::Ready),
+        "no-wifi" => Some(Readiness::NoWifi),
+        "wifi-off" => Some(Readiness::WifiOff),
+        "no-wifi-direct" => Some(Readiness::NoWifiDirect),
+        _ => Some(Readiness::Unknown),
+    }
+}
+
+/// Asks the helper whether this PC could host a direct link. Run afresh on
+/// every call, since Wi-Fi can be switched on or off at any time; bounded.
+pub fn readiness(helper_path: &Path) -> Readiness {
+    if !helper_path.is_file() {
+        return Readiness::NotBundled;
+    }
+    let mut command = helper_command(helper_path);
+    command.arg("status");
+    ask(&mut command, STATUS_TIMEOUT)
+}
+
+fn ask(command: &mut Command, patience: Duration) -> Readiness {
+    let spawned = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+    let Ok(mut child) = spawned else { return Readiness::Unknown };
+    let (found, finding) = mpsc::channel();
+    if let Some(stdout) = child.stdout.take() {
+        thread::spawn(move || {
+            let lines = BufReader::new(stdout).lines().map_while(Result::ok);
+            if let Some(readiness) = lines.take(64).find_map(|line| parse_status(&line)) {
+                let _ = found.send(readiness);
+            }
+        });
+    }
+    // An answer, the end of the output, or the limit: whichever comes first.
+    let readiness = finding.recv_timeout(patience).unwrap_or(Readiness::Unknown);
+    // The rest of its work (the lab's Bluetooth check) is of no interest.
+    if !matches!(child.try_wait(), Ok(Some(_))) && child.kill().is_ok() {
+        let _ = child.wait();
+    }
+    readiness
 }
 
 #[cfg(test)]
@@ -499,8 +679,44 @@ mod tests {
     #[test]
     fn a_build_without_the_helper_offers_nothing() {
         let missing = std::env::temp_dir().join("dropflow-no-such-helper.exe");
-        assert!(WindowsHostLink::new(missing, "id").is_none());
+        assert!(WindowsHostLink::new(missing.clone(), "id").is_none());
         assert!(WindowsHostLink::new(std::env::temp_dir(), "id").is_none());
+        assert_eq!(readiness(&missing), Readiness::NotBundled);
+        assert_eq!(readiness(&std::env::temp_dir()), Readiness::NotBundled);
+    }
+
+    #[test]
+    fn only_the_status_line_meant_for_the_app_is_read() {
+        assert_eq!(parse_status("direct\tok"), Some(Readiness::Ready));
+        assert_eq!(parse_status("direct\tno-wifi"), Some(Readiness::NoWifi));
+        assert_eq!(parse_status("direct\twifi-off"), Some(Readiness::WifiOff));
+        assert_eq!(parse_status("direct\tno-wifi-direct"), Some(Readiness::NoWifiDirect));
+        // A finding from a newer helper is an answer, just not one to act on.
+        assert_eq!(parse_status("direct\tsomething-new"), Some(Readiness::Unknown));
+        for line in [
+            "",
+            "direct",
+            "ok",
+            "Wi-Fi is enabled; Wi-Fi Direct driver and concurrency remain unverified.",
+            "Bluetooth LE is available. This lab uses manual Wi-Fi pairing.",
+            "ready",
+        ] {
+            assert_eq!(parse_status(line), None, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn only_a_passed_check_is_ready_and_every_other_finding_says_why() {
+        assert!(Readiness::Ready.ready() && Readiness::Ready.detail().is_empty());
+        for finding in [
+            Readiness::NotBundled,
+            Readiness::NoWifi,
+            Readiness::WifiOff,
+            Readiness::NoWifiDirect,
+            Readiness::Unknown,
+        ] {
+            assert!(!finding.ready() && !finding.detail().is_empty(), "{finding:?}");
+        }
     }
 
     #[cfg(unix)]
@@ -684,6 +900,184 @@ mod tests {
             host(&mut closed, "printf 'ready\\n'; sleep 0.2; exit 0").unwrap();
             let gone = closed.connect(Some("192.168.137.24"), 4000);
             assert_eq!(gone.err().as_deref(), Some("the private network is no longer up"));
+        }
+
+        // ── A joiner that left its own network: found by what Windows reports ──
+
+        const LONG: Duration = Duration::from_secs(20);
+
+        /// Stands in for the joined device: every address leads to this listener.
+        fn loopback(listener: &TcpListener) -> impl Fn(SocketAddrV4) -> io::Result<TcpStream> {
+            let std::net::SocketAddr::V4(here) = listener.local_addr().unwrap() else { panic!("IPv4") };
+            move |_| dial(Some(Ipv4Addr::LOCALHOST), here, Duration::from_secs(5))
+        }
+
+        fn refused() -> io::Error {
+            io::Error::from(io::ErrorKind::ConnectionRefused)
+        }
+
+        #[test]
+        fn a_device_that_joins_late_is_found_without_being_told_its_address() {
+            let _turn = turn();
+            let mut link = link();
+            assert!(link.accepts_leaving());
+            assert_eq!(
+                link.connect_joined(4000, &mut || Ok(())).err().as_deref(),
+                Some("the private network is not up")
+            );
+            host(&mut link, "printf 'ready\\n'; sleep 1; printf 'peer\\t192.168.137.1\\t192.168.137.24\\n'; read line").unwrap();
+            assert!(link.connect_joined(0, &mut || Ok(())).unwrap_err().contains("no port"));
+
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let reach = loopback(&listener);
+            let (mut ticks, mut asked) = (0, Vec::new());
+            let started = Instant::now();
+            let socket = link.reach_joined(4000, &mut || { ticks += 1; Ok(()) }, LONG, LONG, &mut |local, remote| {
+                asked.push((local, remote));
+                reach(remote)
+            });
+            assert!(socket.is_ok());
+            assert!(started.elapsed() >= Duration::from_millis(300), "waited for Windows to report it");
+            // About a second of waiting, checked at least every 250 ms.
+            assert!(ticks >= 3, "{ticks} ticks");
+            // From this PC's end of the pair, to the address Windows named, on the port asked for.
+            assert_eq!(asked, [(ip("192.168.137.1"), SocketAddrV4::new(ip("192.168.137.24"), 4000))]);
+        }
+
+        #[test]
+        fn nobody_joining_is_said_plainly() {
+            let _turn = turn();
+            let mut link = link();
+            host(&mut link, "printf 'ready\\n'; read line").unwrap();
+            let started = Instant::now();
+            let nobody = link.reach_joined(4000, &mut || Ok(()), Duration::from_millis(500), LONG, &mut |_, _| {
+                panic!("there is nobody to dial")
+            });
+            assert_eq!(
+                nobody.err().as_deref(),
+                Some("Windows did not report the device that joined the private network")
+            );
+            assert!(started.elapsed() >= Duration::from_millis(500) && started.elapsed() < Duration::from_secs(3));
+        }
+
+        #[test]
+        fn a_cancel_stops_the_wait_and_the_retries() {
+            let _turn = turn();
+            let mut link = link();
+            host(&mut link, "printf 'ready\\n'; sleep 2; printf 'peer\\t192.168.137.1\\t192.168.137.24\\n'; read line").unwrap();
+            let cancel_after = |limit: u32| {
+                let mut ticks = 0;
+                move || {
+                    ticks += 1;
+                    if ticks > limit { Err("cancelled".to_string()) } else { Ok(()) }
+                }
+            };
+            // While nobody has joined yet.
+            let started = Instant::now();
+            let waiting = link.reach_joined(4000, &mut cancel_after(2), LONG, LONG, &mut |_, _| panic!("nobody yet"));
+            assert_eq!(waiting.err().as_deref(), Some("cancelled"));
+            assert!(started.elapsed() < Duration::from_millis(1500));
+
+            // While the device that joined keeps refusing.
+            let mut attempts = 0;
+            let started = Instant::now();
+            let retrying = link.reach_joined(4000, &mut cancel_after(40), LONG, LONG, &mut |_, _| {
+                attempts += 1;
+                Err(refused())
+            });
+            assert_eq!(retrying.err().as_deref(), Some("cancelled"));
+            assert!(attempts >= 2, "{attempts} attempts");
+            assert!(started.elapsed() < Duration::from_secs(12));
+        }
+
+        #[test]
+        fn a_device_that_is_not_listening_yet_is_tried_again() {
+            let _turn = turn();
+            let mut link = link();
+            host(&mut link, "printf 'ready\\npeer\\t192.168.137.1\\t192.168.137.24\\n'; read line").unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let reach = loopback(&listener);
+            let mut attempts = 0;
+            let mut socket = link
+                .reach_joined(4000, &mut || Ok(()), LONG, LONG, &mut |_, remote| {
+                    attempts += 1;
+                    if attempts <= 3 { Err(refused()) } else { reach(remote) }
+                })
+                .unwrap();
+            assert_eq!(attempts, 4);
+            // The engine gets an ordinary blocking socket to the device.
+            let (mut accepted, _) = listener.accept().unwrap();
+            socket.write_all(b"ping").unwrap();
+            let mut bytes = [0; 4];
+            accepted.read_exact(&mut bytes).unwrap();
+            assert_eq!(&bytes, b"ping");
+
+            // It does not try for ever.
+            let started = Instant::now();
+            let never = link.reach_joined(4000, &mut || Ok(()), LONG, Duration::from_millis(600), &mut |_, _| Err(refused()));
+            let reason = never.err().unwrap();
+            assert!(reason.starts_with("the device that joined the private network did not answer: "), "{reason}");
+            assert!(started.elapsed() < Duration::from_secs(4));
+        }
+
+        #[test]
+        fn the_newest_device_is_tried_first() {
+            let _turn = turn();
+            let mut link = link();
+            host(&mut link, "printf 'ready\\npeer\\t192.168.137.1\\t192.168.137.24\\npeer\\t192.168.137.1\\t192.168.137.30\\n'; sleep 0.3; printf 'note\\tdone\\n'; read line").unwrap();
+            thread::sleep(Duration::from_millis(200));
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let reach = loopback(&listener);
+            let mut asked = Vec::new();
+            let socket = link.reach_joined(4000, &mut || Ok(()), LONG, LONG, &mut |_, remote| {
+                asked.push(*remote.ip());
+                // Only the older one answers, so both are tried, newest first.
+                if *remote.ip() == ip("192.168.137.24") { reach(remote) } else { Err(refused()) }
+            });
+            assert!(socket.is_ok());
+            assert_eq!(asked, [ip("192.168.137.30"), ip("192.168.137.24")]);
+        }
+
+        #[test]
+        fn a_network_lost_while_waiting_ends_the_wait() {
+            let _turn = turn();
+            let mut link = link();
+            host(&mut link, "printf 'ready\\n'; sleep 0.3; printf 'lost\\tradio busy\\n'; exit 1").unwrap();
+            let started = Instant::now();
+            let lost = link.reach_joined(4000, &mut || Ok(()), LONG, LONG, &mut |_, _| panic!("nobody joined"));
+            assert_eq!(lost.err().as_deref(), Some("radio busy"));
+            assert!(started.elapsed() < Duration::from_secs(3));
+        }
+
+        // ── The capability check ──
+
+        fn ask_script(script: &str, patience: Duration) -> Readiness {
+            ask(Command::new("/bin/sh").args(["-c", script]), patience)
+        }
+
+        #[test]
+        fn the_check_reads_the_helpers_answer_and_does_not_wait_for_the_rest() {
+            let started = Instant::now();
+            let lab_text = "printf 'direct\\tok\\nBluetooth LE is available.\\n'; exec sleep 600";
+            assert_eq!(ask_script(lab_text, LONG), Readiness::Ready);
+            assert!(started.elapsed() < Duration::from_secs(3), "the helper is not waited for");
+
+            assert_eq!(ask_script("printf 'direct\\twifi-off\\n'; exit 1", LONG), Readiness::WifiOff);
+            assert_eq!(ask_script("printf 'direct\\tno-wifi\\n'; exit 1", LONG), Readiness::NoWifi);
+            assert_eq!(ask_script("printf 'Wi-Fi is enabled\\ndirect\\tno-wifi-direct\\n'", LONG), Readiness::NoWifiDirect);
+        }
+
+        #[test]
+        fn a_helper_that_does_not_answer_is_not_ready() {
+            // An older helper: only the lab's text.
+            assert_eq!(ask_script("printf 'Wi-Fi is enabled; unverified.\\n'", LONG), Readiness::Unknown);
+            assert_eq!(ask_script("exit 1", LONG), Readiness::Unknown);
+            let started = Instant::now();
+            assert_eq!(ask_script("exec sleep 600", Duration::from_millis(400)), Readiness::Unknown);
+            assert!(started.elapsed() < Duration::from_secs(3), "bounded, and the helper is stopped");
+            // Through the real entry point: /bin/sh is no helper.
+            assert_eq!(readiness(Path::new("/bin/sh")), Readiness::Unknown);
+            assert_eq!(ask(&mut Command::new("/no/such/helper"), LONG), Readiness::Unknown);
         }
     }
 }

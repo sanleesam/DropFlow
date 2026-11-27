@@ -13,5 +13,6 @@ windows = { version = "0.61.3", features = [
     "Devices_Bluetooth", "Devices_Enumeration", "Devices_Radios", "Devices_WiFiDirect",
     "Foundation", "Networking_Connectivity", "Security_Credentials",
     "Win32_Foundation", "Win32_NetworkManagement_WiFi", "Win32_System_WinRT",
+    "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock",
 ] }
 windows-future = "0.2.1"

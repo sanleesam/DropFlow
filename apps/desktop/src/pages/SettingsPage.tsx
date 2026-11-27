@@ -49,6 +49,10 @@ export function SettingsPage() {
   const [loadingVersion, setLoadingVersion] = useState(true);
   // What this device can do for a direct link; absent on builds without it.
   const [link, setLink] = useState<{ role: "host" | "join" | "none"; ready: boolean; detail: string } | null>(null);
+  // Only a missing adapter or helper rules it out. "Does not support Wi-Fi
+  // Direct" is a read of the driver list that can be wrong, so the person may
+  // still try; the transfer falls back if the PC really cannot host.
+  const linkBlocked = !!link && !link.ready && /not included|no wi-fi adapter/i.test(link.detail);
   useEffect(() => {
     invoke<{ role: "host" | "join" | "none"; ready: boolean; detail: string }>("direct_link_status")
       .then((status) => setLink(status && typeof status.role === "string" ? status : null))
@@ -201,8 +205,8 @@ export function SettingsPage() {
                 >
                   <Switch
                     label="Use a direct link"
-                    checked={settings.directLink && settings.fastTransfer && link.ready}
-                    disabled={!settings.fastTransfer || !link.ready}
+                    checked={settings.directLink && settings.fastTransfer && !linkBlocked}
+                    disabled={!settings.fastTransfer || linkBlocked}
                     onChange={() => updateSetting("directLink", !settings.directLink)}
                   />
                 </SettingRow>
