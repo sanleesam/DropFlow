@@ -11,6 +11,34 @@ See [the current policy](docs/VERSIONING.md). Published versions are not renamed
 Android's numeric `versionCode` only increases, including when moving from the
 legacy beta label to the next alpha product version.
 
+## Desktop — [0.2.0-dev.1] — 2026-11-27
+
+Development build. Not yet tested on physical devices; see
+`docs/RELEASE_PLAN.md` for what must pass before this becomes a Beta.
+
+- DFP/1.1 engine with devices that support it: files stream without a pause
+  between them, interrupted transfers continue, and a transfer is no longer
+  limited to about 400 files. Older builds get the original exchange.
+- Each side says why it stopped (cancelled, out of storage). Transfers show
+  "Waiting for … to accept" and "Saving"; a dropped connection that can
+  continue is labelled Interrupted.
+- The sender's folder paths are no longer included in the request.
+- Faster SHA-256 on Apple Silicon.
+- Interface fixes: sheets and menus keep their blur on Windows, the Files
+  table fits the smallest window, toasts no longer cover the toolbar, an Auto
+  theme follows the system.
+- Settings → Transfers → Faster transfers turns the new engine off.
+
+## Android — [0.3.0-alpha.1] — 2026-11-27
+
+Alpha. Checked on an emulator against the desktop engine; not on phones.
+
+- DFP/1.1 engine: batch streaming both ways, resume when sending to a desktop,
+  no file-count limit. Receiving many files prepares and syncs them in the
+  background and publishes them only when the whole transfer verifies.
+- Cancelling is now visible to the other device, and failures say why.
+- Two picked files with the same name no longer make a transfer fail.
+
 ## Desktop — [0.1.2-beta.21] — 2026-11-06
 
 - Replace socket-clone shutdown cancellation with portable cancellation-aware
