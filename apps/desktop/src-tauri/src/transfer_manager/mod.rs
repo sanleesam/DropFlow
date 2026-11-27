@@ -13,6 +13,8 @@ pub mod validation;
 mod lifecycle;
 pub mod transport;
 mod bulk_io;
+#[cfg(any(windows, test))]
+mod direct_windows;
 #[cfg(test)]
 mod session_tests;
 #[cfg(any(test, feature = "experimental-transfer"))]

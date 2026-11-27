@@ -412,7 +412,20 @@ fn receive_session(
             );
         }
     };
-    let summary = super::session::receive_session(stream, metadata, &setup, &cancel_flag, None, &mut on_event)
+    let mut link = super::engine::direct_link(app);
+    let outcome = super::session::receive_session(
+        stream,
+        metadata,
+        &setup,
+        &cancel_flag,
+        super::engine::lend(&mut link),
+        &mut on_event,
+    );
+    // The private network goes away with the session, however it ended.
+    if let Some(link) = link.as_mut() {
+        link.close();
+    }
+    let summary = outcome
         .map_err(|failure| {
             if failure.resumable {
                 info!("[Receiver] Interrupted; kept the received part for a retry");
@@ -423,10 +436,11 @@ fn receive_session(
         })?;
     info!("[Receiver] ACK_SENT");
     info!(
-        "{} batch={} resumed_bytes={}",
+        "{} batch={} resumed_bytes={} direct={}",
         super::perf::summary("receive", metadata.files.len(), summary.bytes_received, summary.elapsed),
         summary.negotiated.batch,
-        summary.bytes_resumed
+        summary.bytes_resumed,
+        summary.direct
     );
     info!("[Receiver] CONNECTION_CLOSED");
 

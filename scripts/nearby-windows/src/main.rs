@@ -1,21 +1,26 @@
 #[cfg(any(windows, test))]
 mod hardware;
+#[cfg(any(windows, test))]
+mod link;
 #[cfg(windows)]
 mod windows_host;
+#[cfg(windows)]
+mod windows_link;
 #[cfg(any(windows, test))]
 mod wire;
 
 fn main() {
     #[cfg(windows)]
     {
-        let ipc = std::env::args().nth(1).as_deref() == Some("host-ipc");
+        // Driven by the app over pipes: errors are a line on stdout.
+        let ipc = matches!(
+            std::env::args().nth(1).as_deref(),
+            Some("host-ipc" | "host-link")
+        );
         let result = windows_host::run(ipc);
         if let Err(error) = &result {
             if ipc {
-                println!(
-                    "error\t{}",
-                    error.to_string().replace(['\r', '\n', '\t'], " ")
-                );
+                println!("{}", link::Event::Error(&error.to_string()).line());
             } else {
                 eprintln!("{error}");
             }

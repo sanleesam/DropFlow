@@ -1,4 +1,5 @@
 use crate::hardware::{preflight, BluetoothStatus};
+use crate::link;
 use crate::wire;
 use std::error::Error;
 use std::io::{self, Read, Write};
@@ -28,8 +29,8 @@ use windows::Win32::NetworkManagement::WiFi::{
 use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
 use windows_future::{AsyncStatus, IAsyncOperation};
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const TICK: Duration = Duration::from_millis(100);
+pub(crate) type Result<T> = std::result::Result<T, Box<dyn Error>>;
+pub(crate) const TICK: Duration = Duration::from_millis(100);
 
 struct Runtime;
 impl Drop for Runtime {
@@ -38,7 +39,7 @@ impl Drop for Runtime {
     }
 }
 
-struct Wlan(HANDLE);
+pub(crate) struct Wlan(HANDLE);
 impl Drop for Wlan {
     fn drop(&mut self) {
         unsafe { WlanCloseHandle(self.0, None) };
@@ -68,7 +69,7 @@ impl Wlan {
         Ok(Self(handle))
     }
 
-    fn snapshot(&self) -> Result<(bool, Vec<GUID>)> {
+    pub(crate) fn snapshot(&self) -> Result<(bool, Vec<GUID>)> {
         let mut list = std::ptr::null_mut();
         win32(unsafe { WlanEnumInterfaces(self.0, None, &mut list) })?;
         if list.is_null() {
@@ -93,7 +94,7 @@ impl Wlan {
     }
 }
 
-fn wait_for<T: windows::core::RuntimeType>(
+pub(crate) fn wait_for<T: windows::core::RuntimeType>(
     operation: IAsyncOperation<T>,
     deadline: Instant,
     mut check: impl FnMut() -> Result<()>,
@@ -114,7 +115,7 @@ fn wait_for<T: windows::core::RuntimeType>(
     result
 }
 
-fn check_wifi(wlan: &Wlan) -> Result<()> {
+pub(crate) fn check_wifi(wlan: &Wlan) -> Result<()> {
     if !wlan.snapshot()?.0 {
         return Err("no usable Wi-Fi adapter was found".into());
     }
@@ -143,7 +144,7 @@ fn check_ble() -> Result<bool> {
     Ok(bluetooth.State()? == RadioState::On)
 }
 
-fn internet_adapter() -> Result<Option<GUID>> {
+pub(crate) fn internet_adapter() -> Result<Option<GUID>> {
     let profile = NetworkInformation::GetInternetConnectionProfile();
     // WinRT projects a successful null interface as E_POINTER.
     let profile = match profile {
@@ -244,10 +245,9 @@ fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
     Ok(())
 }
 
-fn host(wlan: &Wlan, cancelled: &AtomicBool, ipc: bool) -> Result<()> {
-    check_cancelled(cancelled)?;
-    let primary_wifi = wlan.snapshot()?.1;
-    let primary_internet = internet_adapter()?;
+/// A publisher set up to advertise a network that any Wi-Fi device can join
+/// with this name and passphrase. Not started yet.
+pub(crate) fn legacy_group(ssid: &str, passphrase: &str) -> Result<WiFiDirectAdvertisementPublisher> {
     let publisher = WiFiDirectAdvertisementPublisher::new()?;
     let advertisement = publisher.Advertisement()?;
     advertisement.SetIsAutonomousGroupOwnerEnabled(true)?;
@@ -255,12 +255,20 @@ fn host(wlan: &Wlan, cancelled: &AtomicBool, ipc: bool) -> Result<()> {
         .SetListenStateDiscoverability(WiFiDirectAdvertisementListenStateDiscoverability::Normal)?;
     let settings = advertisement.LegacySettings()?;
     settings.SetIsEnabled(true)?;
+    let credential = PasswordCredential::new()?;
+    credential.SetPassword(&HSTRING::from(passphrase))?;
+    settings.SetSsid(&HSTRING::from(ssid))?;
+    settings.SetPassphrase(&credential)?;
+    Ok(publisher)
+}
+
+fn host(wlan: &Wlan, cancelled: &AtomicBool, ipc: bool) -> Result<()> {
+    check_cancelled(cancelled)?;
+    let primary_wifi = wlan.snapshot()?.1;
+    let primary_internet = internet_adapter()?;
     let ssid = format!("DIRECT-DF-{}", &Uuid::new_v4().simple().to_string()[..10]);
     let passphrase = Uuid::new_v4().simple().to_string();
-    let credential = PasswordCredential::new()?;
-    credential.SetPassword(&HSTRING::from(&passphrase))?;
-    settings.SetSsid(&HSTRING::from(&ssid))?;
-    settings.SetPassphrase(&credential)?;
+    let publisher = legacy_group(&ssid, &passphrase)?;
 
     let listener = WiFiDirectConnectionListener::new()?;
     let (requests, peer) = mpsc::sync_channel::<WiFiDirectConnectionRequest>(1);
@@ -388,10 +396,25 @@ fn host(wlan: &Wlan, cancelled: &AtomicBool, ipc: bool) -> Result<()> {
 }
 
 pub fn run(ipc: bool) -> Result<()> {
-    let command = std::env::args().nth(1);
+    const USAGE: &str =
+        "Usage: dropflow-nearby-windows-lab status|host|host-link <ssid> <passphrase>";
+    let mut arguments = std::env::args().skip(1);
+    let command = arguments.next();
     let command = match command.as_deref() {
-        Some(command @ ("status" | "host" | "host-ipc")) => command,
-        _ => return Err("Usage: dropflow-nearby-windows-lab status|host".into()),
+        Some(command @ ("status" | "host" | "host-ipc" | "host-link")) => command,
+        _ => return Err(USAGE.into()),
+    };
+    // The app's own network for a real transfer: no lab, no synthetic data.
+    let link = if command == "host-link" {
+        match (arguments.next(), arguments.next(), arguments.next()) {
+            (Some(ssid), Some(passphrase), None) => {
+                link::check_arguments(&ssid, &passphrase)?;
+                Some((ssid, passphrase))
+            }
+            _ => return Err(USAGE.into()),
+        }
+    } else {
+        None
     };
     unsafe { RoInitialize(RO_INIT_MULTITHREADED)? };
     let _runtime = Runtime;
@@ -406,6 +429,10 @@ pub fn run(ipc: bool) -> Result<()> {
     }
     let wlan = Wlan::open()
         .map_err(|err| format!("Nearby Link unavailable: Windows WLAN is unavailable: {err}"))?;
+    if let Some((ssid, passphrase)) = link {
+        check_wifi(&wlan).map_err(|err| format!("Wi-Fi Direct unavailable: {err}"))?;
+        return crate::windows_link::host(&wlan, &ssid, &passphrase, &cancelled);
+    }
     let bluetooth = preflight(check_wifi(&wlan), check_ble)
         .map_err(|err| format!("Nearby Link unavailable: {err}"))?;
     if !ipc {

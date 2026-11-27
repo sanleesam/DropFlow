@@ -787,7 +787,7 @@ const LINK_OFFER_TIMEOUT: Duration = Duration::from_secs(25);
 /// How long the host waits for the joiner; a phone may ask its owner first.
 const LINK_JOIN_TIMEOUT: Duration = Duration::from_secs(75);
 /// How long a listening joiner waits for the host's connection.
-const LINK_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+const LINK_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const LINK_GREETING_TIMEOUT: Duration = Duration::from_secs(5);
 const LINK_POLL: Duration = Duration::from_millis(250);
 

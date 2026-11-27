@@ -43,6 +43,51 @@ pub(crate) fn fast_transfer_enabled(app: &AppHandle) -> bool {
         .unwrap_or(true)
 }
 
+/// Whether a transfer may move onto a private Wi-Fi link. Experimental and
+/// off unless the person turned it on; it needs the DFP/1.1 engine as well.
+pub(crate) fn direct_link_enabled(app: &AppHandle) -> bool {
+    app.try_state::<crate::state_manager::AppStateContainer>()
+        .and_then(|container| {
+            container.state.lock().ok().map(|state| state.settings.direct_link && state.settings.fast_transfer)
+        })
+        .unwrap_or(false)
+}
+
+/// Where the Wi-Fi Direct helper sits among the app's resources, in Windows
+/// builds that bundle it. The Nearby Link lab uses the same program, but the
+/// direct link does not need the lab to be switched on.
+const DIRECT_HELPER: &str = "nearby-lab/dropflow-nearby-windows-lab.exe";
+
+/// This device's way to set up a direct link for one session. `None` (the
+/// setting is off, or this platform or build has no way) keeps the transfer
+/// on the normal network. Dropping the link releases its network.
+pub(crate) fn direct_link(app: &AppHandle) -> Option<Box<dyn super::session::DirectLink>> {
+    if !cfg!(windows) || !direct_link_enabled(app) {
+        return None;
+    }
+    let device_id = app
+        .try_state::<crate::state_manager::AppStateContainer>()
+        .and_then(|container| container.state.lock().ok().map(|state| state.device_uuid.clone()))?;
+    let helper = app.path().resolve(DIRECT_HELPER, tauri::path::BaseDirectory::Resource).ok()?;
+    windows_link(helper, &device_id)
+}
+
+#[cfg(windows)]
+fn windows_link(helper: std::path::PathBuf, device_id: &str) -> Option<Box<dyn super::session::DirectLink>> {
+    Some(Box::new(super::direct_windows::WindowsHostLink::new(helper, device_id)?))
+}
+#[cfg(not(windows))]
+fn windows_link(_helper: std::path::PathBuf, _device_id: &str) -> Option<Box<dyn super::session::DirectLink>> {
+    None
+}
+
+/// Lends a session the link for its duration; the caller closes it after.
+pub(crate) fn lend(
+    link: &mut Option<Box<dyn super::session::DirectLink>>,
+) -> Option<&mut dyn super::session::DirectLink> {
+    link.as_mut().map(|link| &mut **link as &mut dyn super::session::DirectLink)
+}
+
 impl Default for TransferState {
     fn default() -> Self {
         Self {

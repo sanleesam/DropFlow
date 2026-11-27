@@ -294,7 +294,7 @@ Both sides send keep-alives while they work.
 `FAILED: reason` on the shared connection; both then continue there as if
 `direct` had not been granted. Limits: the joiner waits 25 seconds for the
 offer; the host waits 75 seconds for the joiner (a phone may ask its owner
-first); a listening joiner waits 20 seconds for the host's connection. A
+first); a listening joiner waits 30 seconds for the host's connection. A
 `DIRECT_RESULT` that arrives after both sides have settled is ignored, like a
 keep-alive. A `TRANSFER_CANCEL` during set-up ends the transfer.
 

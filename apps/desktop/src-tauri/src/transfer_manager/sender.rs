@@ -166,7 +166,13 @@ pub fn send_files_over_tcp(
         }
     };
     // The command's result is the single failure report; no failure event here.
-    let summary = send_session(&mut stream, &job, &cancel_flag, None, &mut on_event).map_err(|error| {
+    let mut link = super::engine::direct_link(app);
+    let outcome = send_session(&mut stream, &job, &cancel_flag, super::engine::lend(&mut link), &mut on_event);
+    // The private network goes away with the session, however it ended.
+    if let Some(link) = link.as_mut() {
+        link.close();
+    }
+    let summary = outcome.map_err(|error| {
         // The receiver kept what arrived; sending the same files again continues.
         if resume_granted && error.starts_with("Connection lost") {
             format!("{error} [resumable]")
@@ -176,10 +182,11 @@ pub fn send_files_over_tcp(
     })?;
     info!("[Sender] ACK_RECEIVED");
     info!(
-        "{} batch={} resumed_bytes={}",
+        "{} batch={} resumed_bytes={} direct={}",
         super::perf::summary("send", total_files as usize, summary.bytes_sent, summary.elapsed),
         summary.negotiated.batch,
-        summary.bytes_resumed
+        summary.bytes_resumed,
+        summary.direct
     );
 
     crate::state_manager::remove_incomplete_session(app, &session_id);
