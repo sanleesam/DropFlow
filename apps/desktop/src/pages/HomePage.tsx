@@ -137,7 +137,7 @@ export function HomePage() {
             const failed = item.status === "failed";
             return (
               <div className="row has-leading" key={item.id}>
-                <span className={`tile ${failed ? "red" : "green"}`}>
+                <span className={`tile ${failed ? (isResumable(item.error) ? "orange" : "red") : "green"}`}>
                   {item.direction === "receive" ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
                 </span>
                 <div className="grow">

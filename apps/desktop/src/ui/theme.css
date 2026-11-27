@@ -2265,17 +2265,22 @@ html.dark .scrim {
   font-size: 13px;
 }
 
+/* Bottom centre, clear of the toolbar. They sit above the send dock when a
+   page has one. Newest is nearest the edge. */
 .toasts {
   position: fixed;
   z-index: 60;
-  top: 12px;
+  bottom: 22px;
   left: 50%;
   translate: -50% 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   align-items: center;
   gap: 8px;
   pointer-events: none;
+}
+body:has(.dock-wrap) .toasts {
+  bottom: 84px;
 }
 .toast {
   pointer-events: auto;
@@ -2307,7 +2312,7 @@ html.dark .scrim {
 }
 @keyframes toast-in {
   from {
-    transform: translateY(-18px) scale(0.9);
+    transform: translateY(18px) scale(0.9);
     opacity: 0;
   }
 }
