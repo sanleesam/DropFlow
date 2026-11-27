@@ -1567,7 +1567,6 @@ html.dark .avatar.local {
   gap: 6px;
   height: 52px;
   padding: 6px;
-  max-width: calc(100% - 40px);
   animation: dock-in var(--spring-bouncy-ms) var(--spring-bouncy) backwards;
 }
 @keyframes dock-in {
@@ -1577,6 +1576,7 @@ html.dark .avatar.local {
   }
 }
 .dock .btn {
+  flex: none;
   height: 40px;
   padding: 0 16px;
   background: transparent;
@@ -1609,6 +1609,11 @@ html.dark .avatar.local {
   font-size: 12px;
   color: var(--label-2);
   white-space: nowrap;
+  /* Gives way first when the window is narrow; never spills past the glass. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .dock .select {
   height: 40px;
@@ -1624,6 +1629,11 @@ html.dark .avatar.local {
 .dock-stack {
   position: relative;
   pointer-events: none;
+  /* The width limit belongs here. On the dock itself it was measured against
+     this wrapper, which is exactly as wide as the dock, so the dock always
+     came out 40px narrower than its own content. */
+  max-width: calc(100% - 40px);
+  min-width: 0;
 }
 .dock-stack > * {
   pointer-events: auto;
