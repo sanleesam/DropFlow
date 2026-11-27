@@ -240,13 +240,16 @@ data class DirectOffer(
     /** Proves that whoever connects on the new network received this offer. */
     val token: String,
     /** Set when the host listens; otherwise the joiner listens and answers with [DirectJoined]. */
-    val hostPort: Int? = null
+    val hostPort: Int? = null,
+    /** The host can find a joiner that has to leave the shared network to join (see [DirectJoined.leaving]). */
+    val leavingOk: Boolean = false
 ) {
     fun toJsonObject(): JSONObject = JSONObject().apply {
         put("ssid", ssid)
         put("passphrase", passphrase)
         put("token", token)
         if (hostPort != null) put("hostPort", hostPort)
+        if (leavingOk) put("leavingOk", true)
     }
 
     companion object {
@@ -258,24 +261,39 @@ data class DirectOffer(
                 ssid = json.get("ssid") as String,
                 passphrase = json.get("passphrase") as String,
                 token = json.get("token") as String,
-                hostPort = port?.let { (it as Number).toInt().also { number -> require(number in 1..65535) } }
+                hostPort = port?.let { (it as Number).toInt().also { number -> require(number in 1..65535) } },
+                leavingOk = json.opt("leavingOk") == true
             ).takeIf { it.ssid.isNotEmpty() && it.token.isNotEmpty() }
         }.getOrNull()
     }
 }
 
 /** Sent by a listening joiner on the shared connection. */
-data class DirectJoined(val address: String, val port: Int) {
+data class DirectJoined(
+    /** Empty when [leaving]: the joiner does not know its address yet. */
+    val address: String,
+    val port: Int,
+    /**
+     * Sent before joining by a device with one Wi-Fi connection: it is about
+     * to leave the shared network, so this is the last frame on it. The host
+     * connects to the address its own platform reports for the device.
+     */
+    val leaving: Boolean = false
+) {
     fun toJsonObject(): JSONObject = JSONObject().apply {
         put("address", address)
         put("port", port)
+        if (leaving) put("leaving", true)
     }
 
     companion object {
         fun parse(payload: ByteArray): DirectJoined? = runCatching {
             val json = JSONObject(String(payload, Charsets.UTF_8))
-            DirectJoined(json.get("address") as String, (json.get("port") as Number).toInt())
-                .takeIf { it.address.isNotEmpty() && it.port in 1..65535 }
+            DirectJoined(
+                address = json.opt("address") as? String ?: "",
+                port = (json.get("port") as Number).toInt(),
+                leaving = json.opt("leaving") == true
+            ).takeIf { (it.leaving || it.address.isNotEmpty()) && it.port in 1..65535 }
         }.getOrNull()
     }
 }

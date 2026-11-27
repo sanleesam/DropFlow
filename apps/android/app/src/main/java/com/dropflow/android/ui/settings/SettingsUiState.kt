@@ -13,5 +13,6 @@ data class SettingsUiState(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val glassStyle: GlassStyle = GlassStyle.LIQUID,
     val directLink: Boolean = false,
+    val directLinkLeavesWifi: Boolean = false,
     val downloadDirectory: String = "/storage/emulated/0/Download/DropFlow"
 )

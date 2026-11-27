@@ -50,11 +50,19 @@ class FileSender {
         var input = socketInputStream
         var output = FrameOutput.of(socketOutputStream)
         var linked: Socket? = null
+        var setup: LinkSetup? = null
+        // A device left the shared network for a link that never came up:
+        // that connection is finished, and nothing more is said on it.
+        val stranded = { linked == null && setup?.left == true }
         // Only this thread writes, and only whole frames, so a notice sent from
         // here is always at a frame boundary.
         val notify = { tag: FrameTag, text: String ->
             val payload = text.toByteArray(StandardCharsets.UTF_8)
-            if (sendNotice != null) runCatching { sendNotice(tag, payload) } else output.notice(tag, payload)
+            when {
+                stranded() -> false
+                sendNotice != null -> runCatching { sendNotice(tag, payload) }.isSuccess
+                else -> output.notice(tag, payload)
+            }
         }
         var batch = false
 
@@ -117,7 +125,8 @@ class FileSender {
 
             if (iHost != null && direct != null) {
                 progressTracker.startLinking()
-                val socket = LinkSetup(input, output, direct.link, isCancelled, direct.limits, ::stopped).run(iHost)
+                val socket = LinkSetup(input, output, direct.link, isCancelled, direct.limits, ::stopped)
+                    .also { setup = it }.run(iHost)
                 if (socket != null) {
                     // The rest of the session, notices included, uses the new connection.
                     linked = socket
@@ -257,6 +266,10 @@ class FileSender {
                 e is LocalFailureException -> {
                     Log.e(TAG, "FileSender (streams) could not read a file for ${requestPayload.sessionId}: ${e.message}", e)
                     if (batch) notify(FrameTag.ERROR, e.notice)
+                    e.message
+                }
+                e is DirectLinkLostException -> {
+                    Log.e(TAG, "Session ${requestPayload.sessionId} left the shared network and the link failed: ${e.message}")
                     e.message
                 }
                 e is IOException -> {

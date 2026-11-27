@@ -39,6 +39,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dropflow.android.BuildConfig
 import com.dropflow.android.core.network.transfer.DirectLinkSupport
+import com.dropflow.android.core.network.transfer.LinkMode
 import com.dropflow.android.ui.components.ButtonStyle
 import com.dropflow.android.ui.components.CapsuleButton
 import com.dropflow.android.ui.components.IconTile
@@ -71,8 +72,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, onUpdates:
     val glassMode = LocalGlassMode.current
     val canSave = draft.trim().isNotEmpty() && draft.trim() != state.deviceName
     val save = { if (canSave) { viewModel.updateDeviceName(draft); keyboard?.hide() }; Unit }
-    // Joining must leave this phone's own Wi-Fi connected; not every phone can do that.
-    val canLink = remember(context) { DirectLinkSupport.keepsWifi(context) }
+    // Some phones keep their own Wi-Fi while joining; others have to leave it. Each is allowed separately.
+    val linkMode = remember(context) { DirectLinkSupport.mode(context) }
     Page(Screen.Settings.title, modifier) {
         item("device-head") { SectionHeader("This Device") }
         item("device") {
@@ -117,13 +118,24 @@ fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, onUpdates:
         item("sharing") {
             ListCard {
                 ListRow("Direct link", subtitle = "Experimental", subtitleColor = colors.orange, trailing = {
-                    ToggleSwitch(state.directLink && canLink, viewModel::updateDirectLink, "Direct link", enabled = canLink)
+                    when (linkMode) {
+                        LinkMode.SECOND_CONNECTION ->
+                            ToggleSwitch(state.directLink, viewModel::updateDirectLink, "Direct link")
+                        LinkMode.LEAVES_WIFI ->
+                            ToggleSwitch(state.directLinkLeavesWifi, viewModel::updateDirectLinkLeavesWifi, "Direct link")
+                        LinkMode.UNAVAILABLE -> ToggleSwitch(false, {}, "Direct link", enabled = false)
+                    }
                 })
             }
         }
         item("sharing-foot") {
-            SectionFooter(if (canLink) "Moves a transfer onto a private Wi‑Fi link when the other device offers one. Android may ask before joining."
-                else "This phone cannot keep its own Wi‑Fi while joining another network.", Modifier.padding(top = 6.dp))
+            SectionFooter(when (linkMode) {
+                LinkMode.SECOND_CONNECTION ->
+                    "Moves a transfer onto a private Wi‑Fi link when the other device offers one. Android may ask before joining."
+                LinkMode.LEAVES_WIFI ->
+                    "Your phone leaves its Wi‑Fi while a transfer runs, then returns. No Wi‑Fi internet during the transfer."
+                LinkMode.UNAVAILABLE -> "Needs Android 10 or newer."
+            }, Modifier.padding(top = 6.dp))
         }
         if (BuildConfig.NEARBY_LAB) {
             sectionGap("gap-nearby")

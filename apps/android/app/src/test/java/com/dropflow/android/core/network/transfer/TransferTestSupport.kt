@@ -265,11 +265,20 @@ internal open class LoopbackLink(hostRank: Int, join: Boolean) : DirectLink {
     @Volatile var hostListens = false
     @Volatile var failHost = false
     @Volatile var failJoin = false
+    /** One Wi-Fi connection only: joining means leaving the shared network. */
+    @Volatile var leaves = false
+    /** As host: able to find a joiner that left ([connectJoined]). */
+    @Volatile var findsJoiner = true
     val calls: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     val closed = AtomicBoolean(false)
+    /** The network a joiner expects to be offered; null accepts any. */
+    protected open val expectedNetwork: Pair<String, String>? = SSID to PASSPHRASE
     @Volatile private var listener: ServerSocket? = null
 
-    protected fun listen(): Int = ServerSocket(0, 8, InetAddress.getLoopbackAddress()).also { listener = it }.localPort
+    protected fun open(): Int = ServerSocket(0, 8, InetAddress.getLoopbackAddress()).also { listener = it }.localPort
+
+    /** Where this link listens, once it does. */
+    val listeningPort: Int? get() = listener?.localPort
 
     override fun caps() = caps
 
@@ -277,15 +286,32 @@ internal open class LoopbackLink(hostRank: Int, join: Boolean) : DirectLink {
         calls += "host"
         tick()
         if (failHost) throw DirectLinkException("this adapter cannot create a network")
-        return HostedLink(SSID, PASSPHRASE, if (hostListens) listen() else null)
+        return HostedLink(SSID, PASSPHRASE, if (hostListens) open() else null)
     }
 
     override fun join(offer: DirectOffer, tick: () -> Unit): JoinedLink {
         calls += "join"
         tick()
-        assertEquals(SSID to PASSPHRASE, offer.ssid to offer.passphrase)
+        expectedNetwork?.let { assertEquals(it, offer.ssid to offer.passphrase) }
         if (failJoin) throw DirectLinkException("could not join the network")
-        return JoinedLink("127.0.0.1", if (offer.hostPort == null) listen() else 0)
+        // A device that leaves is listening already.
+        val port = listener?.localPort ?: if (offer.hostPort == null) open() else 0
+        return JoinedLink("127.0.0.1", port)
+    }
+
+    override fun leavesNetwork() = leaves
+
+    override fun listen(): Int {
+        calls += "listen"
+        return open()
+    }
+
+    override fun acceptsLeaving() = findsJoiner
+
+    override fun connectJoined(port: Int, tick: () -> Unit): Socket {
+        calls += "find"
+        tick()
+        return Socket("127.0.0.1", port)
     }
 
     override fun accept(waitMs: Int): Socket? {

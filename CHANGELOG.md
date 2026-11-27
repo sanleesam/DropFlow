@@ -11,6 +11,30 @@ See [the current policy](docs/VERSIONING.md). Published versions are not renamed
 Android's numeric `versionCode` only increases, including when moving from the
 legacy beta label to the next alpha product version.
 
+## Desktop — [0.2.0-dev.4] — 2026-11-28
+
+Development build.
+
+- **Direct Link for devices with one Wi-Fi connection (experimental, off by
+  default).** A Mac, or a phone that cannot hold two Wi-Fi connections, can
+  now use a Windows PC's direct link by leaving its own Wi-Fi for the length
+  of the transfer and returning afterwards. Turn it on on both devices
+  (Settings → Transfers → Direct Link). A link that fails after the device
+  has left ends the transfer; sending again continues it.
+  **Not yet tested on any real PC, Mac or phone.**
+- Settings shows whether this PC can host a direct link, and why not.
+- Fixed the transfer details panel losing its values behind a long file
+  name, and sent transfers being listed under "Target Device".
+
+## Android — [0.3.0-alpha.3] — 2026-11-28
+
+Alpha.
+
+- **Direct link on phones without dual Wi-Fi (experimental, off by
+  default).** The phone leaves its Wi-Fi while a transfer runs, joins the
+  PC's private network, then returns. Android asks you to approve the
+  network. **Not yet tested on a real phone.**
+
 ## Desktop — [0.2.0-dev.3] — 2026-11-27
 
 Development build.

@@ -26,7 +26,9 @@ data class UserPreferences(
     val updateChannel: String = "alpha",
     val themeMode: String = "system",
     val glassStyle: String = "liquid",
-    val directLink: Boolean = false
+    val directLink: Boolean = false,
+    /** Direct link on a phone that has to leave its own Wi-Fi for it; allowed separately. */
+    val directLinkLeavesWifi: Boolean = false
 )
 
 class UserPreferencesRepository(private val context: Context) {
@@ -44,6 +46,7 @@ class UserPreferencesRepository(private val context: Context) {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val GLASS_STYLE = stringPreferencesKey("glass_style")
         val DIRECT_LINK = booleanPreferencesKey("direct_link")
+        val DIRECT_LINK_LEAVES_WIFI = booleanPreferencesKey("direct_link_leaves_wifi")
     }
 
     val userPreferencesFlow: Flow<UserPreferences> = context.dataStore.data.map { preferences ->
@@ -64,7 +67,8 @@ class UserPreferencesRepository(private val context: Context) {
                 ?: defaultChannel,
             themeMode = preferences[PreferencesKeys.THEME_MODE] ?: "system",
             glassStyle = preferences[PreferencesKeys.GLASS_STYLE] ?: "liquid",
-            directLink = preferences[PreferencesKeys.DIRECT_LINK] ?: false
+            directLink = preferences[PreferencesKeys.DIRECT_LINK] ?: false,
+            directLinkLeavesWifi = preferences[PreferencesKeys.DIRECT_LINK_LEAVES_WIFI] ?: false
         )
     }
 
@@ -127,6 +131,10 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun updateDirectLink(value: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.DIRECT_LINK] = value }
+    }
+
+    suspend fun updateDirectLinkLeavesWifi(value: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DIRECT_LINK_LEAVES_WIFI] = value }
     }
 
     suspend fun updateChannel(value: String) {

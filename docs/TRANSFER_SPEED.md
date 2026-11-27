@@ -29,10 +29,16 @@ With **Direct link** turned on (off by default, experimental):
 
 | Pair | Wireless direct link | State |
 | --- | --- | --- |
-| Windows ↔ Android | Windows hosts, the phone joins (Android 12+ with dual Wi-Fi) | Being built; untested on hardware |
+| Windows ↔ Android | Windows hosts, the phone joins. A phone with dual Wi-Fi keeps its own network; any other phone leaves it for the transfer | Built; untested on hardware |
+| Windows ↔ Mac | Windows hosts, the Mac leaves its Wi-Fi and joins | Built; untested on hardware |
 | Android ↔ Android | One phone hosts a local-only hotspot | Not built |
 | Mac ↔ Mac | Apple peer-to-peer (AWDL) | Probe only |
-| Mac ↔ Android, Mac ↔ Windows | macOS gives apps no Wi-Fi Direct. The Mac would have to leave its own Wi-Fi to join the other device's network, so it must be an explicit choice each time | Not built |
+| Mac ↔ Android | Neither can host a network the other can join without first losing the connection they use to arrange it | Not possible this way |
+
+A device that has to leave its Wi-Fi does so only with Direct Link turned on,
+and the setting says so. It has no Wi-Fi internet during the transfer, and a
+link that fails after it has left ends the transfer (sending again continues
+it) instead of falling back.
 
 What it cannot do: it still needs the two devices to see each other on some
 shared network first. Finding devices with no network at all needs Bluetooth

@@ -69,13 +69,14 @@ class DirectLinkTest {
         storage: FakeStorage,
         direct: DirectOptions?,
         input: InputStream = socket.getInputStream(),
-        isCancelled: () -> Boolean = { false }
+        isCancelled: () -> Boolean = { false },
+        output: OutputStream = socket.getOutputStream()
     ): Receive {
         socket.soTimeout = 15_000
         val receiver = FileReceiver(storage)
         return Receive(receiver, inBackground {
             runBlocking {
-                receiver.receiveTransferSession(input, socket.getOutputStream(), request,
+                receiver.receiveTransferSession(input, output, request,
                     trackerFor(request, SessionDirection.INCOMING), isCancelled, direct = direct)
             }
         })
@@ -217,13 +218,31 @@ class DirectLinkTest {
         assertEquals(LinkLimits(offerMs = 25_000, joinMs = 75_000, connectMs = 30_000, greetingMs = 5_000, pollMs = 250), LinkLimits())
     }
 
-    @Test fun thisPhoneJoinsOnlyWithTheSettingAndroid12AndASecondWifiConnection() {
-        assertEquals(DirectCaps(hostRank = 0, join = true), DirectLinkSupport.caps(enabled = true, sdk = 31, keepsWifi = true))
-        assertEquals(DirectCaps(0, true), DirectLinkSupport.caps(enabled = true, sdk = 34, keepsWifi = true))
-        // Each condition alone is not enough, and the phone never hosts.
-        assertEquals(DirectCaps(0, false), DirectLinkSupport.caps(enabled = false, sdk = 34, keepsWifi = true))
-        assertEquals(DirectCaps(0, false), DirectLinkSupport.caps(enabled = true, sdk = 30, keepsWifi = true))
-        assertEquals(DirectCaps(0, false), DirectLinkSupport.caps(enabled = true, sdk = 34, keepsWifi = false))
+    @Test fun thisPhoneKeepsItsWifiWhereItCanAndLeavesItOnlyWhereItMust() {
+        // Android 12 with a chip that holds two connections: the phone's own Wi-Fi stays.
+        assertEquals(LinkMode.SECOND_CONNECTION, DirectLinkSupport.mode(sdk = 31, keepsWifi = true))
+        assertEquals(LinkMode.SECOND_CONNECTION, DirectLinkSupport.mode(sdk = 34, keepsWifi = true))
+        // Otherwise, from Android 10 on, it can join by leaving its own Wi-Fi.
+        assertEquals(LinkMode.LEAVES_WIFI, DirectLinkSupport.mode(sdk = 34, keepsWifi = false))
+        assertEquals(LinkMode.LEAVES_WIFI, DirectLinkSupport.mode(sdk = 29, keepsWifi = false))
+        assertEquals(LinkMode.LEAVES_WIFI, DirectLinkSupport.mode(sdk = 30, keepsWifi = true))
+        // Before Android 10 an app cannot ask for a network at all.
+        assertEquals(LinkMode.UNAVAILABLE, DirectLinkSupport.mode(sdk = 28, keepsWifi = false))
+        assertEquals(LinkMode.UNAVAILABLE, DirectLinkSupport.mode(sdk = 26, keepsWifi = true))
+    }
+
+    @Test fun eachWayOfJoiningNeedsItsOwnConsentAndThePhoneNeverHosts() {
+        fun caps(mode: LinkMode, second: Boolean, leaving: Boolean) =
+            DirectLinkSupport.caps(mode, secondConnection = second, leavingWifi = leaving)
+        assertEquals(DirectCaps(hostRank = 0, join = true), caps(LinkMode.SECOND_CONNECTION, second = true, leaving = false))
+        assertEquals(DirectCaps(0, true), caps(LinkMode.LEAVES_WIFI, second = false, leaving = true))
+        // Off is off.
+        assertEquals(DirectCaps(0, false), caps(LinkMode.SECOND_CONNECTION, second = false, leaving = false))
+        assertEquals(DirectCaps(0, false), caps(LinkMode.LEAVES_WIFI, second = false, leaving = false))
+        // Having allowed a second connection never lets the phone leave its Wi-Fi, and the other way round.
+        assertEquals(DirectCaps(0, false), caps(LinkMode.LEAVES_WIFI, second = true, leaving = false))
+        assertEquals(DirectCaps(0, false), caps(LinkMode.SECOND_CONNECTION, second = false, leaving = true))
+        assertEquals(DirectCaps(0, false), caps(LinkMode.UNAVAILABLE, second = true, leaving = true))
     }
 
     @Test fun theHostOfAJoinedNetworkIsItsOwnPrivateOnLinkAddress() {
@@ -721,11 +740,11 @@ class DirectLinkTest {
         assertEquals(BATCH_AND_RESUME, off.features())
         assertFalse(off.has("direct"))
 
-        // The setting is on, but this phone would have to give up its own Wi-Fi, or runs Android 11.
+        // The setting is off for the way this phone would join, or the phone is too old.
         for (caps in listOf(
-            DirectLinkSupport.caps(enabled = true, sdk = 34, keepsWifi = false),
-            DirectLinkSupport.caps(enabled = true, sdk = 30, keepsWifi = true),
-            DirectLinkSupport.caps(enabled = false, sdk = 34, keepsWifi = true)
+            DirectLinkSupport.caps(LinkMode.SECOND_CONNECTION, secondConnection = false, leavingWifi = false),
+            DirectLinkSupport.caps(LinkMode.LEAVES_WIFI, secondConnection = true, leavingWifi = false),
+            DirectLinkSupport.caps(LinkMode.UNAVAILABLE, secondConnection = true, leavingWifi = true)
         )) {
             val link = LoopbackLink(caps.hostRank, caps.join)
             val request = requestWith(link)
@@ -736,7 +755,7 @@ class DirectLinkTest {
         }
 
         // Everything holds: the phone offers to join, never to host.
-        val caps = DirectLinkSupport.caps(enabled = true, sdk = 34, keepsWifi = true)
+        val caps = DirectLinkSupport.caps(LinkMode.LEAVES_WIFI, secondConnection = false, leavingWifi = true)
         val request = requestWith(LoopbackLink(caps.hostRank, caps.join))
         assertEquals(listOf("batch", "resume", "direct"), request.features())
         assertEquals(0, request.getJSONObject("direct").getInt("hostRank"))
@@ -1136,7 +1155,7 @@ class DirectLinkTest {
                 calls += "join"
                 joining.set(true)
                 while (!finish.get()) Thread.sleep(10)
-                return JoinedLink("127.0.0.1", listen())
+                return JoinedLink("127.0.0.1", open())
             }
         }
         val link = Late()
@@ -1299,5 +1318,401 @@ class DirectLinkTest {
         assertTrue(sent.result()!!.startsWith("Connection to recipient"))
         near.close()
         assertEquals(listOf("join", "close"), steps(link))
+    }
+
+    // ── A phone with one Wi-Fi connection: it leaves its network to join ────
+
+    private val stays = "FAILED: this device would have to leave the network, and the other device cannot work with that"
+    private val lost = "The direct link could not be set up"
+
+    private fun leaver() = LoopbackLink(0, true).apply { leaves = true }
+
+    /** What a host that can find a joiner by itself offers. */
+    private fun offerToLeaver(hostPort: Int? = null, leavingOk: Boolean = true) =
+        DirectOffer(LoopbackLink.SSID, LoopbackLink.PASSPHRASE, token, hostPort, leavingOk).toJsonObject().toString()
+
+    /** The host finds the phone on its own network; here that is loopback. */
+    private fun findAsHost(joined: JSONObject, shown: String = token): Peer =
+        connectAsHost(JSONObject().put("address", "127.0.0.1").put("port", joined.getInt("port")), shown)
+
+    /** A leaver whose radio waits for the test, and which notes what had been written when it started to join. */
+    private class GatedLeaver(private val written: () -> Int = { 0 }) : LoopbackLink(0, true) {
+        val joining = AtomicBoolean(false)
+        val gate = AtomicBoolean(false)
+        @Volatile var writtenBeforeJoining = -1
+
+        init {
+            leaves = true
+        }
+
+        override fun join(offer: DirectOffer, tick: () -> Unit): JoinedLink {
+            calls += "join"
+            writtenBeforeJoining = written()
+            joining.set(true)
+            while (!gate.get()) {
+                tick()
+                Thread.sleep(10)
+            }
+            return JoinedLink("127.0.0.1", checkNotNull(listeningPort))
+        }
+
+        fun awaitJoining() {
+            val giveUp = System.nanoTime() + 10_000L * 1_000_000
+            while (!joining.get()) {
+                check(System.nanoTime() < giveUp) { "the join never started" }
+                Thread.sleep(10)
+            }
+        }
+    }
+
+    @Test fun leavingIsOnlyOnTheWireWhenItApplies() {
+        // Nothing changes for devices that do not use it.
+        assertFalse(DirectOffer("DIRECT-DF-1", "passphrase", token).toJsonObject().has("leavingOk"))
+        assertFalse(DirectJoined("192.168.137.24", 50_123).toJsonObject().has("leaving"))
+        assertFalse(DirectOffer.parse("""{"ssid":"DIRECT-DF-1","passphrase":"passphrase","token":"$token"}""".toByteArray())!!.leavingOk)
+        assertFalse(DirectJoined.parse("""{"address":"192.168.137.24","port":50123}""".toByteArray())!!.leaving)
+
+        val offer = DirectOffer("DIRECT-DF-1", "passphrase", token, leavingOk = true)
+        assertEquals(setOf("ssid", "passphrase", "token", "leavingOk"), offer.toJsonObject().keySet())
+        assertTrue(offer.toJsonObject().getBoolean("leavingOk"))
+        assertEquals(offer, DirectOffer.parse(offer.toJsonObject().toString().toByteArray()))
+        // Anything but true is no.
+        assertFalse(DirectOffer.parse("""{"ssid":"DIRECT-DF-1","passphrase":"passphrase","token":"$token","leavingOk":"yes"}""".toByteArray())!!.leavingOk)
+
+        // The joiner does not know its address yet: it is empty, and the port is what counts.
+        val leaving = DirectJoined("", 50_123, leaving = true)
+        assertEquals(setOf("address", "port", "leaving"), leaving.toJsonObject().keySet())
+        assertEquals("", leaving.toJsonObject().getString("address"))
+        assertEquals(leaving, DirectJoined.parse("""{"address":"","port":50123,"leaving":true}""".toByteArray()))
+        assertEquals(leaving, DirectJoined.parse("""{"port":50123,"leaving":true}""".toByteArray()))
+        // Without `leaving` an address is still required.
+        assertNull(DirectJoined.parse("""{"address":"","port":50123}""".toByteArray()))
+        assertNull(DirectJoined.parse("""{"address":"","port":0,"leaving":true}""".toByteArray()))
+    }
+
+    @Test fun onlyANetworkThatLooksLikeADirectLinkIsJoined() {
+        fun problem(ssid: String, passphrase: String = "0123456789abcdef") = offerProblem(DirectOffer(ssid, passphrase, token))
+        assertNull(problem("DIRECT-DF-8fdf77418e", "0123456789abcdef0123456789abcdef"))
+        assertNull(problem("DIRECT-DF-loopback", "loopback-passphrase"))
+        for (name in listOf("HomeWifi", "direct-df-1", "DIRECT", "DIRECT-DF with space", "DIRECT-DF-" + "x".repeat(23), "DIRECT-DF-é")) {
+            assertEquals(name, "the other device offered a network that is not a direct link", problem(name))
+        }
+        for (password in listOf("short", "has space in it", "x".repeat(64), "pässwörter")) {
+            assertEquals(password, "the other device offered an unusable network password", problem("DIRECT-DF-1", password))
+        }
+
+        // Whichever way the phone joins, such an offer is answered and the transfer stays where it is.
+        for (link in listOf(LoopbackLink(0, true), leaver())) {
+            granted(link) { peer, sent ->
+                peer.write(FrameTag.DIRECT_OFFER, DirectOffer("HomeWifi", LoopbackLink.PASSPHRASE, token, leavingOk = true).toJsonObject().toString())
+                assertEquals("FAILED: the other device offered a network that is not a direct link", failure(peer))
+                expectSharedStream(peer, sent)
+            }
+            assertEquals(listOf("close"), steps(link))
+        }
+    }
+
+    @Test fun aDeviceThatMustLeaveItsNetworkStillGetsADirectLink() {
+        for (senderLeaves in listOf(true, false)) {
+            val name = "senderLeaves=$senderLeaves"
+            val joiner = leaver()
+            val host = LoopbackLink(2, false)
+            // The shared connection fails after 16 KiB: only the link can carry the files.
+            val outcome = if (senderLeaves) transfer(files, joiner, host, sharedLimit = 16 * 1024)
+            else transfer(files, host, joiner, sharedLimit = 16 * 1024)
+            assertNull(name, outcome.sent)
+            assertTrue("$name: ${outcome.failure}", outcome.received)
+            assertTrue(name, outcome.direct)
+            assertSameFiles(published(files), outcome.storage.publishedFiles())
+            // The joiner listened before it joined; the host found it by itself.
+            assertEquals(name, listOf("listen", "join", "close"), steps(joiner))
+            assertEquals(name, listOf("host", "find", "close"), steps(host))
+        }
+    }
+
+    @Test fun aDeviceNeverLeavesForAHostThatCouldNotFindIt() {
+        // The host cannot find joiners; or it listens itself, which a leaver cannot use either.
+        for (senderLeaves in listOf(true, false)) for (hostListens in listOf(false, true)) {
+            val name = "senderLeaves=$senderLeaves hostListens=$hostListens"
+            val joiner = leaver()
+            val host = LoopbackLink(2, false).apply { findsJoiner = hostListens; this.hostListens = hostListens }
+            val outcome = if (senderLeaves) transfer(files, joiner, host) else transfer(files, host, joiner)
+            // It stayed, so the transfer simply used the shared network.
+            assertNull(name, outcome.sent)
+            assertTrue("$name: ${outcome.failure}", outcome.received)
+            assertFalse(name, outcome.direct)
+            assertTrue(name, outcome.sharedBytes > if (senderLeaves) files.sumOf { it.second.size } else 0)
+            assertEquals(name, listOf("close"), steps(joiner))
+            assertEquals(name, listOf("host", "close"), steps(host))
+            assertSameFiles(published(files), outcome.storage.publishedFiles())
+        }
+    }
+
+    @Test fun onceADeviceHasLeftAFailedLinkEndsTheTransferOnBothSides() {
+        for (senderLeaves in listOf(true, false)) {
+            val name = "senderLeaves=$senderLeaves"
+            val joiner = leaver().apply { failJoin = true }
+            val host = LoopbackLink(2, false)
+            val outcome = if (senderLeaves) transfer(files, joiner, host) else transfer(files, host, joiner)
+            // No quiet fallback: there is no shared connection left to fall back to.
+            assertTrue("$name: ${outcome.sent}", outcome.sent!!.startsWith(lost))
+            assertFalse(name, outcome.received)
+            assertTrue("$name: ${outcome.failure}", outcome.failure!!.startsWith(lost))
+            val leaversReason = if (senderLeaves) outcome.sent else outcome.failure
+            assertEquals(name, "$lost (could not join the network)", leaversReason)
+            // Both links are released, so each device returns to its own network.
+            assertEquals(name, listOf("listen", "join", "close"), steps(joiner))
+            assertEquals(name, listOf("host", "find", "close"), steps(host))
+            assertFalse(name, outcome.direct)
+            assertEquals(name, emptyList<String>(), outcome.storage.leftovers())
+            // The sender wrote its request and at most the set-up; no file data went anywhere.
+            assertTrue("$name: ${outcome.sharedBytes}", outcome.sharedBytes < 4 * 1024)
+        }
+    }
+
+    @Test fun aLeavingSenderSaysWhereItListensThenIsSilentOnTheSharedConnection() {
+        val (near, far) = socketPair()
+        val shared = RecordingOutput(near.getOutputStream())
+        val link = GatedLeaver { shared.writes.size }
+        Peer(far).use { peer ->
+            val sent = startSender(near, requestFor(files, BATCH), files, output = shared, direct = options(link))
+            assertEquals(listOf("batch", "direct"), peer.expectJson(FrameTag.TRANSFER_REQUEST).features())
+            peer.write(FrameTag.TRANSFER_ACCEPT, grantBoth)
+            peer.write(FrameTag.HEARTBEAT)
+            peer.write(FrameTag.DIRECT_OFFER, offerToLeaver())
+
+            val joined = peer.expectJson(FrameTag.DIRECT_JOINED)
+            assertEquals(setOf("address", "port", "leaving"), joined.keySet())
+            assertEquals("", joined.getString("address"))
+            assertTrue(joined.getBoolean("leaving"))
+
+            // The system asks the owner, then switches networks. Meanwhile the shared
+            // connection gets nothing at all, not even keep-alives (it is about to go away).
+            link.awaitJoining()
+            Thread.sleep(2_300)
+            assertEquals(0, peer.input.available())
+            assertFalse(sent.isDone)
+            link.gate.set(true)
+
+            findAsHost(joined).use { direct ->
+                assertEquals("OK", String(direct.expect(FrameTag.DIRECT_RESULT)))
+                direct.expectBatchFiles(files)
+                direct.write(FrameTag.TRANSFER_ACK, FINAL_ACK)
+                assertNull(sent.result())
+            }
+            // DIRECT_JOINED was the last frame on the shared connection.
+            assertEquals(0, peer.input.available())
+        }
+        near.close()
+        // It listened first, said so, and only then began to join; nothing was written after that.
+        assertEquals(listOf("listen", "join", "close"), steps(link))
+        assertEquals(2, link.writtenBeforeJoining)
+        assertEquals(link.writtenBeforeJoining, shared.writes.size)
+    }
+
+    @Test fun aLeavingReceiverSaysWhereItListensThenIsSilentOnTheSharedConnection() {
+        val storage = FakeStorage(folder.newFolder())
+        val (near, far) = socketPair()
+        val shared = RecordingOutput(near.getOutputStream())
+        val link = GatedLeaver { shared.writes.size }
+        Peer(far).use { peer ->
+            val run = startReceiver(near, hostingRequest(files), storage, options(link), output = shared)
+            assertEquals("sender", peer.expectJson(FrameTag.TRANSFER_ACCEPT).getString("directHost"))
+            peer.write(FrameTag.DIRECT_OFFER, offerToLeaver())
+            val joined = peer.expectJson(FrameTag.DIRECT_JOINED)
+            assertEquals("", joined.getString("address"))
+            assertTrue(joined.getBoolean("leaving"))
+
+            link.awaitJoining()
+            Thread.sleep(2_300)
+            assertEquals(0, peer.input.available())
+            link.gate.set(true)
+
+            findAsHost(joined).use { direct ->
+                assertEquals("OK", String(direct.expect(FrameTag.DIRECT_RESULT)))
+                direct.sendBatchFiles(files)
+                direct.write(FrameTag.TRANSFER_COMPLETE, "tx-test-session")
+                assertEquals("ACK", JSONObject(String(direct.await(FrameTag.TRANSFER_ACK))).getString("status"))
+            }
+            assertTrue(run.done.result())
+            assertEquals(0, peer.input.available())
+        }
+        near.close()
+        assertSameFiles(published(files), storage.publishedFiles())
+        assertEquals(listOf("listen", "join", "close"), steps(link))
+        // The acceptance and DIRECT_JOINED, and nothing after the join began.
+        assertEquals(2, link.writtenBeforeJoining)
+        assertEquals(link.writtenBeforeJoining, shared.writes.size)
+    }
+
+    @Test fun aLeaverStaysForAnOfferItCannotUse() {
+        // The host cannot find a joiner by itself.
+        val unfound = leaver()
+        granted(unfound) { peer, sent ->
+            peer.write(FrameTag.DIRECT_OFFER, offer())
+            assertEquals(stays, failure(peer))
+            expectSharedStream(peer, sent)
+        }
+        assertEquals(listOf("close"), steps(unfound))
+
+        // The host listens itself: a phone that has left could not tell it where it is, whatever else it says.
+        val listening = leaver()
+        granted(listening) { peer, sent ->
+            ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+                peer.write(FrameTag.DIRECT_OFFER, offerToLeaver(hostPort = server.localPort))
+                assertEquals(stays, failure(peer))
+                expectSharedStream(peer, sent)
+            }
+        }
+        assertEquals(listOf("close"), steps(listening))
+
+        // The same while receiving.
+        val storage = FakeStorage(folder.newFolder())
+        val receiving = leaver()
+        val (near, far) = socketPair()
+        Peer(far).use { peer ->
+            val run = startReceiver(near, hostingRequest(small), storage, options(receiving))
+            peer.expect(FrameTag.TRANSFER_ACCEPT)
+            peer.write(FrameTag.DIRECT_OFFER, offer())
+            assertEquals(stays, failure(peer))
+            peer.sendBatchFiles(small)
+            peer.write(FrameTag.TRANSFER_COMPLETE, "tx-test-session")
+            assertEquals("ACK", JSONObject(String(peer.await(FrameTag.TRANSFER_ACK))).getString("status"))
+            assertTrue(run.done.result())
+        }
+        near.close()
+        assertEquals(listOf("close"), steps(receiving))
+        assertSameFiles(published(small), storage.publishedFiles())
+    }
+
+    @Test fun aHostThatGaveUpBeforeThePhoneLeftKeepsItOnTheSharedConnection() {
+        // The phone cannot listen; then nothing was said and it simply stays.
+        class Deaf : LoopbackLink(0, true) {
+            init {
+                leaves = true
+            }
+
+            override fun listen(): Int {
+                calls += "listen"
+                throw DirectLinkException("DropFlow is not open on this device")
+            }
+        }
+        val deaf = Deaf()
+        granted(deaf) { peer, sent ->
+            peer.write(FrameTag.DIRECT_OFFER, offerToLeaver())
+            assertEquals("FAILED: DropFlow is not open on this device", failure(peer))
+            expectSharedStream(peer, sent)
+        }
+        assertEquals(listOf("listen", "close"), steps(deaf))
+
+        // The host's report arrived with its offer: the phone does not leave for it.
+        val link = leaver()
+        granted(link) { peer, sent ->
+            // One write, so both frames are there when the phone looks.
+            peer.output.write(
+                FrameUtils.encodeFrame(FrameTag.DIRECT_OFFER, offerToLeaver().toByteArray()) +
+                    FrameUtils.encodeFrame(FrameTag.DIRECT_RESULT, "FAILED: the network went away".toByteArray())
+            )
+            expectSharedStream(peer, sent)
+        }
+        assertFalse("join" in link.calls)
+    }
+
+    @Test fun cancellingAfterLeavingEndsTheTransferAndSaysNothingOnTheSharedConnection() {
+        // While the phone joins (the system may be asking its owner).
+        val joining = GatedLeaver()
+        val (connection, peer) = connect(SessionDirection.OUTGOING)
+        peer.use {
+            val sent = startSender(connection, small, joining)
+            peer.expect(FrameTag.TRANSFER_REQUEST)
+            peer.write(FrameTag.TRANSFER_ACCEPT, grantBoth)
+            peer.write(FrameTag.DIRECT_OFFER, offerToLeaver())
+            peer.expect(FrameTag.DIRECT_JOINED)
+            joining.awaitJoining()
+            val started = System.nanoTime()
+            connection.cancelTransfer()
+            assertEquals("Transfer cancelled", sent.result())
+            assertTrue((System.nanoTime() - started) / 1_000_000 < 1_000)
+            // No cancel notice: the connection just ends after DIRECT_JOINED.
+            assertTrue(peer.atEnd())
+        }
+        assertEquals(listOf("listen", "join", "close"), steps(joining))
+
+        // While it waits on the new network for the host.
+        val waiting = leaver()
+        val (second, host) = connect(SessionDirection.OUTGOING)
+        host.use {
+            val sent = startSender(second, small, waiting)
+            host.expect(FrameTag.TRANSFER_REQUEST)
+            host.write(FrameTag.TRANSFER_ACCEPT, grantBoth)
+            host.write(FrameTag.DIRECT_OFFER, offerToLeaver())
+            host.expect(FrameTag.DIRECT_JOINED)
+            Thread.sleep(300)
+            assertFalse(sent.isDone)
+            val started = System.nanoTime()
+            second.cancelTransfer()
+            assertEquals("Transfer cancelled", sent.result())
+            assertTrue((System.nanoTime() - started) / 1_000_000 < 1_000)
+            assertTrue(host.atEnd())
+        }
+        assertEquals(listOf("listen", "join", "close"), steps(waiting))
+
+        // The same while receiving: nothing is kept and nothing is said.
+        val storage = FakeStorage(folder.newFolder())
+        val receiving = GatedLeaver()
+        val (third, sender) = connect(SessionDirection.INCOMING)
+        sender.use {
+            val run = startReceiver(third, hostingRequest(small), storage, receiving)
+            sender.expect(FrameTag.TRANSFER_ACCEPT)
+            sender.write(FrameTag.DIRECT_OFFER, offerToLeaver())
+            sender.expect(FrameTag.DIRECT_JOINED)
+            receiving.awaitJoining()
+            third.cancelTransfer()
+            assertFalse(run.done.result())
+            assertEquals("Transfer cancelled", run.receiver.failureReason)
+            assertTrue(sender.atEnd())
+        }
+        assertEquals(listOf("listen", "join", "close"), steps(receiving))
+        assertEquals(emptyList<String>(), storage.leftovers())
+    }
+
+    @Test fun aPhoneThatLeftAndIsNeverFoundEndsTheTransferWithoutFallingBack() {
+        val link = leaver()
+        val (connection, peer) = connect(SessionDirection.OUTGOING)
+        peer.use {
+            val sent = startSender(connection, small, link, limits = fast.copy(connectMs = 600))
+            peer.expect(FrameTag.TRANSFER_REQUEST)
+            peer.write(FrameTag.TRANSFER_ACCEPT, grantBoth)
+            peer.write(FrameTag.DIRECT_OFFER, offerToLeaver())
+            val joined = peer.expectJson(FrameTag.DIRECT_JOINED)
+            // Someone else on the network is not the host: a wrong token gets no answer.
+            findAsHost(joined, shown = "f".repeat(32)).use { stranger -> assertTrue(stranger.atEnd()) }
+            assertEquals("$lost (the other device did not connect in time)", sent.result())
+            // Not even a failure report: the shared connection ends right after DIRECT_JOINED.
+            assertTrue(peer.atEnd())
+            // The phone no longer listens.
+            assertThrows(IOException::class.java) { Socket("127.0.0.1", joined.getInt("port")).close() }
+        }
+        assertEquals(listOf("listen", "join", "close"), steps(link))
+
+        // Receiving: the same end, and nothing is saved.
+        val storage = FakeStorage(folder.newFolder())
+        val receiving = leaver()
+        val (near, far) = socketPair()
+        val shared = RecordingOutput(near.getOutputStream())
+        Peer(far).use { sender ->
+            val run = startReceiver(near, hostingRequest(small), storage, options(receiving, fast.copy(connectMs = 300)), output = shared)
+            sender.expect(FrameTag.TRANSFER_ACCEPT)
+            sender.write(FrameTag.DIRECT_OFFER, offerToLeaver())
+            sender.expect(FrameTag.DIRECT_JOINED)
+            assertFalse(run.done.result())
+            assertEquals("$lost (the other device did not connect in time)", run.receiver.failureReason)
+            assertEquals(0, sender.input.available())
+        }
+        near.close()
+        // The acceptance and DIRECT_JOINED were the only writes.
+        assertEquals(2, shared.writes.size)
+        assertEquals(listOf("listen", "join", "close"), steps(receiving))
+        assertEquals(emptyList<String>(), storage.leftovers())
     }
 }

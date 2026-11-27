@@ -67,16 +67,23 @@ class TransferEngine(
         this.requireConfirmation = requireConfirmation
     }
 
-    /** Experimental and off until the person turns it on in Settings. */
+    /**
+     * Experimental and off until the person turns it on in Settings. The two
+     * ways to join are allowed separately: a phone may leave its own Wi-Fi
+     * only when the person turned the setting on while it said so.
+     */
     @Volatile
-    private var directLinkEnabled = false
+    private var directLinkPolicy = false to false
 
-    fun updateDirectLinkPolicy(enabled: Boolean) {
-        directLinkEnabled = enabled
+    fun updateDirectLinkPolicy(secondConnection: Boolean, leavingWifi: Boolean) {
+        directLinkPolicy = secondConnection to leavingWifi
     }
 
-    /** One link per transfer. It offers nothing when this phone cannot keep its own Wi-Fi while joining. */
-    private fun openDirectLink(): DirectLink? = if (directLinkEnabled) WifiJoinLink(appContext) else null
+    /** One link per transfer. It offers only what this phone can do and the person allowed. */
+    private fun openDirectLink(): DirectLink? {
+        val (secondConnection, leavingWifi) = directLinkPolicy
+        return if (secondConnection || leavingWifi) WifiJoinLink(appContext, secondConnection, leavingWifi) else null
+    }
 
     private val tcpServer = TcpTransferServer(
         context = appContext,

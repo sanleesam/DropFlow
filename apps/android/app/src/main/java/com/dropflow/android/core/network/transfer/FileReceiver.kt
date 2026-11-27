@@ -39,6 +39,7 @@ class FileReceiver(private val storage: ReceiveStorage) {
         var input = inputStream
         var output = FrameOutput.of(outputStream)
         var linked: Socket? = null
+        var setup: LinkSetup? = null
         // Resume needs staged data that survives the session; Android does not keep any yet.
         val batch = Protocol.FEATURE_BATCH in requestPayload.features
         val frames = BulkFrameReader()
@@ -79,7 +80,7 @@ class FileReceiver(private val storage: ReceiveStorage) {
             if (host != null && direct != null) {
                 progressTracker.startLinking()
                 val socket = LinkSetup(input, output, direct.link, isCancelled, direct.limits, ::senderStopped)
-                    .run(iHost = host == DirectCaps.HOST_RECEIVER)
+                    .also { setup = it }.run(iHost = host == DirectCaps.HOST_RECEIVER)
                 if (socket != null) {
                     // The rest of the session, notices included, uses the new connection.
                     linked = socket
@@ -209,7 +210,10 @@ class FileReceiver(private val storage: ReceiveStorage) {
                 else -> FrameTag.ERROR to MISMATCH_NOTICE
             }
             failureReason = e.message ?: "File transfer failed"
-            if (batch && notice != null) {
+            // A device left the shared network for a link that never came up:
+            // that connection is finished, and nothing more is said on it.
+            val stranded = linked == null && setup?.left == true
+            if (batch && notice != null && !stranded) {
                 val payload = notice.second.toByteArray(StandardCharsets.UTF_8)
                 if (sendNotice != null) runCatching { sendNotice(notice.first, payload) } else output.notice(notice.first, payload)
             }

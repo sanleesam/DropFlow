@@ -38,7 +38,7 @@ class HomeViewModel(
 
             userPreferencesRepository.userPreferencesFlow.collectLatest { prefs ->
                 transferEngine.updateAuthorizationPolicy(prefs.requireConfirmation)
-                transferEngine.updateDirectLinkPolicy(prefs.directLink)
+                transferEngine.updateDirectLinkPolicy(prefs.directLink, prefs.directLinkLeavesWifi)
                 _uiState.update { current -> current.copy(
                     localDeviceName = prefs.deviceName,
                     localUuid = prefs.deviceUuid.ifEmpty { stableUuid }

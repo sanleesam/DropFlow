@@ -33,7 +33,8 @@ class SettingsViewModel(
                     reduceMotion = prefs.reduceMotion,
                     themeMode = ThemeMode.fromId(prefs.themeMode),
                     glassStyle = GlassStyle.fromId(prefs.glassStyle),
-                    directLink = prefs.directLink
+                    directLink = prefs.directLink,
+                    directLinkLeavesWifi = prefs.directLinkLeavesWifi
                 )
             }
         }
@@ -83,6 +84,10 @@ class SettingsViewModel(
 
     fun updateDirectLink(value: Boolean) {
         viewModelScope.launch { userPreferencesRepository.updateDirectLink(value) }
+    }
+
+    fun updateDirectLinkLeavesWifi(value: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.updateDirectLinkLeavesWifi(value) }
     }
 
     companion object {

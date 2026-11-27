@@ -1,6 +1,7 @@
 package com.dropflow.android.core.network.transfer
 
 import android.util.Log
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.Socket
@@ -32,6 +33,12 @@ class JoinedLink(val address: String, val port: Int)
 class DirectLinkException(message: String) : Exception(message)
 
 /**
+ * The link failed after one device had left the shared network for it. There
+ * is nothing to fall back to: the transfer ends like a lost connection.
+ */
+class DirectLinkLostException(reason: String) : IOException("The direct link could not be set up ($reason)")
+
+/**
  * The platform side of a direct link. Every method may take seconds; the long
  * ones call `tick` at least once a second and pass on whatever it throws.
  * A failure is a [DirectLinkException] with a short reason.
@@ -53,6 +60,25 @@ interface DirectLink {
 
     /** Releases the network. Safe to call more than once. */
     fun close()
+
+    /**
+     * True when this device can hold only one Wi-Fi connection, so joining
+     * means leaving the shared network for the length of the transfer.
+     */
+    fun leavesNetwork(): Boolean = false
+
+    /** For a device that leaves: starts listening on every interface before it joins, and returns the port. */
+    fun listen(): Int = throw DirectLinkException("this device cannot listen before joining")
+
+    /** For a host: true when [connectJoined] works on this platform. */
+    fun acceptsLeaving(): Boolean = false
+
+    /**
+     * For a host: waits for a device to join the private network and connects
+     * to it on [port], at the address the platform itself reports for it.
+     */
+    fun connectJoined(port: Int, tick: () -> Unit): Socket =
+        throw DirectLinkException("this device cannot find a joiner by itself")
 }
 
 /** How long each step of the set-up may take, in milliseconds. Tests shorten them. */
@@ -82,6 +108,22 @@ internal fun chooseHost(sender: DirectCaps, receiver: DirectCaps): String? {
         senderCan && receiverCan && sender.hostRank > receiver.hostRank -> DirectCaps.HOST_SENDER
         receiverCan -> DirectCaps.HOST_RECEIVER
         senderCan -> DirectCaps.HOST_SENDER
+        else -> null
+    }
+}
+
+/**
+ * Why the offered network is not joined, or null when it may be. The name
+ * comes from the other device, and this one is about to trust it with its
+ * Wi-Fi: only a network that looks like a direct link is ever joined.
+ */
+internal fun offerProblem(offer: DirectOffer): String? {
+    fun plain(text: String) = text.all { it.code in 0x21..0x7E }
+    return when {
+        !offer.ssid.startsWith("DIRECT-") || offer.ssid.length > 32 || !plain(offer.ssid) ->
+            "the other device offered a network that is not a direct link"
+        offer.passphrase.length !in 8..63 || !plain(offer.passphrase) ->
+            "the other device offered an unusable network password"
         else -> null
     }
 }
@@ -145,6 +187,14 @@ internal class LinkSetup(
     private class Settled(val reason: String?) : RuntimeException()
 
     /**
+     * True once either device has left the shared network for the link: the
+     * shared connection is finished and nothing more may be said on it.
+     */
+    @Volatile
+    var left = false
+        private set
+
+    /**
      * The connected and greeted socket, or null when the transfer stays on
      * the shared connection. Throws only when that connection fails or the
      * transfer is cancelled. The link is released unless it is now in use.
@@ -167,7 +217,11 @@ internal class LinkSetup(
         }
         // 32 random hex characters.
         val token = UUID.randomUUID().toString().replace("-", "")
-        send(FrameTag.DIRECT_OFFER, DirectOffer(hosted.ssid, hosted.passphrase, token, hosted.listenPort).toJsonObject().toString())
+        val offer = DirectOffer(
+            hosted.ssid, hosted.passphrase, token, hosted.listenPort,
+            leavingOk = hosted.listenPort == null && link.acceptsLeaving()
+        )
+        send(FrameTag.DIRECT_OFFER, offer.toJsonObject().toString())
 
         if (hosted.listenPort != null) {
             return awaitConnection(token, limits.joinMs, "the other device did not join in time")
@@ -183,7 +237,7 @@ internal class LinkSetup(
                 FrameTag.DIRECT_RESULT -> null
                 FrameTag.DIRECT_JOINED -> {
                     val joined = DirectJoined.parse(payload) ?: return stay("the other device's address could not be read")
-                    connectAndGreet(joined.address, joined.port, token)
+                    if (joined.leaving) findAndGreet(joined.port, token) else connectAndGreet(joined.address, joined.port, token)
                 }
                 else -> stay("unexpected $tag frame")
             }
@@ -207,6 +261,8 @@ internal class LinkSetup(
                 else -> return stay("unexpected $tag frame")
             }
         }
+        offerProblem(offer)?.let { return stay(it) }
+        if (link.leavesNetwork()) return leaveAndJoin(offer)
         val joined = try {
             link.join(offer, ::tick)
         } catch (error: Exception) {
@@ -224,6 +280,87 @@ internal class LinkSetup(
         }
         send(FrameTag.DIRECT_JOINED, DirectJoined(joined.address, joined.port).toJsonObject().toString())
         return awaitConnection(offer.token, limits.connectMs, "the other device did not connect in time")
+    }
+
+    /**
+     * The joiner's side when it can hold only one Wi-Fi connection: it says
+     * where it will listen, leaves the shared network, and the host finds it
+     * on the private one. Until DIRECT_JOINED is sent it can still stay.
+     */
+    private fun leaveAndJoin(offer: DirectOffer): Socket? {
+        if (!offer.leavingOk || offer.hostPort != null) {
+            return stay("this device would have to leave the network, and the other device cannot work with that")
+        }
+        try {
+            val port = link.listen()
+            // A host that gave up meanwhile must not be left waiting for a device that never comes.
+            tick()
+            // The last frame on the shared connection, for both sides.
+            send(FrameTag.DIRECT_JOINED, DirectJoined("", port, leaving = true).toJsonObject().toString())
+        } catch (error: Exception) {
+            return gaveUp(error)
+        }
+        left = true
+        try {
+            link.join(offer, ::cancelTick)
+        } catch (error: Exception) {
+            throw noWayBack(error)
+        }
+        val deadline = deadlineAfter(limits.connectMs)
+        while (true) {
+            if (isCancelled()) throw TransferCancelledException()
+            if (System.nanoTime() >= deadline) throw DirectLinkLostException("the other device did not connect in time")
+            val socket = try {
+                link.accept(limits.pollMs)
+            } catch (error: Exception) {
+                throw noWayBack(error)
+            } ?: continue
+            try {
+                greet(socket, offer.token, outgoing = false, timeoutMs = limits.greetingMs)
+                return socket
+            } catch (error: Exception) {
+                // A stranger on the link is ignored; the real peer may still arrive.
+                Log.i(TAG, "Ignored a connection on the direct link: ${error.message}")
+                runCatching { socket.close() }
+            }
+        }
+    }
+
+    /** The host's side for a joiner that left: the shared connection is finished, whatever happens next. */
+    private fun findAndGreet(port: Int, token: String): Socket {
+        left = true
+        val socket = try {
+            link.connectJoined(port, ::cancelTick)
+        } catch (error: Exception) {
+            throw noWayBack(error)
+        }
+        try {
+            greet(socket, token, outgoing = true, timeoutMs = limits.greetingMs)
+            return socket
+        } catch (error: Exception) {
+            runCatching { socket.close() }
+            throw noWayBack(error)
+        }
+    }
+
+    /**
+     * After one side has left the shared network there is nothing to fall
+     * back to: the transfer ends, and a retry continues it where resume applies.
+     */
+    private fun noWayBack(error: Exception): Exception = when {
+        error is TransferCancelledException || isCancelled() -> TransferCancelledException()
+        error is DirectLinkLostException -> error
+        error is DirectLinkException -> DirectLinkLostException(error.message ?: "the link could not be set up")
+        error is SocketTimeoutException -> DirectLinkLostException("the direct link did not answer in time")
+        else -> {
+            Log.w(TAG, "Direct link failed after leaving", error)
+            DirectLinkLostException("the link could not be set up")
+        }
+    }
+
+    /** For work that happens after the shared connection is gone: only a cancel can stop it. */
+    private fun cancelTick() {
+        if (isCancelled()) throw TransferCancelledException()
     }
 
     /**

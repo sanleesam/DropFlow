@@ -99,13 +99,18 @@ class RustPeerLinkTest {
     }
 
     /** This phone's part: it joins the network it is offered and listens on it. Here that is loopback. */
-    private class Joiner : LoopbackLink(0, true) {
+    private class Joiner(leaves: Boolean = false) : LoopbackLink(0, true) {
         val offers = CopyOnWriteArrayList<DirectOffer>()
+        // The other implementation names its own network.
+        override val expectedNetwork: Pair<String, String>? = null
+
+        init {
+            this.leaves = leaves
+        }
+
         override fun join(offer: DirectOffer, tick: () -> Unit): JoinedLink {
-            calls += "join"
             offers += offer
-            tick()
-            return JoinedLink("127.0.0.1", listen())
+            return super.join(offer, tick)
         }
     }
 
@@ -346,5 +351,81 @@ class RustPeerLinkTest {
                 assertSaved(received.storage)
             }
         }
+    }
+
+    // ── One Wi-Fi connection: the joiner leaves, and the host finds it ──────
+
+    @Test fun aKotlinLeaverIsFoundByARustHostWhicheverSideSends() {
+        // This phone sends: it listens, says so, "leaves", and the computer connects to it.
+        val saved = folder.newFolder()
+        startPeer("receive", saved.path, "--count", "1", "--link", "host")
+        val sending = Joiner(leaves = true)
+        val sent = sendToPeer(listeningPort(), sending)
+        assertNull("the sender failed. Peer output:\n" + peerOutput.joinToString("\n"), sent.error)
+        awaitPeerExit()
+        assertTrue(peerLine("[Perf] receive").contains("direct=true"))
+        assertEquals(1, sent.linked.size)
+        assertOfferFromAHostThatConnects(sending)
+        // The computer said it can find a device that left, and the phone listened before it joined.
+        assertTrue(sending.offers.single().leavingOk)
+        assertEquals(listOf("listen", "join"), sending.calls.take(2))
+        assertEquals("close", sending.calls.last())
+        assertPeerSaved(saved)
+
+        // This phone receives.
+        peerOutput.clear()
+        val receiving = Joiner(leaves = true)
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+            startPeer("send", "127.0.0.1", server.localPort.toString(), "--link", "host", *sourceFiles().toTypedArray())
+            val received = receiveFromPeer(server, receiving)
+            assertTrue("the receiver failed: ${received.failure}. Peer output:\n" + peerOutput.joinToString("\n"), received.ok)
+            awaitPeerExit()
+            assertTrue(peerLine("[Perf] send").contains("direct=true"))
+            assertEquals(1, received.linked.size)
+            assertTrue(receiving.offers.single().leavingOk)
+            assertEquals(listOf("listen", "join"), receiving.calls.take(2))
+            assertEquals("close", receiving.calls.last())
+            assertSaved(received.storage)
+        }
+    }
+
+    @Test fun aRustLeaverIsFoundByAKotlinHostWhicheverSideSends() {
+        // Sending and hosting: the computer says where it listens and leaves; this side finds it.
+        val saved = folder.newFolder()
+        startPeer("receive", saved.path, "--count", "1", "--link", "leave")
+        val sending = LoopbackLink(2, false)
+        val sent = sendToPeer(listeningPort(), sending)
+        assertNull("the sender failed. Peer output:\n" + peerOutput.joinToString("\n"), sent.error)
+        awaitPeerExit()
+        assertTrue(peerLine("[Perf] receive").contains("direct=true"))
+        assertEquals(1, sent.linked.size)
+        assertEquals(listOf("host", "find"), sending.calls.take(2))
+        assertPeerSaved(saved)
+
+        // Receiving and hosting.
+        peerOutput.clear()
+        val receiving = LoopbackLink(2, false)
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+            startPeer("send", "127.0.0.1", server.localPort.toString(), "--link", "leave", *sourceFiles().toTypedArray())
+            val received = receiveFromPeer(server, receiving)
+            assertTrue("the receiver failed: ${received.failure}. Peer output:\n" + peerOutput.joinToString("\n"), received.ok)
+            awaitPeerExit()
+            assertTrue(peerLine("[Perf] send").contains("direct=true"))
+            assertEquals(1, received.linked.size)
+            assertEquals(listOf("host", "find"), receiving.calls.take(2))
+            assertSaved(received.storage)
+        }
+
+        // A host that cannot find a joiner: the computer stays, and so does the transfer.
+        peerOutput.clear()
+        val staying = folder.newFolder()
+        startPeer("receive", staying.path, "--count", "1", "--link", "leave")
+        val blind = LoopbackLink(2, false).apply { findsJoiner = false }
+        val kept = sendToPeer(listeningPort(), blind)
+        assertNull("the sender failed. Peer output:\n" + peerOutput.joinToString("\n"), kept.error)
+        awaitPeerExit()
+        assertTrue(peerLine("[Perf] receive").contains("direct=false"))
+        assertTrue(kept.linked.isEmpty())
+        assertPeerSaved(staying)
     }
 }

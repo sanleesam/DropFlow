@@ -18,7 +18,8 @@ import java.io.File
  * Optional: `sendDir` sends every file in that folder under the app's files
  * directory to the peer once, and `cancelAfterMs` cancels a transfer that long
  * after its progress appears. Both go through the normal ViewModel methods.
- * `directLink on|off` sets the app's own Direct link preference first.
+ * `directLink on|off` sets the app's own Direct link preference first, for
+ * whichever way this device joins (including leaving its Wi-Fi).
  * Never packaged in a release APK.
  */
 class InteropInstrumentation : Instrumentation() {
@@ -51,7 +52,10 @@ class InteropInstrumentation : Instrumentation() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
             directLink?.let { enabled ->
                 val app = targetContext.applicationContext as DropFlowApplication
-                kotlinx.coroutines.runBlocking { app.userPreferencesRepository.updateDirectLink(enabled) }
+                kotlinx.coroutines.runBlocking {
+                    app.userPreferencesRepository.updateDirectLink(enabled)
+                    app.userPreferencesRepository.updateDirectLinkLeavesWifi(enabled)
+                }
                 // The app applies its preferences a moment after they are saved.
                 Thread.sleep(1_000)
             }
