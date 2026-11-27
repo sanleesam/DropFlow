@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
@@ -20,7 +21,9 @@ class FileReceiver(private val storage: ReceiveStorage) {
     /**
      * Runs an approved transfer: sends the acceptance, receives and verifies
      * every file, saves them, then confirms. Grants `batch` when the sender
-     * offers it; otherwise this is the original DFP/1 exchange.
+     * offers it; otherwise this is the original DFP/1 exchange. With [direct]
+     * it also grants a private link when the two devices can form one, and
+     * moves the session onto it; the link is released when the session ends.
      */
     suspend fun receiveTransferSession(
         inputStream: InputStream,
@@ -28,10 +31,14 @@ class FileReceiver(private val storage: ReceiveStorage) {
         requestPayload: TransferRequestPayload,
         progressTracker: TransferProgressTracker,
         isCancelled: () -> Boolean = { false },
-        sendNotice: ((FrameTag, ByteArray) -> Unit)? = null
+        sendNotice: ((FrameTag, ByteArray) -> Unit)? = null,
+        direct: DirectOptions? = null
     ): Boolean = withContext(Dispatchers.IO) {
         Log.d(TAG, "Starting FileReceiver for session ${requestPayload.sessionId} (${requestPayload.totalFiles} files, ${requestPayload.totalSizeBytes} bytes)")
-        val output = FrameOutput.of(outputStream)
+        // Replaced by the direct link's streams when the session moves there.
+        var input = inputStream
+        var output = FrameOutput.of(outputStream)
+        var linked: Socket? = null
         // Resume needs staged data that survives the session; Android does not keep any yet.
         val batch = Protocol.FEATURE_BATCH in requestPayload.features
         val frames = BulkFrameReader()
@@ -50,21 +57,50 @@ class FileReceiver(private val storage: ReceiveStorage) {
 
         try {
             ReceiveValidation.request(requestPayload)
+            // A direct link needs batch, both devices to offer it, and a workable pairing.
+            val theirs = requestPayload.direct
+            val mine = direct?.link?.let { runCatching(it::caps).getOrNull() }
+            val host = if (batch && mine != null && theirs != null && Protocol.FEATURE_DIRECT in requestPayload.features) {
+                chooseHost(sender = theirs, receiver = mine)
+            } else {
+                null
+            }
             FrameUtils.writeTransferAccept(
                 output,
-                TransferAcceptPayload(status = "ACCEPTED", features = if (batch) listOf(Protocol.FEATURE_BATCH) else emptyList())
+                TransferAcceptPayload(
+                    status = "ACCEPTED",
+                    features = listOfNotNull(
+                        Protocol.FEATURE_BATCH.takeIf { batch },
+                        Protocol.FEATURE_DIRECT.takeIf { host != null }
+                    ),
+                    directHost = host
+                )
             )
+            if (host != null && direct != null) {
+                progressTracker.startLinking()
+                val socket = LinkSetup(input, output, direct.link, isCancelled, direct.limits, ::senderStopped)
+                    .run(iHost = host == DirectCaps.HOST_RECEIVER)
+                if (socket != null) {
+                    // The rest of the session, notices included, uses the new connection.
+                    linked = socket
+                    val (linkInput, linkOutput) = direct.adopt(socket)
+                    input = linkInput
+                    output = FrameOutput.of(linkOutput)
+                }
+                progressTracker.finishLinking(direct = socket != null)
+                Log.d(TAG, "Session ${requestPayload.sessionId} ${if (socket != null) "moved to the direct link" else "stays on the shared network"}")
+            }
             val files = ReceivePipeline(storage, requestPayload.files.map { it.relativePath }).also { pipeline = it }
             val messageDigest = MessageDigest.getInstance("SHA-256")
 
             for (i in 0 until requestPayload.totalFiles) {
                 tick()
-                val header = nextFrame(inputStream, batch)
+                val header = nextFrame(input, batch)
                 if (header.tag != FrameTag.FILE_HEADER) {
                     throw IllegalStateException("Expected FILE_HEADER frame tag, received 0x${String.format("%02X", header.tag.code)}")
                 }
 
-                val headerPayloadBytes = FrameUtils.readPayload(inputStream, header.payloadLength)
+                val headerPayloadBytes = FrameUtils.readPayload(input, header.payloadLength)
                 val fileHeader = FileHeaderPayload.fromJsonString(String(headerPayloadBytes, StandardCharsets.UTF_8))
                 ReceiveValidation.header(requestPayload, i, fileHeader)
 
@@ -77,13 +113,13 @@ class FileReceiver(private val storage: ReceiveStorage) {
 
                 var bytesWritten = 0L
                 while (bytesWritten < fileHeader.sizeBytes) {
-                    val chunkHeader = nextFrame(inputStream, batch)
+                    val chunkHeader = nextFrame(input, batch)
                     if (chunkHeader.tag != FrameTag.DATA_CHUNK) {
                         throw IllegalStateException("Expected DATA_CHUNK frame tag, received 0x${String.format("%02X", chunkHeader.tag.code)}")
                     }
                     val remainingBytes = fileHeader.sizeBytes - bytesWritten
                     val length = chunkHeader.payloadLength
-                    val chunkBytes = frames.read(inputStream, length, remainingBytes)
+                    val chunkBytes = frames.read(input, length, remainingBytes)
                     try {
                         target.stream.write(chunkBytes, 0, length)
                     } catch (e: IOException) {
@@ -101,12 +137,12 @@ class FileReceiver(private val storage: ReceiveStorage) {
                 progressTracker.finishFile()
 
                 // Read FileComplete frame
-                val compHeader = nextFrame(inputStream, batch)
+                val compHeader = nextFrame(input, batch)
                 if (compHeader.tag != FrameTag.FILE_COMPLETE) {
                     throw IllegalStateException("Expected FILE_COMPLETE frame tag, received 0x${String.format("%02X", compHeader.tag.code)}")
                 }
 
-                val compPayloadBytes = FrameUtils.readPayload(inputStream, compHeader.payloadLength)
+                val compPayloadBytes = FrameUtils.readPayload(input, compHeader.payloadLength)
                 val fileComp = FileCompletePayload.fromJsonString(String(compPayloadBytes, StandardCharsets.UTF_8))
                 if (fileComp.fileIndex != fileHeader.fileIndex || fileComp.bytesWritten != bytesWritten) {
                     throw IllegalStateException("Invalid FILE_COMPLETE for '${fileHeader.relativePath}'")
@@ -118,11 +154,11 @@ class FileReceiver(private val storage: ReceiveStorage) {
                 Log.d(TAG, "File ${i + 1}/${requestPayload.totalFiles} '${target.displayName}' received and verified ($bytesWritten bytes)")
             }
 
-            val finalHeader = nextFrame(inputStream, batch)
+            val finalHeader = nextFrame(input, batch)
             if (finalHeader.tag != FrameTag.TRANSFER_COMPLETE) {
                 throw IllegalStateException("Expected TRANSFER_COMPLETE, received ${finalHeader.tag}")
             }
-            val completedSessionId = String(FrameUtils.readPayload(inputStream, finalHeader.payloadLength), StandardCharsets.UTF_8)
+            val completedSessionId = String(FrameUtils.readPayload(input, finalHeader.payloadLength), StandardCharsets.UTF_8)
             if (completedSessionId.isNotBlank() && completedSessionId != requestPayload.sessionId) {
                 throw IllegalStateException("TRANSFER_COMPLETE session ID mismatch")
             }
@@ -155,6 +191,8 @@ class FileReceiver(private val storage: ReceiveStorage) {
             if (!sendQuietly(output, FrameTag.TRANSFER_ACK, ack)) {
                 Log.w(TAG, "Files saved, but the confirmation was not sent for ${requestPayload.sessionId}")
             }
+            // The private network goes away right after this returns; let the confirmation arrive first.
+            linked?.let(::awaitPeerClose)
             Log.i(TAG, TransferPerf.summary("receive", requestPayload.totalFiles, requestPayload.totalSizeBytes, System.nanoTime() - started))
 
             true
@@ -178,8 +216,17 @@ class FileReceiver(private val storage: ReceiveStorage) {
             // Everything this session allocated is removed, published or not.
             pipeline?.discard()
             false
+        } finally {
+            // However the session ended: the private network is given back.
+            linked?.let { runCatching { it.close() } }
+            direct?.link?.let { runCatching { it.close() } }
         }
     }
+
+    private fun senderStopped(tag: FrameTag, payload: ByteArray) = PeerStoppedException(
+        if (tag == FrameTag.ERROR) "The sending device stopped the transfer: ${noticeText(payload)}"
+        else "Transfer cancelled by sender"
+    )
 
     /** Writes a frame whose failure must not stop the caller. */
     private fun sendQuietly(output: FrameOutput, tag: FrameTag, payload: ByteArray): Boolean = try {
@@ -199,7 +246,8 @@ class FileReceiver(private val storage: ReceiveStorage) {
             val header = FrameUtils.readHeader(input)
             when {
                 header.tag == FrameTag.TRANSFER_CANCEL -> throw PeerStoppedException("Transfer cancelled by sender")
-                batch && header.tag == FrameTag.HEARTBEAT -> FrameUtils.readPayload(input, header.payloadLength)
+                // Keep-alives, and a late "the direct link failed" after both sides settled.
+                batch && header.tag.isIdle -> FrameUtils.readPayload(input, header.payloadLength)
                 batch && header.tag == FrameTag.ERROR -> throw PeerStoppedException(
                     "The sending device stopped the transfer: ${noticeText(FrameUtils.readPayload(input, header.payloadLength))}"
                 )

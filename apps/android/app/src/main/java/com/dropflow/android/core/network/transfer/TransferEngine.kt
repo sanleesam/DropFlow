@@ -67,6 +67,17 @@ class TransferEngine(
         this.requireConfirmation = requireConfirmation
     }
 
+    /** Experimental and off until the person turns it on in Settings. */
+    @Volatile
+    private var directLinkEnabled = false
+
+    fun updateDirectLinkPolicy(enabled: Boolean) {
+        directLinkEnabled = enabled
+    }
+
+    /** One link per transfer. It offers nothing when this phone cannot keep its own Wi-Fi while joining. */
+    private fun openDirectLink(): DirectLink? = if (directLinkEnabled) WifiJoinLink(appContext) else null
+
     private val tcpServer = TcpTransferServer(
         context = appContext,
         claimTransfer = transferSlot::claim,
@@ -79,7 +90,8 @@ class TransferEngine(
         onProgressUpdated = { progress ->
             _activeProgress.value = progress
         },
-        onTransferFinished = ::recordIncomingTransfer
+        onTransferFinished = ::recordIncomingTransfer,
+        openDirectLink = ::openDirectLink
     )
 
     val serverStatus: StateFlow<ServerStatus> = tcpServer.status
@@ -187,7 +199,8 @@ class TransferEngine(
                 progressTracker = tracker,
                 setReadTimeout = { socket.readTimeoutMs = it },
                 isCancelled = { socket.isCancelled },
-                sendNotice = { tag, payload -> socket.sendNotice(tag, payload, drain = true) }
+                sendNotice = { tag, payload -> socket.sendNotice(tag, payload, drain = true) },
+                direct = openDirectLink()?.let { DirectOptions(it, socket::adopt) }
             )
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled

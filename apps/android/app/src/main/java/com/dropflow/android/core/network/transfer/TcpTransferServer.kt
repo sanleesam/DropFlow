@@ -33,7 +33,8 @@ internal class TcpTransferServer(
     private val onIncomingConnection: (TransferConnection) -> Unit,
     private val onSessionStateChanged: (TransferSession) -> Unit,
     private val onProgressUpdated: (TransferProgressPayload?) -> Unit,
-    private val onTransferFinished: suspend (TransferRequestPayload, Boolean, String?, Boolean) -> Unit
+    private val onTransferFinished: suspend (TransferRequestPayload, Boolean, String?, Boolean) -> Unit,
+    private val openDirectLink: () -> DirectLink? = { null }
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + Job())
 
@@ -100,7 +101,8 @@ internal class TcpTransferServer(
                     releaseTransfer = releaseTransfer,
                     requestDecision = requestDecision,
                     onProgressUpdated = onProgressUpdated,
-                    onTransferFinished = onTransferFinished
+                    onTransferFinished = onTransferFinished,
+                    openDirectLink = openDirectLink
                 )
 
                 activeConnectionsMap[session.sessionId] = connection

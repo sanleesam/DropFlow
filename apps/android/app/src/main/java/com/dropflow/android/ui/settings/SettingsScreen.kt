@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dropflow.android.BuildConfig
+import com.dropflow.android.core.network.transfer.DirectLinkSupport
 import com.dropflow.android.ui.components.ButtonStyle
 import com.dropflow.android.ui.components.CapsuleButton
 import com.dropflow.android.ui.components.IconTile
@@ -69,6 +71,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, onUpdates:
     val glassMode = LocalGlassMode.current
     val canSave = draft.trim().isNotEmpty() && draft.trim() != state.deviceName
     val save = { if (canSave) { viewModel.updateDeviceName(draft); keyboard?.hide() }; Unit }
+    // Joining must leave this phone's own Wi-Fi connected; not every phone can do that.
+    val canLink = remember(context) { DirectLinkSupport.keepsWifi(context) }
     Page(Screen.Settings.title, modifier) {
         item("device-head") { SectionHeader("This Device") }
         item("device") {
@@ -107,6 +111,19 @@ fun SettingsScreen(viewModel: SettingsViewModel, onAbout: () -> Unit, onUpdates:
             SectionFooter(if (state.requireConfirmation) "Verified files keep their folders. Same names save as copies."
                 else "Anyone who can reach this device can send without asking.",
                 Modifier.padding(top = 6.dp), color = if (state.requireConfirmation) colors.label2 else colors.orange)
+        }
+        sectionGap("gap-sharing")
+        item("sharing-head") { SectionHeader("Sharing") }
+        item("sharing") {
+            ListCard {
+                ListRow("Direct link", subtitle = "Experimental", subtitleColor = colors.orange, trailing = {
+                    ToggleSwitch(state.directLink && canLink, viewModel::updateDirectLink, "Direct link", enabled = canLink)
+                })
+            }
+        }
+        item("sharing-foot") {
+            SectionFooter(if (canLink) "Moves a transfer onto a private Wi‑Fi link when the other device offers one. Android may ask before joining."
+                else "This phone cannot keep its own Wi‑Fi while joining another network.", Modifier.padding(top = 6.dp))
         }
         if (BuildConfig.NEARBY_LAB) {
             sectionGap("gap-nearby")

@@ -22,7 +22,7 @@ class Dfp11ProtocolTest {
         assertEquals(0x0D.toByte(), FrameTag.RESUME_STATE.code)
         assertEquals(FrameTag.TRANSFER_REQUEST_LARGE, FrameTag.fromCode(0x0C))
         assertEquals(FrameTag.RESUME_STATE, FrameTag.fromCode(0x0D))
-        assertThrows(IllegalArgumentException::class.java) { FrameTag.fromCode(0x0E) }
+        assertThrows(IllegalArgumentException::class.java) { FrameTag.fromCode(0x11) }
 
         val wire = ByteArrayOutputStream()
         FrameUtils.writeFrame(wire, FrameTag.RESUME_STATE, "[]".toByteArray())

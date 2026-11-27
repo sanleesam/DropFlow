@@ -25,7 +25,9 @@ internal class TransferConnection(
     private val releaseTransfer: ((String) -> Unit)? = null,
     private val requestDecision: (suspend (TransferRequestPayload) -> IncomingDecision)? = null,
     private val onProgressUpdated: ((TransferProgressPayload?) -> Unit)? = null,
-    private val onTransferFinished: (suspend (TransferRequestPayload, Boolean, String?, Boolean) -> Unit)? = null
+    private val onTransferFinished: (suspend (TransferRequestPayload, Boolean, String?, Boolean) -> Unit)? = null,
+    /** A direct link for one incoming transfer, or null when the person has not turned it on. */
+    private val openDirectLink: (() -> DirectLink?)? = null
 ) {
     private val closed = AtomicBoolean(false)
     private val cancelled = AtomicBoolean(false)
@@ -34,6 +36,11 @@ internal class TransferConnection(
 
     private var sessionInput: SessionInput? = null
     private var frameOutput: FrameOutput? = null
+
+    /** The private link's socket once the session moved there. [socket] then stays open but idle. */
+    @Volatile
+    private var linkSocket: Socket? = null
+    private val activeSocket: Socket get() = linkSocket ?: socket
 
     var inputStream: InputStream? = null
         private set
@@ -67,6 +74,27 @@ internal class TransferConnection(
             Log.e(TAG, "Failed to initialize socket streams for session ${session.sessionId}", e)
             updateState(SessionState.FAILED, e.message)
         }
+    }
+
+    /**
+     * Moves the session onto a direct link's socket: reads wake for a cancel
+     * the same way, and notices and the final close go to this socket. Call
+     * from the thread that runs the session, between frames.
+     */
+    fun adopt(link: Socket): Pair<InputStream, OutputStream> {
+        link.soTimeout = SessionInput.SLICE_MS
+        link.tcpNoDelay = true
+        val input = SessionInput(link.getInputStream(), cancelled::get)
+        val output = FrameOutput(link.getOutputStream())
+        val buffered = BufferedInputStream(input, 64 * 1024)
+        sessionInput = input
+        frameOutput = output
+        inputStream = buffered
+        outputStream = output
+        linkSocket = link
+        // Closed meanwhile (the server stopped, or a cancel ran out of patience): do not leave it open.
+        if (closed.get()) runCatching { link.close() }
+        return buffered to output
     }
 
     fun updateState(newState: SessionState, error: String? = null) {
@@ -220,7 +248,8 @@ internal class TransferConnection(
                 val received = receiver.receiveTransferSession(
                     input, output, request, tracker,
                     isCancelled = cancelled::get,
-                    sendNotice = { tag, payload -> sendNotice(tag, payload, drain = true) }
+                    sendNotice = { tag, payload -> sendNotice(tag, payload, drain = true) },
+                    direct = openDirectLink?.invoke()?.let { DirectOptions(it, ::adopt) }
                 )
                 if (received) null else receiver.failureReason ?: "File transfer failed"
             } catch (e: Exception) {
@@ -248,6 +277,7 @@ internal class TransferConnection(
                 // A notice is out: give the peer time to read it before closing.
                 if (noticeSent.get()) Thread.sleep(Protocol.NOTICE_DRAIN_MS + 500)
             }
+            runCatching { linkSocket?.close() }
             runCatching { socket.close() }
         }
     }
@@ -260,6 +290,7 @@ internal class TransferConnection(
      */
     fun sendNotice(tag: FrameTag, payload: ByteArray, drain: Boolean): Boolean {
         val output = frameOutput ?: return false
+        val socket = activeSocket
         if (socket.isClosed || !output.notice(tag, payload)) return false
         noticeSent.set(true)
         if (!drain) return true
@@ -281,6 +312,7 @@ internal class TransferConnection(
 
     fun close() {
         if (!closed.compareAndSet(false, true)) return
+        runCatching { linkSocket?.close() }
         try {
             socket.close()
         } catch (e: Exception) {

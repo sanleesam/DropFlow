@@ -3,6 +3,7 @@ package com.dropflow.android.core.network.transfer
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.Socket
 import java.net.SocketTimeoutException
 
 /** The person on this device cancelled. Not an IOException: the connection is fine. */
@@ -106,12 +107,36 @@ internal class FrameOutput(private val raw: OutputStream) : OutputStream() {
     }
 }
 
-/** Reads the next frame that is not a keep-alive. */
+/**
+ * Reads the next frame that is not a keep-alive. A late "the direct link
+ * failed" may still be on its way after both sides settled on this connection.
+ */
 internal fun readReply(input: InputStream): Pair<FrameTag, ByteArray> {
     while (true) {
         val header = FrameUtils.readHeader(input)
         val payload = FrameUtils.readPayload(input, header.payloadLength)
-        if (header.tag != FrameTag.HEARTBEAT) return header.tag to payload
+        if (!header.tag.isIdle) return header.tag to payload
+    }
+}
+
+/** Frames that may sit between any two others in batch mode and carry nothing for the stream. */
+internal val FrameTag.isIdle: Boolean get() = this == FrameTag.HEARTBEAT || this == FrameTag.DIRECT_RESULT
+
+/** After the last frame on a direct link: waits briefly for the peer to close, so the frame is not lost with the network. */
+internal fun awaitPeerClose(socket: Socket) {
+    runCatching {
+        socket.shutdownOutput()
+        socket.soTimeout = SessionInput.SLICE_MS
+        val input = socket.getInputStream()
+        val sink = ByteArray(4 * 1024)
+        val deadline = System.nanoTime() + Protocol.NOTICE_DRAIN_MS * 1_000_000
+        while (System.nanoTime() < deadline) {
+            try {
+                if (input.read(sink) < 0) break
+            } catch (_: SocketTimeoutException) {
+                // Nothing arrived in this slice.
+            }
+        }
     }
 }
 

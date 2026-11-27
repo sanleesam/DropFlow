@@ -7,6 +7,7 @@ import java.io.BufferedInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.Socket
 import java.net.SocketTimeoutException
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -26,7 +27,9 @@ class FileSender {
     /**
      * Opens one Android SAF stream at a time, after the recipient approves.
      * Uses the DFP/1.1 features the request offers and the recipient grants;
-     * without them this is the original DFP/1 exchange.
+     * without them this is the original DFP/1 exchange. With [direct] it also
+     * offers a private link and, when the recipient agrees, moves the session
+     * onto it; the link is released when the session ends.
      *
      * Returns null on success, or a human-readable error message describing the failure.
      */
@@ -38,11 +41,15 @@ class FileSender {
         progressTracker: TransferProgressTracker,
         setReadTimeout: (Int) -> Unit = {},
         isCancelled: () -> Boolean = { false },
-        sendNotice: ((FrameTag, ByteArray) -> Unit)? = null
+        sendNotice: ((FrameTag, ByteArray) -> Unit)? = null,
+        direct: DirectOptions? = null
     ): String? = withContext(Dispatchers.IO) {
         Log.d(TAG, "Sending ${requestPayload.totalFiles} files in session ${requestPayload.sessionId}")
 
-        val output = FrameOutput.of(socketOutputStream)
+        // Replaced by the direct link's streams when the session moves there.
+        var input = socketInputStream
+        var output = FrameOutput.of(socketOutputStream)
+        var linked: Socket? = null
         // Only this thread writes, and only whole frames, so a notice sent from
         // here is always at a frame boundary.
         val notify = { tag: FrameTag, text: String ->
@@ -52,15 +59,24 @@ class FileSender {
         var batch = false
 
         try {
+            // A direct link is offered only with batch, and only for a part this device can play.
+            val caps = direct?.link?.let { runCatching(it::caps).getOrNull() }?.takeIf {
+                Protocol.FEATURE_BATCH in requestPayload.features && (it.hostRank > 0 || it.join)
+            }
+            val request = if (caps == null) requestPayload else requestPayload.copy(
+                features = requestPayload.features + Protocol.FEATURE_DIRECT,
+                direct = caps
+            )
+
             // 1. Send TransferRequest frame
-            val requestJson = FrameUtils.encodeTransferRequest(requestPayload)
+            val requestJson = FrameUtils.encodeTransferRequest(request)
             val large = requestJson.size > Protocol.MAX_METADATA_SIZE
             val asked = System.nanoTime()
 
             // 2. Read TransferAccept frame
             val acceptHeader = try {
                 FrameUtils.writeTransferRequest(output, requestJson)
-                readAuthorizationResponse(socketInputStream, setReadTimeout)
+                readAuthorizationResponse(input, setReadTimeout)
             } catch (e: IOException) {
                 // A peer that predates large manifests drops the connection at once.
                 val quick = System.nanoTime() - asked < Protocol.LARGE_REQUEST_REJECT_WINDOW_MS * 1_000_000
@@ -83,11 +99,35 @@ class FileSender {
 
             // A feature is on only if we offered it and the recipient granted it.
             val granted = TransferAcceptPayload.grantedFeatures(acceptHeader.payload)
-            val agreed = { name: String -> name in requestPayload.features && name in granted }
+            val agreed = { name: String -> name in request.features && name in granted }
             batch = agreed(Protocol.FEATURE_BATCH)
             val resume = batch && agreed(Protocol.FEATURE_RESUME)
-            val held = if (resume) readResumeState(socketInputStream) else mutableMapOf()
-            Log.d(TAG, "Session ${requestPayload.sessionId} negotiated batch=$batch resume=$resume")
+            // The recipient names the host; follow only a role this device offered.
+            val iHost: Boolean? = if (caps != null && batch && agreed(Protocol.FEATURE_DIRECT)) {
+                when (TransferAcceptPayload.directHost(acceptHeader.payload)) {
+                    DirectCaps.HOST_SENDER -> true.takeIf { caps.hostRank > 0 }
+                    DirectCaps.HOST_RECEIVER -> false.takeIf { caps.join }
+                    else -> null
+                }
+            } else {
+                null
+            }
+            val held = if (resume) readResumeState(input) else mutableMapOf()
+            Log.d(TAG, "Session ${requestPayload.sessionId} negotiated batch=$batch resume=$resume direct=${iHost != null}")
+
+            if (iHost != null && direct != null) {
+                progressTracker.startLinking()
+                val socket = LinkSetup(input, output, direct.link, isCancelled, direct.limits, ::stopped).run(iHost)
+                if (socket != null) {
+                    // The rest of the session, notices included, uses the new connection.
+                    linked = socket
+                    val (linkInput, linkOutput) = direct.adopt(socket)
+                    input = linkInput
+                    output = FrameOutput.of(linkOutput)
+                }
+                progressTracker.finishLinking(direct = socket != null)
+                Log.d(TAG, "Session ${requestPayload.sessionId} ${if (socket != null) "moved to the direct link" else "stays on the shared network"}")
+            }
 
             val frames = BulkFrameWriter()
             val outbox = Outbox(output, batch)
@@ -100,7 +140,7 @@ class FileSender {
                 val now = System.nanoTime()
                 if (batch && now - lastPeerCheck >= Protocol.PEER_CHECK_INTERVAL_MS * 1_000_000) {
                     lastPeerCheck = now
-                    checkPeer(socketInputStream)
+                    checkPeer(input)
                 }
             }
 
@@ -150,7 +190,7 @@ class FileSender {
                     )
 
                     // DFP/1 waits for the recipient before each file; batch mode does not.
-                    if (!batch) awaitFileAck(socketInputStream, displayName)
+                    if (!batch) awaitFileAck(input, displayName)
 
                     progressTracker.startFile(idx, displayName, fileSize, offset)
 
@@ -198,7 +238,7 @@ class FileSender {
             outbox.flush()
 
             // Complete only when the recipient confirms that every file is saved.
-            awaitFinalAck(socketInputStream, batch)
+            awaitFinalAck(input, batch)
 
             Log.i(TAG, TransferPerf.summary("send", requestPayload.totalFiles, requestPayload.totalSizeBytes, System.nanoTime() - started))
             Log.d(TAG, "FileSender (streams) completed session ${requestPayload.sessionId} cleanly")
@@ -221,7 +261,7 @@ class FileSender {
                 }
                 e is IOException -> {
                     Log.e(TAG, "FileSender (streams) connection lost for ${requestPayload.sessionId}: ${e.message}", e)
-                    val said = if (batch) lateNotice(socketInputStream, setReadTimeout) else null
+                    val said = if (batch) lateNotice(input, setReadTimeout) else null
                     said ?: if (e is SocketTimeoutException ||
                         e.message?.contains("ETIMEDOUT", ignoreCase = true) == true ||
                         e.message?.contains("timeout", ignoreCase = true) == true
@@ -237,6 +277,10 @@ class FileSender {
                     e.message ?: "Outgoing transfer failed"
                 }
             }
+        } finally {
+            // However the session ended: the private network is given back.
+            linked?.let { runCatching { it.close() } }
+            direct?.link?.let { runCatching { it.close() } }
         }
     }
 
@@ -304,7 +348,7 @@ class FileSender {
         while (input.available() > 0) {
             val header = FrameUtils.readHeader(input)
             val payload = FrameUtils.readPayload(input, header.payloadLength)
-            if (header.tag != FrameTag.HEARTBEAT) throw stopped(header.tag, payload)
+            if (!header.tag.isIdle) throw stopped(header.tag, payload)
         }
     }
 

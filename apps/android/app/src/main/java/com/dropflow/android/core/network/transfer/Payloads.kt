@@ -37,7 +37,9 @@ data class TransferRequestPayload(
     val totalSizeBytes: Long,
     val files: List<FileMetadataPayload>,
     /** DFP/1.1 features the sender offers. Older peers ignore the field. */
-    val features: List<String> = emptyList()
+    val features: List<String> = emptyList(),
+    /** What the sender can do for a direct link. Sent with the `direct` feature. */
+    val direct: DirectCaps? = null
 ) {
     val primaryFileName: String
         get() = files.firstOrNull()?.relativePath ?: "File"
@@ -53,6 +55,7 @@ data class TransferRequestPayload(
         files.forEach { filesArray.put(it.toJsonObject()) }
         put("files", filesArray)
         if (features.isNotEmpty()) put("features", JSONArray(features))
+        if (direct != null) put("direct", direct.toJsonObject())
     }
 
     companion object {
@@ -74,7 +77,8 @@ data class TransferRequestPayload(
                 totalFiles = json.optInt("totalFiles", json.optInt("total_files", filesList.size)),
                 totalSizeBytes = json.optLong("totalSizeBytes", json.optLong("total_size_bytes", 0L)),
                 files = filesList,
-                features = featureNames(json, strict = true)
+                features = featureNames(json, strict = true),
+                direct = DirectCaps.fromJson(json.opt("direct"))
             )
         }
     }
@@ -156,11 +160,14 @@ data class TransferAcceptPayload(
     val status: String = "ACCEPTED",
     val resumeOffset: Long = 0L,
     /** DFP/1.1 features the receiver grants. Empty keeps the DFP/1 reply unchanged. */
-    val features: List<String> = emptyList()
+    val features: List<String> = emptyList(),
+    /** With the `direct` feature: which side creates the network, `sender` or `receiver`. */
+    val directHost: String? = null
 ) {
     fun toJsonObject(): JSONObject = JSONObject().apply {
         put("status", status)
         if (features.isEmpty()) put("resumeOffset", resumeOffset) else put("features", JSONArray(features))
+        if (features.isNotEmpty() && directHost != null) put("directHost", directHost)
     }
 
     companion object {
@@ -169,13 +176,19 @@ data class TransferAcceptPayload(
             return TransferAcceptPayload(
                 status = json.optString("status", "ACCEPTED"),
                 resumeOffset = json.optLong("resumeOffset", json.optLong("resume_offset", 0L)),
-                features = featureNames(json, strict = false)
+                features = featureNames(json, strict = false),
+                directHost = json.opt("directHost") as? String
             )
         }
+
 
         /** Older receivers answer with plain text or JSON without features: nothing granted. */
         fun grantedFeatures(payload: ByteArray): List<String> =
             runCatching { featureNames(JSONObject(String(payload, Charsets.UTF_8)), strict = false) }.getOrDefault(emptyList())
+
+        /** Which side the receiver named as the host of a direct link, if any. */
+        fun directHost(payload: ByteArray): String? =
+            runCatching { JSONObject(String(payload, Charsets.UTF_8)).opt("directHost") as? String }.getOrNull()
     }
 }
 
@@ -195,6 +208,76 @@ private fun featureNames(json: JSONObject, strict: Boolean): List<String> {
         if (fits) names += name
     }
     return names
+}
+
+/**
+ * A device's part in a direct link: it can create the private network
+ * ([hostRank] above zero; the higher rank hosts), join one, or both.
+ */
+data class DirectCaps(val hostRank: Int = 0, val join: Boolean = false) {
+    fun toJsonObject(): JSONObject = JSONObject().apply {
+        put("hostRank", hostRank)
+        put("join", join)
+    }
+
+    companion object {
+        const val HOST_SENDER = "sender"
+        const val HOST_RECEIVER = "receiver"
+
+        /** Anything that is not an object with usable values offers nothing. */
+        fun fromJson(value: Any?): DirectCaps? {
+            val json = value as? JSONObject ?: return null
+            val rank = (json.opt("hostRank") as? Number)?.toInt() ?: 0
+            return DirectCaps(hostRank = rank.coerceIn(0, 255), join = json.opt("join") == true)
+        }
+    }
+}
+
+/** Sent by the host on the shared connection once its network is up. */
+data class DirectOffer(
+    val ssid: String,
+    val passphrase: String,
+    /** Proves that whoever connects on the new network received this offer. */
+    val token: String,
+    /** Set when the host listens; otherwise the joiner listens and answers with [DirectJoined]. */
+    val hostPort: Int? = null
+) {
+    fun toJsonObject(): JSONObject = JSONObject().apply {
+        put("ssid", ssid)
+        put("passphrase", passphrase)
+        put("token", token)
+        if (hostPort != null) put("hostPort", hostPort)
+    }
+
+    companion object {
+        /** Null when the offer cannot be used. */
+        fun parse(payload: ByteArray): DirectOffer? = runCatching {
+            val json = JSONObject(String(payload, Charsets.UTF_8))
+            val port = json.opt("hostPort").takeUnless { it == null || it == JSONObject.NULL }
+            DirectOffer(
+                ssid = json.get("ssid") as String,
+                passphrase = json.get("passphrase") as String,
+                token = json.get("token") as String,
+                hostPort = port?.let { (it as Number).toInt().also { number -> require(number in 1..65535) } }
+            ).takeIf { it.ssid.isNotEmpty() && it.token.isNotEmpty() }
+        }.getOrNull()
+    }
+}
+
+/** Sent by a listening joiner on the shared connection. */
+data class DirectJoined(val address: String, val port: Int) {
+    fun toJsonObject(): JSONObject = JSONObject().apply {
+        put("address", address)
+        put("port", port)
+    }
+
+    companion object {
+        fun parse(payload: ByteArray): DirectJoined? = runCatching {
+            val json = JSONObject(String(payload, Charsets.UTF_8))
+            DirectJoined(json.get("address") as String, (json.get("port") as Number).toInt())
+                .takeIf { it.address.isNotEmpty() && it.port in 1..65535 }
+        }.getOrNull()
+    }
 }
 
 /** One staged file the receiver can continue, with the SHA-256 of exactly the bytes it holds. */
@@ -240,7 +323,7 @@ data class TransferRejectPayload(
     }
 }
 
-enum class TransferPhase { PREPARING, STREAMING, FINISHING }
+enum class TransferPhase { PREPARING, LINKING, STREAMING, FINISHING }
 
 data class TransferProgressPayload(
     val sessionId: String,
@@ -255,5 +338,7 @@ data class TransferProgressPayload(
     val percentage: Float,
     val speedBytesPerSec: Long,
     val etaSeconds: Long,
-    val phase: TransferPhase = TransferPhase.STREAMING
+    val phase: TransferPhase = TransferPhase.STREAMING,
+    /** The data travels over a private link instead of the shared network. */
+    val direct: Boolean = false
 )

@@ -27,6 +27,8 @@ object Protocol {
     // DFP/1.1 features, used only when both peers ask for them.
     const val FEATURE_BATCH = "batch"
     const val FEATURE_RESUME = "resume"
+    // Experimental: move the data onto a private Wi-Fi link (protocol section 7.5).
+    const val FEATURE_DIRECT = "direct"
     // A request is read before anyone approves it, so its fields are bounded.
     const val MAX_FEATURES = 16
     const val MAX_FEATURE_NAME_BYTES = 32

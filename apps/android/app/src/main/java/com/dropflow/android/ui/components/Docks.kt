@@ -82,9 +82,10 @@ fun TransferDock(progress: TransferProgressPayload, onCancel: () -> Unit, modifi
     val percent = progress.percentage.toInt().coerceIn(0, 100)
     val status = when (progress.phase) {
         TransferPhase.PREPARING -> if (sending) "Waiting for approval" else "Preparing"
+        TransferPhase.LINKING -> "Setting up a direct link"
         TransferPhase.STREAMING -> "${progress.currentFileIndex + 1} of ${progress.totalFiles} · " +
             "${formatBytes(progress.sessionBytesTransferred)} of ${formatBytes(progress.sessionTotalBytes)} · " +
-            formatSpeed(progress.speedBytesPerSec)
+            formatSpeed(progress.speedBytesPerSec) + if (progress.direct) " · Direct link" else ""
         TransferPhase.FINISHING -> if (sending) "Waiting for the recipient to confirm" else "Verifying and saving"
     }
     Glass(modifier.fillMaxWidth(), shape = DockShape, cornerRadius = 30.dp) {

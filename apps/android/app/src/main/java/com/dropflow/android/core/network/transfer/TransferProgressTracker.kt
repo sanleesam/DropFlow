@@ -18,9 +18,23 @@ class TransferProgressTracker(
     private var currentFileTotalBytes = 0L
     private var sessionBytesTransferred = 0L
     private var phase = TransferPhase.PREPARING
+    private var direct = false
 
     fun startSession(status: String = "Preparing transfer") {
         currentFileName = status
+        emitProgress(force = true)
+    }
+
+    /** The two devices are arranging a direct link; no file data moves yet. */
+    fun startLinking() {
+        phase = TransferPhase.LINKING
+        emitProgress(force = true)
+    }
+
+    /** [direct] tells whether the session moved onto the link or stays on the shared network. */
+    fun finishLinking(direct: Boolean) {
+        this.direct = direct
+        phase = TransferPhase.PREPARING
         emitProgress(force = true)
     }
 
@@ -81,7 +95,8 @@ class TransferProgressTracker(
             percentage = percentage,
             speedBytesPerSec = speedBytesPerSec,
             etaSeconds = etaSeconds,
-            phase = phase
+            phase = phase,
+            direct = direct
         )
 
         onProgressUpdate(payload)

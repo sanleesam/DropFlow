@@ -32,7 +32,8 @@ class SettingsViewModel(
                     accentColor = prefs.accentColor,
                     reduceMotion = prefs.reduceMotion,
                     themeMode = ThemeMode.fromId(prefs.themeMode),
-                    glassStyle = GlassStyle.fromId(prefs.glassStyle)
+                    glassStyle = GlassStyle.fromId(prefs.glassStyle),
+                    directLink = prefs.directLink
                 )
             }
         }
@@ -78,6 +79,10 @@ class SettingsViewModel(
 
     fun updateGlassStyle(value: GlassStyle) {
         viewModelScope.launch { userPreferencesRepository.updateGlassStyle(value.id) }
+    }
+
+    fun updateDirectLink(value: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.updateDirectLink(value) }
     }
 
     companion object {

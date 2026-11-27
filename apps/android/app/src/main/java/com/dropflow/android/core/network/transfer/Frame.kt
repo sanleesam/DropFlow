@@ -21,7 +21,11 @@ enum class FrameTag(val code: Byte) {
     // DFP/1.1: a request whose manifest does not fit in 64 KB.
     TRANSFER_REQUEST_LARGE(0x0C),
     // DFP/1.1: what the receiver already holds from an interrupted attempt.
-    RESUME_STATE(0x0D);
+    RESUME_STATE(0x0D),
+    // Direct link: the host's network, where a listening joiner waits, and the outcome.
+    DIRECT_OFFER(0x0E),
+    DIRECT_JOINED(0x0F),
+    DIRECT_RESULT(0x10);
 
     companion object {
         fun fromCode(code: Byte): FrameTag {

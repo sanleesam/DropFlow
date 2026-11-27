@@ -18,6 +18,7 @@ import java.io.File
  * Optional: `sendDir` sends every file in that folder under the app's files
  * directory to the peer once, and `cancelAfterMs` cancels a transfer that long
  * after its progress appears. Both go through the normal ViewModel methods.
+ * `directLink on|off` sets the app's own Direct link preference first.
  * Never packaged in a release APK.
  */
 class InteropInstrumentation : Instrumentation() {
@@ -27,6 +28,7 @@ class InteropInstrumentation : Instrumentation() {
     private var decision = "manual"
     private var sendDir: String? = null
     private var cancelAfterMs = -1L
+    private var directLink: Boolean? = null
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
@@ -36,6 +38,7 @@ class InteropInstrumentation : Instrumentation() {
         decision = arguments?.getString("decision") ?: "manual"
         sendDir = arguments?.getString("sendDir")
         cancelAfterMs = arguments?.getString("cancelAfterMs")?.toLongOrNull() ?: -1L
+        directLink = arguments?.getString("directLink")?.let { it == "on" }
         start()
     }
 
@@ -46,6 +49,12 @@ class InteropInstrumentation : Instrumentation() {
             stop.delete()
             val activity = startActivitySync(Intent(targetContext, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            directLink?.let { enabled ->
+                val app = targetContext.applicationContext as DropFlowApplication
+                kotlinx.coroutines.runBlocking { app.userPreferencesRepository.updateDirectLink(enabled) }
+                // The app applies its preferences a moment after they are saved.
+                Thread.sleep(1_000)
+            }
             val getter = MainActivity::class.java.getDeclaredMethod("getHomeViewModel").apply { isAccessible = true }
             val peer = Device(id = peerId, name = "Mac app · direct emulator test", type = DeviceType.DESKTOP,
                 addresses = listOf(DeviceAddress(peerHost, "ipv4")), port = peerPort,

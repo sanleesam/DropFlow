@@ -38,8 +38,8 @@ android {
         applicationId = "com.dropflow.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 23
-        versionName = "0.3.0-alpha.1"
+        versionCode = 24
+        versionName = "0.3.0-alpha.2"
 
         testInstrumentationRunner = providers.gradleProperty("dropflowInteropRunner")
             .orElse("androidx.test.runner.AndroidJUnitRunner").get()
@@ -123,6 +123,11 @@ android {
 }
 
 tasks.named("preBuild").configure { dependsOn(generateLicenseAssets) }
+
+// `-DDFP_PEER=<path>` names the desktop command-line peer for the cross-implementation tests.
+tasks.withType<Test>().configureEach {
+    System.getProperty("DFP_PEER")?.let { systemProperty("DFP_PEER", it) }
+}
 
 dependencies {
     implementation(libs.androidx.core.ktx)

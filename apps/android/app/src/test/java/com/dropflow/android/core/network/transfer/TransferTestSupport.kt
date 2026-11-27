@@ -11,6 +11,7 @@ import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.security.MessageDigest
 import java.util.Collections
 import java.util.Random
@@ -18,6 +19,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -91,6 +93,16 @@ internal class Peer(val socket: Socket) : Closeable {
 
     fun expectJson(tag: FrameTag) = JSONObject(String(expect(tag), Charsets.UTF_8))
 
+    /** The next frame that is not a keep-alive, which must be [tag]. */
+    fun await(tag: FrameTag): ByteArray {
+        while (true) {
+            val (actual, payload) = read()
+            if (actual == FrameTag.HEARTBEAT) continue
+            assertEquals(tag, actual)
+            return payload
+        }
+    }
+
     /** Reads DATA_CHUNK frames until [size] bytes have arrived. */
     fun expectData(size: Int): ByteArray {
         val data = ByteArrayOutputStream()
@@ -124,7 +136,8 @@ internal fun startSender(
     files: List<TestFile>,
     output: OutputStream = socket.getOutputStream(),
     openFile: (Int) -> InputStream = { ByteArrayInputStream(files[it].second) },
-    isCancelled: () -> Boolean = { false }
+    isCancelled: () -> Boolean = { false },
+    direct: DirectOptions? = null
 ): Future<String?> = inBackground {
     runBlocking {
         FileSender().sendTransferSession(
@@ -134,7 +147,8 @@ internal fun startSender(
             openFile = openFile,
             progressTracker = trackerFor(request, SessionDirection.OUTGOING),
             setReadTimeout = { socket.soTimeout = it },
-            isCancelled = isCancelled
+            isCancelled = isCancelled,
+            direct = direct
         )
     }
 }
@@ -239,4 +253,91 @@ internal class FakeStorage(root: File, override val publishesInAnyOrder: Boolean
 
     fun publishedFiles(): Map<String, ByteArray> = published.listFiles().orEmpty().associate { it.name to it.readBytes() }
     fun leftovers(): List<String> = (staging.listFiles().orEmpty().toList() + published.listFiles().orEmpty().toList()).map { it.name }
+}
+
+/**
+ * A "private network" that is really loopback: it exercises everything about
+ * a direct link except the radio.
+ */
+internal open class LoopbackLink(hostRank: Int, join: Boolean) : DirectLink {
+    private val caps = DirectCaps(hostRank, join)
+    /** As host: accept the joiner's connection (otherwise the joiner listens). */
+    @Volatile var hostListens = false
+    @Volatile var failHost = false
+    @Volatile var failJoin = false
+    val calls: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    val closed = AtomicBoolean(false)
+    @Volatile private var listener: ServerSocket? = null
+
+    protected fun listen(): Int = ServerSocket(0, 8, InetAddress.getLoopbackAddress()).also { listener = it }.localPort
+
+    override fun caps() = caps
+
+    override fun host(tick: () -> Unit): HostedLink {
+        calls += "host"
+        tick()
+        if (failHost) throw DirectLinkException("this adapter cannot create a network")
+        return HostedLink(SSID, PASSPHRASE, if (hostListens) listen() else null)
+    }
+
+    override fun join(offer: DirectOffer, tick: () -> Unit): JoinedLink {
+        calls += "join"
+        tick()
+        assertEquals(SSID to PASSPHRASE, offer.ssid to offer.passphrase)
+        if (failJoin) throw DirectLinkException("could not join the network")
+        return JoinedLink("127.0.0.1", if (offer.hostPort == null) listen() else 0)
+    }
+
+    override fun accept(waitMs: Int): Socket? {
+        val server = listener ?: throw DirectLinkException("not listening")
+        server.soTimeout = waitMs
+        return try {
+            server.accept()
+        } catch (_: SocketTimeoutException) {
+            null
+        }
+    }
+
+    override fun connect(address: String?, port: Int): Socket {
+        calls += "connect"
+        return Socket(address ?: "127.0.0.1", port)
+    }
+
+    override fun close() {
+        calls += "close"
+        runCatching { listener?.close() }
+        closed.set(true)
+    }
+
+    companion object {
+        const val SSID = "DIRECT-DF-test"
+        const val PASSPHRASE = "0123456789abcdef"
+    }
+}
+
+/** Batch mode as the receiving side sees it: every file whole and in order, then the end of the session. */
+internal fun Peer.expectBatchFiles(files: List<TestFile>) {
+    for ((index, file) in files.withIndex()) {
+        val header = JSONObject(String(await(FrameTag.FILE_HEADER), Charsets.UTF_8))
+        assertEquals(index, header.getInt("fileIndex"))
+        assertEquals(file.first, header.getString("relativePath"))
+        org.junit.Assert.assertArrayEquals(file.first, file.second, expectData(file.second.size))
+        val complete = expectJson(FrameTag.FILE_COMPLETE)
+        assertEquals(sha256(file.second), complete.getString("sha256Checksum"))
+    }
+    assertEquals("tx-test-session", String(expect(FrameTag.TRANSFER_COMPLETE)))
+}
+
+/** Batch mode as the sending side writes it, without the final TRANSFER_COMPLETE. */
+internal fun Peer.sendBatchFiles(files: List<TestFile>, chunk: Int = 256 * 1024) {
+    for ((index, file) in files.withIndex()) {
+        write(FrameTag.FILE_HEADER, FileHeaderPayload(index, file.first, file.second.size.toLong()).toJsonObject().toString())
+        var sent = 0
+        while (sent < file.second.size) {
+            val count = minOf(chunk, file.second.size - sent)
+            FrameUtils.writeFrame(output, FrameTag.DATA_CHUNK, file.second.copyOfRange(sent, sent + count))
+            sent += count
+        }
+        write(FrameTag.FILE_COMPLETE, FileCompletePayload(index, file.second.size.toLong(), sha256(file.second)).toJsonObject().toString())
+    }
 }

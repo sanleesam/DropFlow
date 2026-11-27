@@ -11,6 +11,28 @@ See [the current policy](docs/VERSIONING.md). Published versions are not renamed
 Android's numeric `versionCode` only increases, including when moving from the
 legacy beta label to the next alpha product version.
 
+## Desktop — [0.2.0-dev.3] — 2026-11-27
+
+Development build.
+
+- **Direct link (experimental, Windows, off by default).** Settings →
+  Transfers → Direct Link. The PC creates a private Wi-Fi network for the
+  transfer, an Android phone joins it, and the files bypass the router. If
+  the link cannot be set up the transfer carries on over the normal network.
+  **Not yet tested on any real PC or phone.**
+- Fixed the send dock's hint text spilling past the glass.
+
+## Android — [0.3.0-alpha.2] — 2026-11-27
+
+Alpha.
+
+- **Direct link (experimental, off by default).** Settings → Sharing. Joins
+  a private Wi-Fi network created by a Windows PC, as a second connection so
+  the phone keeps its own Wi-Fi. Needs Android 12 or newer and a phone that
+  supports two Wi-Fi connections; otherwise the switch is disabled.
+  **Not yet tested on a real phone.**
+- The sender now waits for its "cancelled" to be read before closing.
+
 ## Desktop — [0.2.0-dev.2] — 2026-11-27
 
 Development build. Not yet tested on physical devices; see

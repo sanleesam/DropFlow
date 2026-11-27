@@ -25,7 +25,8 @@ data class UserPreferences(
     val reduceMotion: Boolean = false,
     val updateChannel: String = "alpha",
     val themeMode: String = "system",
-    val glassStyle: String = "liquid"
+    val glassStyle: String = "liquid",
+    val directLink: Boolean = false
 )
 
 class UserPreferencesRepository(private val context: Context) {
@@ -42,6 +43,7 @@ class UserPreferencesRepository(private val context: Context) {
         val UPDATE_CHANNEL = stringPreferencesKey("android_update_channel")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val GLASS_STYLE = stringPreferencesKey("glass_style")
+        val DIRECT_LINK = booleanPreferencesKey("direct_link")
     }
 
     val userPreferencesFlow: Flow<UserPreferences> = context.dataStore.data.map { preferences ->
@@ -61,7 +63,8 @@ class UserPreferencesRepository(private val context: Context) {
             updateChannel = preferences[PreferencesKeys.UPDATE_CHANNEL]
                 ?: defaultChannel,
             themeMode = preferences[PreferencesKeys.THEME_MODE] ?: "system",
-            glassStyle = preferences[PreferencesKeys.GLASS_STYLE] ?: "liquid"
+            glassStyle = preferences[PreferencesKeys.GLASS_STYLE] ?: "liquid",
+            directLink = preferences[PreferencesKeys.DIRECT_LINK] ?: false
         )
     }
 
@@ -120,6 +123,10 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun updateGlassStyle(value: String) {
         context.dataStore.edit { it[PreferencesKeys.GLASS_STYLE] = value }
+    }
+
+    suspend fun updateDirectLink(value: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DIRECT_LINK] = value }
     }
 
     suspend fun updateChannel(value: String) {
