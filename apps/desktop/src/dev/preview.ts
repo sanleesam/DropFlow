@@ -64,7 +64,7 @@ async function simulateSend(args: { sessionId: string; filePaths: string[] }) {
   await emit("transfer-completed", {
     sessionId,
     fileName: filePaths[0]?.split("/").pop(),
-    deviceName: "Target Device",
+    deviceName: "",
     size: "610.4 MB",
     totalFiles: filePaths.length,
     totalSizeBytes: total,

@@ -456,6 +456,17 @@ export function runLifecycleTests() {
     assertTrue(store.activeTransfers["dl"].direct===true,"Direct survives progress updates");
     assertTrue(transferSubtitle(store.activeTransfers["dl"]).includes("Direct link"),"Row says it is direct");
   }
+  // 22c: a sent transfer keeps the name of the device it was sent to.
+  {
+    let store=startSendSession(createInitialSessionStore(),"nm","Studio PC","a.mov",1);
+    store=applyCompletionEvent(store,{sessionId:"nm",fileName:"a.mov",deviceName:""});
+    assertEqual(store.recentTransfers[0].deviceName,"Studio PC","Empty event name keeps the session's");
+    let old=startSendSession(createInitialSessionStore(),"nm2","Studio PC","a.mov",1);
+    old=applyCompletionEvent(old,{sessionId:"nm2",fileName:"a.mov",deviceName:"Target Device"});
+    assertEqual(old.recentTransfers[0].deviceName,"Studio PC","Placeholder never wins");
+    const received=applyCompletionEvent(createInitialSessionStore(),{sessionId:"rx",fileName:"b",deviceName:"Pixel",direction:"receive"});
+    assertEqual(received.recentTransfers[0].deviceName,"Pixel","A receive with no session uses the event's name");
+  }
   // 23: 100% only when every byte has moved.
   {
     let store=startSendSession(createInitialSessionStore(),"near","Peer","big.bin",1);

@@ -1497,6 +1497,7 @@ html.dark .avatar.local {
 .inspector {
   position: sticky;
   top: 0;
+  min-width: 0;
   padding: 20px;
   display: flex;
   flex-direction: column;
@@ -1524,6 +1525,9 @@ html.dark .avatar.local {
 }
 .facts {
   display: grid;
+  /* One column that may shrink: without this a long unbroken value (a file
+     name) widens the column past the card and drags every value off it. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
 }
 .facts > div {
@@ -1541,6 +1545,7 @@ html.dark .avatar.local {
   flex-shrink: 0;
 }
 .facts dd {
+  min-width: 0;
   text-align: right;
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;

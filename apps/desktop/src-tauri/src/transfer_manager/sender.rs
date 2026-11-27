@@ -209,7 +209,8 @@ pub fn send_files_over_tcp(
         TransferCompletedPayload {
             session_id: session_id.clone(),
             file_name: job.files.first().map(|f| f.relative_path.clone()).unwrap_or_else(|| "File".into()),
-            device_name: "Target Device".to_string(),
+            // The window knows the device's name; this side only has its address.
+            device_name: String::new(),
             size: format_size(total_size_bytes),
             timestamp: "Just now".to_string(),
             total_files,

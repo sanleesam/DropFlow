@@ -374,7 +374,10 @@ export function applyCompletionEvent(
   const active = store.activeTransfers[sessionId];
   const direction = payload.direction || active?.direction || "send";
   const totalFiles = payload.totalFiles ?? active?.totalFiles ?? 1;
-  const deviceName = payload.deviceName || active?.deviceName || "Target Device";
+  // The session knows who it was started with; an event that carries no name
+  // (or an old placeholder) must not replace that.
+  const named = payload.deviceName && payload.deviceName !== "Target Device" ? payload.deviceName : "";
+  const deviceName = active?.deviceName || named || "Another device";
   const receiveDir = payload.receiveDir || active?.receiveDir;
 
   let displayName = payload.fileName || active?.fileName || "File";
