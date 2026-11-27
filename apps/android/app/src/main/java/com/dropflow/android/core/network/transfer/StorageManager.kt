@@ -21,9 +21,14 @@ import java.nio.file.Files
 private const val TAG = "DropFlowStorage"
 private const val RECEIVE_SUBDIR = "DropFlow"
 
-class StorageManager(private val context: Context) {
+class StorageManager(private val context: Context) : ReceiveStorage {
+    // A pending MediaStore row reserves its name when it is created. Legacy
+    // staging files only get theirs when published, so those go in order.
+    override val publishesInAnyOrder: Boolean
+        get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+
     /** Allocate a pending MediaStore row or a uniquely owned legacy staging file. */
-    fun prepareTargetStream(fileName: String): WritableTarget {
+    override fun prepareTargetStream(fileName: String): WritableTarget {
         val parts = ReceivePath.components(fileName)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             prepareMediaStoreTarget(parts)
@@ -73,7 +78,7 @@ class StorageManager(private val context: Context) {
     }
 
     /** Publish already closed and verified data, without replacing another file. */
-    fun completePendingFile(target: WritableTarget) {
+    override fun completePendingFile(target: WritableTarget) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
             if (context.contentResolver.update(checkNotNull(target.uri), values, null, null) != 1) {
@@ -87,7 +92,7 @@ class StorageManager(private val context: Context) {
     }
 
     /** Clean up only storage allocated by this transfer. */
-    fun cleanupTarget(target: WritableTarget) {
+    override fun cleanupTarget(target: WritableTarget) {
         runCatching { target.stream.close() }
         runCatching {
             target.uri?.let { context.contentResolver.delete(it, null, null) }

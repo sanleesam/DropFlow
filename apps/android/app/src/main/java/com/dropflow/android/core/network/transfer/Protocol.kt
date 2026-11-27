@@ -19,6 +19,24 @@ object Protocol {
     const val APPROVAL_TIMEOUT_MS = 75_000
 
     const val MAX_METADATA_SIZE = 64 * 1024 // 64 KB
+    // DFP/1.1 large manifests and resume lists.
+    const val MAX_LARGE_METADATA_SIZE = 16 * 1024 * 1024
     const val DEFAULT_CHUNK_SIZE = 64 * 1024 // 64 KB
     const val MAX_CHUNK_SIZE = 1024 * 1024 // 1 MB
+
+    // DFP/1.1 features, used only when both peers ask for them.
+    const val FEATURE_BATCH = "batch"
+    const val FEATURE_RESUME = "resume"
+    // A request is read before anyone approves it, so its fields are bounded.
+    const val MAX_FEATURES = 16
+    const val MAX_FEATURE_NAME_BYTES = 32
+
+    const val HEARTBEAT_INTERVAL_MS = 2_000L
+    const val PEER_CHECK_INTERVAL_MS = 100L
+    // How long a peer keeps reading after it sent a cancel or error notice.
+    const val NOTICE_DRAIN_MS = 1_500L
+    // A cancelled transfer that is stuck in a write is closed after this long.
+    const val CANCEL_GRACE_MS = 1_500L
+    // A peer without large manifests drops the connection well within this.
+    const val LARGE_REQUEST_REJECT_WINDOW_MS = 5_000L
 }

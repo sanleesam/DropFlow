@@ -149,11 +149,14 @@ class TransferEngine(
                 files += FileMetadataPayload(index, safeName, size, "")
                 totalSize = Math.addExact(totalSize, size)
             }
-            val request = TransferRequestPayload(sessionId, localDeviceId, localDeviceName, "Android",
-                files.size, totalSize, files)
-            require(request.toJsonObject().toString().toByteArray(Charsets.UTF_8).size <= Protocol.MAX_METADATA_SIZE) {
-                "Too many files for one transfer. Try sending a smaller selection."
+            SendNames.unique(files.map { it.relativePath }).forEachIndexed { index, name ->
+                if (name != files[index].relativePath) files[index] = files[index].copy(relativePath = name)
             }
+            // Offer the DFP/1.1 features; an older recipient ignores them.
+            val request = TransferRequestPayload(sessionId, localDeviceId, localDeviceName, "Android",
+                files.size, totalSize, files, listOf(Protocol.FEATURE_BATCH, Protocol.FEATURE_RESUME))
+            // Fails here, before connecting, when the list is too long even for a large request.
+            FrameUtils.encodeTransferRequest(request)
 
             // Try another advertised endpoint only before sending the request.
             for (address in device.addresses.distinctBy { it.address }.take(3)) {
@@ -182,7 +185,9 @@ class TransferEngine(
                 openFile = { index -> contentResolver.openInputStream(uris[index])
                     ?: throw java.io.IOException("Could not open '${files[index].relativePath}'") },
                 progressTracker = tracker,
-                setReadTimeout = { socket.socket.soTimeout = it }
+                setReadTimeout = { socket.readTimeoutMs = it },
+                isCancelled = { socket.isCancelled },
+                sendNotice = { tag, payload -> socket.sendNotice(tag, payload, drain = false) }
             )
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled

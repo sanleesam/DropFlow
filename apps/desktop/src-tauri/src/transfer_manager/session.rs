@@ -1051,8 +1051,22 @@ fn receive_inner(
     let mut received: Vec<FileMetadata> = Vec::with_capacity(meta.files.len());
     let mut targets: Vec<PathBuf> = Vec::with_capacity(meta.files.len());
 
+    // A batch sender can have written a whole folder of small files into the
+    // socket buffers and already be waiting for the final reply while this
+    // device is still creating files. Slow storage must not look like a dead
+    // connection, so keep-alives continue while receiving.
+    macro_rules! keep_alive {
+        () => {
+            if negotiated.batch && last_write.elapsed() >= HEARTBEAT_EVERY {
+                write_frame(stream, FrameTag::Heartbeat, b"").map_err(Fail::network)?;
+                last_write = Instant::now();
+            }
+        };
+    }
+
     for (index, expected) in meta.files.iter().enumerate() {
         check_cancel(cancel)?;
+        keep_alive!();
         let (tag, len) = next_frame(stream, negotiated.batch)?;
         expect(tag, FrameTag::FileHeader)?;
         let header: FileHeaderPayload = parse(&read_body(stream, len)?, "file header")?;
@@ -1131,6 +1145,7 @@ fn receive_inner(
             file_bytes += len as u64;
             session_bytes += len as u64;
             meter.add(len as u64);
+            keep_alive!();
             if let Some(speed) = meter.due(session_bytes == total) {
                 on_event(SessionEvent::Progress(Progress {
                     file_index: index as u32,

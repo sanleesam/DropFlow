@@ -6,11 +6,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import java.io.BufferedInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 
 private const val TAG = "DropFlowConnection"
 
@@ -26,12 +29,21 @@ internal class TransferConnection(
 ) {
     private val closed = AtomicBoolean(false)
     private val cancelled = AtomicBoolean(false)
+    private val noticeSent = AtomicBoolean(false)
     val isCancelled: Boolean get() = cancelled.get()
+
+    private var sessionInput: SessionInput? = null
+    private var frameOutput: FrameOutput? = null
 
     var inputStream: InputStream? = null
         private set
     var outputStream: OutputStream? = null
         private set
+
+    /** The limit for one read. The socket itself wakes more often to notice a cancel. */
+    var readTimeoutMs: Int
+        get() = sessionInput?.timeoutMs ?: Protocol.READ_TIMEOUT_MS
+        set(value) { sessionInput?.timeoutMs = value }
 
     private val _currentSession = MutableStateFlow(session)
     val currentSession: StateFlow<TransferSession> = _currentSession.asStateFlow()
@@ -42,12 +54,15 @@ internal class TransferConnection(
 
     init {
         try {
-            socket.soTimeout = Protocol.READ_TIMEOUT_MS
+            socket.soTimeout = SessionInput.SLICE_MS
             // Request/response control frames must not wait on Nagle + delayed ACK
             // (up to 200 ms per file on Windows peers). Data frames are large writes.
             socket.tcpNoDelay = true
-            inputStream = socket.getInputStream()
-            outputStream = socket.getOutputStream()
+            val input = SessionInput(socket.getInputStream(), cancelled::get)
+            sessionInput = input
+            // Batch mode sends many small frames back to back; read them in bulk.
+            inputStream = BufferedInputStream(input, 64 * 1024)
+            outputStream = FrameOutput(socket.getOutputStream()).also { frameOutput = it }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize socket streams for session ${session.sessionId}", e)
             updateState(SessionState.FAILED, e.message)
@@ -137,11 +152,13 @@ internal class TransferConnection(
 
                 while (_currentSession.value.state == SessionState.CONNECTED) {
                     val header = FrameUtils.readHeader(inp)
+                    // Only a request may be large here; nothing has been approved yet.
+                    check(header.tag != FrameTag.RESUME_STATE) { "Unexpected RESUME_STATE frame" }
                     val payloadBytes = FrameUtils.readPayload(inp, header.payloadLength)
                     Log.d(TAG, "Received frame ${header.tag} len ${header.payloadLength} on session ${session.sessionId}")
 
                     when (header.tag) {
-                        FrameTag.TRANSFER_REQUEST -> {
+                        FrameTag.TRANSFER_REQUEST, FrameTag.TRANSFER_REQUEST_LARGE -> {
                             val requestPayload = TransferRequestPayload.fromJsonString(String(payloadBytes, StandardCharsets.UTF_8))
                             ReceiveValidation.request(requestPayload)
                             receiveRequest(context, inp, out, requestPayload)
@@ -189,7 +206,7 @@ internal class TransferConnection(
                 FrameUtils.writeTransferReject(output, TransferRejectPayload("REJECTED", decision.reason ?: "User declined transfer"))
                 return
             }
-            val receiver = FileReceiver(context)
+            val receiver = FileReceiver(StorageManager(context))
             val tracker = TransferProgressTracker(
                 sessionId = request.sessionId,
                 totalFiles = request.totalFiles,
@@ -198,10 +215,14 @@ internal class TransferConnection(
                 onProgressUpdate = { progress -> onProgressUpdated?.invoke(progress) }
             )
             val error = try {
-                FrameUtils.writeTransferAccept(output, TransferAcceptPayload(status = "ACCEPTED"))
                 tracker.startSession("Preparing to receive")
-                if (receiver.receiveTransferSession(input, output, request, tracker)) null
-                else receiver.failureReason ?: "File transfer failed"
+                // The receiver sends the acceptance, with the features it grants.
+                val received = receiver.receiveTransferSession(
+                    input, output, request, tracker,
+                    isCancelled = cancelled::get,
+                    sendNotice = { tag, payload -> sendNotice(tag, payload, drain = true) }
+                )
+                if (received) null else receiver.failureReason ?: "File transfer failed"
             } catch (e: Exception) {
                 Log.w(TAG, "Receive failed for ${session.sessionId}", e)
                 e.message ?: "File transfer failed"
@@ -213,11 +234,49 @@ internal class TransferConnection(
         }
     }
 
+    /**
+     * The transfer loop sees the flag between frames (a blocked read wakes for
+     * it), tells the peer at a frame boundary and closes. Nothing is written
+     * from here: a second writer could land inside a frame in progress. This
+     * only closes the socket if the loop is still stuck, for example in a write.
+     */
     fun cancelTransfer() {
-        cancelled.set(true)
-        // Closing interrupts a blocked read or write. Never interleave a second
-        // writer's cancellation frame with a file frame already on this socket.
-        runCatching { socket.close() }
+        if (!cancelled.compareAndSet(false, true)) return
+        thread(isDaemon = true, name = "dropflow-cancel") {
+            runCatching {
+                Thread.sleep(Protocol.CANCEL_GRACE_MS)
+                // A notice is out: give the peer time to read it before closing.
+                if (noticeSent.get()) Thread.sleep(Protocol.NOTICE_DRAIN_MS + 500)
+            }
+            runCatching { socket.close() }
+        }
+    }
+
+    /**
+     * Tells the peer why this side stops (TRANSFER_CANCEL or ERROR). Call only
+     * from the thread that writes the session, between frames. With [drain] it
+     * then waits for the peer to read the notice: closing with unread input
+     * resets the connection and can destroy it.
+     */
+    fun sendNotice(tag: FrameTag, payload: ByteArray, drain: Boolean): Boolean {
+        val output = frameOutput ?: return false
+        if (socket.isClosed || !output.notice(tag, payload)) return false
+        noticeSent.set(true)
+        if (!drain) return true
+        runCatching {
+            socket.shutdownOutput()
+            val input = socket.getInputStream()
+            val sink = ByteArray(16 * 1024)
+            val deadline = System.nanoTime() + Protocol.NOTICE_DRAIN_MS * 1_000_000
+            while (System.nanoTime() < deadline) {
+                try {
+                    if (input.read(sink) < 0) break
+                } catch (_: SocketTimeoutException) {
+                    // Nothing arrived in this slice; keep waiting for the peer to close.
+                }
+            }
+        }
+        return true
     }
 
     fun close() {

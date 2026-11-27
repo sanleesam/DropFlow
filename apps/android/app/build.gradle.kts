@@ -115,6 +115,11 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // JVM tests drive the transfer engine; its android.util.Log calls are no-ops there.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 tasks.named("preBuild").configure { dependsOn(generateLicenseAssets) }
@@ -138,4 +143,6 @@ dependencies {
 
     debugImplementation(libs.androidx.ui.tooling)
     testImplementation("junit:junit:4.13.2")
+    // The android.jar used by JVM tests only has stubs for org.json.
+    testImplementation("org.json:json:20240303")
 }

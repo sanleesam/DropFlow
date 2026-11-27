@@ -17,7 +17,11 @@ enum class FrameTag(val code: Byte) {
     TRANSFER_ACK(0x08),
     FILE_COMPLETE(0x09),
     HEARTBEAT(0x0A),
-    ERROR(0x0B);
+    ERROR(0x0B),
+    // DFP/1.1: a request whose manifest does not fit in 64 KB.
+    TRANSFER_REQUEST_LARGE(0x0C),
+    // DFP/1.1: what the receiver already holds from an interrupted attempt.
+    RESUME_STATE(0x0D);
 
     companion object {
         fun fromCode(code: Byte): FrameTag {
@@ -39,11 +43,15 @@ object FrameUtils {
      * two TCP segments. Same bytes on the wire as header-then-payload.
      */
     fun writeFrame(outputStream: OutputStream, tag: FrameTag, payload: ByteArray) {
+        outputStream.write(encodeFrame(tag, payload))
+        outputStream.flush()
+    }
+
+    internal fun encodeFrame(tag: FrameTag, payload: ByteArray): ByteArray {
         val frame = ByteArray(Protocol.HEADER_SIZE + payload.size)
         encodeHeader(frame, tag, payload.size)
         payload.copyInto(frame, Protocol.HEADER_SIZE)
-        outputStream.write(frame)
-        outputStream.flush()
+        return frame
     }
 
     fun writeHeader(outputStream: OutputStream, tag: FrameTag, payloadLength: Int) {
@@ -52,18 +60,18 @@ object FrameUtils {
         outputStream.write(header)
     }
 
-    internal fun encodeHeader(buffer: ByteArray, tag: FrameTag, payloadLength: Int) {
-        require(buffer.size >= Protocol.HEADER_SIZE)
+    internal fun encodeHeader(buffer: ByteArray, tag: FrameTag, payloadLength: Int, offset: Int = 0) {
+        require(offset >= 0 && buffer.size - offset >= Protocol.HEADER_SIZE)
         require(payloadLength in 0..maxPayloadSize(tag)) {
             "Invalid ${tag.name} payload size: $payloadLength"
         }
-        Protocol.MAGIC_BYTES.copyInto(buffer)
-        buffer[4] = Protocol.PROTOCOL_VERSION
-        buffer[5] = tag.code
-        buffer[6] = (payloadLength ushr 24).toByte()
-        buffer[7] = (payloadLength ushr 16).toByte()
-        buffer[8] = (payloadLength ushr 8).toByte()
-        buffer[9] = payloadLength.toByte()
+        Protocol.MAGIC_BYTES.copyInto(buffer, offset)
+        buffer[offset + 4] = Protocol.PROTOCOL_VERSION
+        buffer[offset + 5] = tag.code
+        buffer[offset + 6] = (payloadLength ushr 24).toByte()
+        buffer[offset + 7] = (payloadLength ushr 16).toByte()
+        buffer[offset + 8] = (payloadLength ushr 8).toByte()
+        buffer[offset + 9] = payloadLength.toByte()
     }
 
     fun readHeader(inputStream: InputStream): FrameHeader {
@@ -99,9 +107,24 @@ object FrameUtils {
         return FrameHeader(tag = tag, payloadLength = payloadLen)
     }
 
+    /**
+     * Memory grows with the bytes that actually arrive, so a peer cannot
+     * reserve a large buffer by only claiming a length.
+     */
     fun readPayload(inputStream: InputStream, length: Int): ByteArray {
-        val payload = ByteArray(length)
-        readPayloadInto(inputStream, payload, length)
+        require(length >= 0)
+        var payload = ByteArray(minOf(length, Protocol.MAX_METADATA_SIZE))
+        var bytesRead = 0
+        while (bytesRead < length) {
+            if (bytesRead == payload.size) {
+                payload = payload.copyOf(minOf(length.toLong(), payload.size * 2L).toInt())
+            }
+            val read = inputStream.read(payload, bytesRead, payload.size - bytesRead)
+            if (read <= 0) {
+                throw java.io.EOFException("End of stream reached while reading payload")
+            }
+            bytesRead += read
+        }
         return payload
     }
 
@@ -117,9 +140,25 @@ object FrameUtils {
         }
     }
 
-    fun writeTransferRequest(outputStream: OutputStream, payload: TransferRequestPayload) {
+    /**
+     * A manifest over 64 KB uses the large frame, which only DFP/1.1 peers
+     * accept. Returns true when the large frame was used.
+     */
+    fun writeTransferRequest(outputStream: OutputStream, payload: TransferRequestPayload): Boolean =
+        writeTransferRequest(outputStream, encodeTransferRequest(payload))
+
+    internal fun encodeTransferRequest(payload: TransferRequestPayload): ByteArray {
         val jsonBytes = payload.toJsonObject().toString().toByteArray(StandardCharsets.UTF_8)
-        writeFrame(outputStream, FrameTag.TRANSFER_REQUEST, jsonBytes)
+        require(jsonBytes.size <= Protocol.MAX_LARGE_METADATA_SIZE) {
+            "Too many files for one transfer. Send them in smaller groups."
+        }
+        return jsonBytes
+    }
+
+    internal fun writeTransferRequest(outputStream: OutputStream, jsonBytes: ByteArray): Boolean {
+        val large = jsonBytes.size > Protocol.MAX_METADATA_SIZE
+        writeFrame(outputStream, if (large) FrameTag.TRANSFER_REQUEST_LARGE else FrameTag.TRANSFER_REQUEST, jsonBytes)
+        return large
     }
 
     fun writeHeartbeat(outputStream: OutputStream, message: String) {
@@ -162,8 +201,9 @@ object FrameUtils {
         writeFrame(outputStream, FrameTag.TRANSFER_CANCEL, sessionBytes)
     }
 
-    private fun maxPayloadSize(tag: FrameTag): Int = when (tag) {
+    internal fun maxPayloadSize(tag: FrameTag): Int = when (tag) {
         FrameTag.DATA_CHUNK -> Protocol.MAX_CHUNK_SIZE
+        FrameTag.TRANSFER_REQUEST_LARGE, FrameTag.RESUME_STATE -> Protocol.MAX_LARGE_METADATA_SIZE
         else -> Protocol.MAX_METADATA_SIZE
     }
 }

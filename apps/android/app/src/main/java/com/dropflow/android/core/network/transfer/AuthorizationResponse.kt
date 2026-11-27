@@ -7,8 +7,9 @@ internal data class AuthorizationResponse(val tag: FrameTag, val payload: ByteAr
 internal fun readAuthorizationResponse(input: InputStream, setReadTimeout: (Int) -> Unit): AuthorizationResponse {
     setReadTimeout(Protocol.APPROVAL_TIMEOUT_MS)
     try {
-        val header = FrameUtils.readHeader(input)
-        return AuthorizationResponse(header.tag, FrameUtils.readPayload(input, header.payloadLength))
+        // A DFP/1.1 receiver may send keep-alives while it prepares its answer.
+        val (tag, payload) = readReply(input)
+        return AuthorizationResponse(tag, payload)
     } finally {
         setReadTimeout(Protocol.READ_TIMEOUT_MS)
     }

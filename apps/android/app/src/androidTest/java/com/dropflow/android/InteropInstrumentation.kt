@@ -3,6 +3,7 @@ package com.dropflow.android
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import com.dropflow.android.core.model.Device
 import com.dropflow.android.core.model.DeviceAddress
@@ -14,6 +15,9 @@ import java.io.File
  * Separate test-APK fixture for emulator/host interoperability.
  * Supplies discovery metadata and optional approval decisions for a known peer.
  * File selection, DFP/1, authorization and storage use the real app methods.
+ * Optional: `sendDir` sends every file in that folder under the app's files
+ * directory to the peer once, and `cancelAfterMs` cancels a transfer that long
+ * after its progress appears. Both go through the normal ViewModel methods.
  * Never packaged in a release APK.
  */
 class InteropInstrumentation : Instrumentation() {
@@ -21,6 +25,8 @@ class InteropInstrumentation : Instrumentation() {
     private lateinit var peerHost: String
     private lateinit var peerId: String
     private var decision = "manual"
+    private var sendDir: String? = null
+    private var cancelAfterMs = -1L
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
@@ -28,6 +34,8 @@ class InteropInstrumentation : Instrumentation() {
         peerHost = arguments?.getString("peerHost") ?: "10.0.2.2"
         peerId = arguments?.getString("peerId") ?: "mac-interop-test"
         decision = arguments?.getString("decision") ?: "manual"
+        sendDir = arguments?.getString("sendDir")
+        cancelAfterMs = arguments?.getString("cancelAfterMs")?.toLongOrNull() ?: -1L
         start()
     }
 
@@ -43,6 +51,7 @@ class InteropInstrumentation : Instrumentation() {
                 addresses = listOf(DeviceAddress(peerHost, "ipv4")), port = peerPort,
                 platform = "macOS", operatingSystem = "macOS")
             val deadline = System.currentTimeMillis() + 15 * 60_000
+            var activeSince = 0L
             while (!stop.exists() && System.currentTimeMillis() < deadline) {
                 runOnMainSync {
                     val viewModel = getter.invoke(activity) as HomeViewModel
@@ -52,6 +61,20 @@ class InteropInstrumentation : Instrumentation() {
                         when (decision) {
                             "accept" -> viewModel.acceptTransfer(request)
                             "decline" -> viewModel.declineTransfer(request)
+                        }
+                    }
+                    sendDir?.let { name ->
+                        sendDir = null
+                        val files = File(targetContext.filesDir, name).listFiles().orEmpty().filter { it.isFile }.sortedBy { it.name }
+                        if (viewModel.uiState.value.selectedDeviceId != peerId) viewModel.selectDevice(peerId)
+                        viewModel.sendFiles(files.map(Uri::fromFile))
+                    }
+                    if (cancelAfterMs >= 0 && viewModel.uiState.value.activeProgress != null) {
+                        val now = System.currentTimeMillis()
+                        if (activeSince == 0L) activeSince = now
+                        if (now - activeSince >= cancelAfterMs) {
+                            cancelAfterMs = -1
+                            viewModel.cancelActiveTransfer()
                         }
                     }
                 }

@@ -185,10 +185,12 @@ then waits for the final `TRANSFER_ACK` (`ACK`). Differences from DFP/1:
 - **`FILE_COMPLETE.sha256Checksum` is required.** An empty digest is an error.
 - **`HEARTBEAT` frames (any payload, normally empty) may appear between any two
   frames in either direction** and are skipped. A peer sends one about every
-  2 seconds while it does long local work with nothing else to send: the
-  receiver while it hashes staged data before the accept and while it saves
-  files before the final acknowledgement; the sender while it hashes a resume
-  prefix. Read timeouts stay at 15 seconds (75 seconds while waiting for the
+  2 seconds whenever it has sent nothing else: the receiver for the whole
+  session (hashing staged data before the accept, receiving, and saving before
+  the final acknowledgement), the sender while it hashes a resume prefix. The
+  receiver's are needed even while data flows: a sender can have written a
+  whole folder of small files into the socket buffers and be waiting for the
+  final reply while the receiver is still creating files. Read timeouts stay at 15 seconds (75 seconds while waiting for the
   accept) and apply per frame.
 - **Either side may stop with a reason.** At a frame boundary a peer may send
   `TRANSFER_CANCEL` (the person cancelled; payload empty or the session id) or

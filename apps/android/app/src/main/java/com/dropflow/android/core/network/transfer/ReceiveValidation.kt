@@ -5,6 +5,11 @@ internal object ReceiveValidation {
     fun request(request: TransferRequestPayload) {
         require(request.sessionId.isNotBlank() && request.sessionId.length <= 128) { "Invalid transfer session ID" }
         require(request.totalFiles > 0 && request.totalFiles == request.files.size) { "Invalid file count" }
+        // Shown in the approval prompt and kept in history; a peer chooses them freely.
+        require(utf8Size(request.senderId) <= 128 && utf8Size(request.senderName) <= 256 &&
+            utf8Size(request.senderPlatform) <= 64) { "Invalid sender details" }
+        require(request.features.size <= Protocol.MAX_FEATURES &&
+            request.features.all { utf8Size(it) <= Protocol.MAX_FEATURE_NAME_BYTES }) { "Invalid feature list" }
         var total = 0L
         request.files.forEachIndexed { index, file ->
             require(file.fileIndex == index && file.sizeBytes >= 0 && file.relativePath.isNotBlank()) {
@@ -27,6 +32,8 @@ internal object ReceiveValidation {
             "File checksum does not match the accepted transfer"
         }
     }
+
+    private fun utf8Size(text: String) = text.toByteArray(Charsets.UTF_8).size
 
     fun checksum(expected: String, completed: String, computed: String) {
         require(completed.length == 64 && completed.all { it in '0'..'9' || it.lowercaseChar() in 'a'..'f' } &&

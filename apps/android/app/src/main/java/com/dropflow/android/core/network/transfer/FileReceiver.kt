@@ -3,6 +3,7 @@ package com.dropflow.android.core.network.transfer
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
@@ -10,29 +11,55 @@ import java.security.MessageDigest
 
 private const val TAG = "DropFlowFileReceiver"
 
-class FileReceiver(
-    context: android.content.Context,
-    private val storageManager: StorageManager = StorageManager(context)
-) {
+private const val MISMATCH_NOTICE = "the data did not match the transfer"
+
+class FileReceiver(private val storage: ReceiveStorage) {
     var failureReason: String? = null
         private set
 
+    /**
+     * Runs an approved transfer: sends the acceptance, receives and verifies
+     * every file, saves them, then confirms. Grants `batch` when the sender
+     * offers it; otherwise this is the original DFP/1 exchange.
+     */
     suspend fun receiveTransferSession(
         inputStream: InputStream,
         outputStream: OutputStream,
         requestPayload: TransferRequestPayload,
-        progressTracker: TransferProgressTracker
+        progressTracker: TransferProgressTracker,
+        isCancelled: () -> Boolean = { false },
+        sendNotice: ((FrameTag, ByteArray) -> Unit)? = null
     ): Boolean = withContext(Dispatchers.IO) {
         Log.d(TAG, "Starting FileReceiver for session ${requestPayload.sessionId} (${requestPayload.totalFiles} files, ${requestPayload.totalSizeBytes} bytes)")
-        val activeTargets = mutableListOf<WritableTarget>()
-        val completedTargets = mutableListOf<WritableTarget>()
+        val output = FrameOutput.of(outputStream)
+        // Resume needs staged data that survives the session; Android does not keep any yet.
+        val batch = Protocol.FEATURE_BATCH in requestPayload.features
         val frames = BulkFrameReader()
         val started = System.nanoTime()
+        var pipeline: ReceivePipeline? = null
+
+        // Runs between frames and while waiting for storage. A batch sender may
+        // have written everything and be waiting for the final reply while this
+        // device is still saving, so slow storage must not look like a dead connection.
+        val tick = {
+            if (isCancelled()) throw TransferCancelledException()
+            if (batch && System.nanoTime() - output.lastWriteNanos >= Protocol.HEARTBEAT_INTERVAL_MS * 1_000_000) {
+                FrameUtils.writeFrame(output, FrameTag.HEARTBEAT, ByteArray(0))
+            }
+        }
 
         try {
             ReceiveValidation.request(requestPayload)
+            FrameUtils.writeTransferAccept(
+                output,
+                TransferAcceptPayload(status = "ACCEPTED", features = if (batch) listOf(Protocol.FEATURE_BATCH) else emptyList())
+            )
+            val files = ReceivePipeline(storage, requestPayload.files.map { it.relativePath }).also { pipeline = it }
+            val messageDigest = MessageDigest.getInstance("SHA-256")
+
             for (i in 0 until requestPayload.totalFiles) {
-                val header = readReceiveHeader(inputStream)
+                tick()
+                val header = nextFrame(inputStream, batch)
                 if (header.tag != FrameTag.FILE_HEADER) {
                     throw IllegalStateException("Expected FILE_HEADER frame tag, received 0x${String.format("%02X", header.tag.code)}")
                 }
@@ -40,41 +67,41 @@ class FileReceiver(
                 val headerPayloadBytes = FrameUtils.readPayload(inputStream, header.payloadLength)
                 val fileHeader = FileHeaderPayload.fromJsonString(String(headerPayloadBytes, StandardCharsets.UTF_8))
                 ReceiveValidation.header(requestPayload, i, fileHeader)
-                Log.d(TAG, "Receiving file ${i + 1}/${requestPayload.totalFiles}: '${fileHeader.relativePath}' (${fileHeader.sizeBytes} bytes)")
 
                 progressTracker.startFile(i, fileHeader.relativePath, fileHeader.sizeBytes)
 
-                // Open the storage target (MediaStore on API 29+, legacy .part file below).
-                val target = storageManager.prepareTargetStream(fileHeader.relativePath)
-                activeTargets += target
-                FrameUtils.writeTransferAck(outputStream, TransferAckPayload(status = "ACCEPTED", resumeOffset = 0L))
+                // The storage target (MediaStore on API 29+, legacy .part file below) was prepared ahead.
+                val target = files.take(i, tick)
+                // DFP/1 acknowledges every file header; batch mode sends nothing until the end.
+                if (!batch) FrameUtils.writeTransferAck(output, TransferAckPayload(status = "ACCEPTED", resumeOffset = 0L))
 
-                val messageDigest = MessageDigest.getInstance("SHA-256")
                 var bytesWritten = 0L
-
-                target.stream.use { fileOut ->
-                    while (bytesWritten < fileHeader.sizeBytes) {
-                        val chunkHeader = readReceiveHeader(inputStream)
-                        if (chunkHeader.tag != FrameTag.DATA_CHUNK) {
-                            throw IllegalStateException("Expected DATA_CHUNK frame tag, received 0x${String.format("%02X", chunkHeader.tag.code)}")
-                        }
-                        val remainingBytes = fileHeader.sizeBytes - bytesWritten
-                        val length = chunkHeader.payloadLength
-                        val chunkBytes = frames.read(inputStream, length, remainingBytes)
-                        fileOut.write(chunkBytes, 0, length)
-                        messageDigest.update(chunkBytes, 0, length)
-
-                        bytesWritten += length
-                        progressTracker.onChunkTransferred(length.toLong())
+                while (bytesWritten < fileHeader.sizeBytes) {
+                    val chunkHeader = nextFrame(inputStream, batch)
+                    if (chunkHeader.tag != FrameTag.DATA_CHUNK) {
+                        throw IllegalStateException("Expected DATA_CHUNK frame tag, received 0x${String.format("%02X", chunkHeader.tag.code)}")
                     }
-                    fileOut.flush()
-                    fileOut.fd.sync()
+                    val remainingBytes = fileHeader.sizeBytes - bytesWritten
+                    val length = chunkHeader.payloadLength
+                    val chunkBytes = frames.read(inputStream, length, remainingBytes)
+                    try {
+                        target.stream.write(chunkBytes, 0, length)
+                    } catch (e: IOException) {
+                        throw storageFailure(e)
+                    }
+                    messageDigest.update(chunkBytes, 0, length)
+
+                    bytesWritten += length
+                    progressTracker.onChunkTransferred(length.toLong())
+                    tick()
                 }
+                // Flushed, synced and closed in the background; joined before anything is published.
+                files.finish(i, tick)
 
                 progressTracker.finishFile()
 
                 // Read FileComplete frame
-                val compHeader = readReceiveHeader(inputStream)
+                val compHeader = nextFrame(inputStream, batch)
                 if (compHeader.tag != FrameTag.FILE_COMPLETE) {
                     throw IllegalStateException("Expected FILE_COMPLETE frame tag, received 0x${String.format("%02X", compHeader.tag.code)}")
                 }
@@ -85,19 +112,13 @@ class FileReceiver(
                     throw IllegalStateException("Invalid FILE_COMPLETE for '${fileHeader.relativePath}'")
                 }
 
-                val computedChecksum = messageDigest.digest().joinToString("") { "%02x".format(it) }
-                Log.d(TAG, "File '${fileHeader.relativePath}' completed. Computed SHA-256: $computedChecksum, Sender SHA-256: ${fileComp.sha256Checksum}")
-
+                // The sender's digest is required and must match what was written.
+                val computedChecksum = messageDigest.digest().toHex()
                 ReceiveValidation.checksum(fileHeader.sha256Checksum, fileComp.sha256Checksum, computedChecksum)
-
-                // File verified — remember it for finalization once the whole
-                // session completes, matching the desktop receiver semantics.
-                completedTargets += target
-                activeTargets.remove(target)
-                Log.d(TAG, "File '${target.displayName}' received and verified (${bytesWritten} bytes)")
+                Log.d(TAG, "File ${i + 1}/${requestPayload.totalFiles} '${target.displayName}' received and verified ($bytesWritten bytes)")
             }
 
-            val finalHeader = readReceiveHeader(inputStream)
+            val finalHeader = nextFrame(inputStream, batch)
             if (finalHeader.tag != FrameTag.TRANSFER_COMPLETE) {
                 throw IllegalStateException("Expected TRANSFER_COMPLETE, received ${finalHeader.tag}")
             }
@@ -105,33 +126,85 @@ class FileReceiver(
             if (completedSessionId.isNotBlank() && completedSessionId != requestPayload.sessionId) {
                 throw IllegalStateException("TRANSFER_COMPLETE session ID mismatch")
             }
-            // Session fully verified — publish every file now. This keeps failed
-            // sessions from leaving partial output in the Downloads folder.
+            // Session fully verified. Publish only once every file is on disk, so a
+            // failed session never leaves partial output in the Downloads folder.
             progressTracker.finishSession()
-            completedTargets.forEach(storageManager::completePendingFile)
+            val streamed = System.nanoTime()
+            files.awaitDurable(tick)
+            val durable = System.nanoTime()
+            // The last point where the person can still cancel.
+            if (isCancelled()) throw TransferCancelledException()
+
+            // From here saving is not interruptible: stopping would leave the
+            // transfer half saved. A cancel or a lost connection no longer
+            // matters; only a storage failure stops it, and then all is removed.
+            var keepAlive = batch
+            files.publishAll {
+                if (keepAlive && System.nanoTime() - output.lastWriteNanos >= Protocol.HEARTBEAT_INTERVAL_MS * 1_000_000) {
+                    keepAlive = sendQuietly(output, FrameTag.HEARTBEAT, ByteArray(0))
+                }
+            }
+            files.close()
+            pipeline = null
+            Log.d(TAG, "Saved ${requestPayload.totalFiles} files: stream ${(streamed - started) / 1_000_000} ms, " +
+                "sync ${(durable - streamed) / 1_000_000} ms, publish ${(System.nanoTime() - durable) / 1_000_000} ms")
             // A sender may report success only after durable output has been published.
-            FrameUtils.writeTransferAck(outputStream, TransferAckPayload(status = "ACK"))
-            completedTargets.clear()
+            // If the confirmation cannot be sent the sender reports a failure,
+            // but nothing is missing on this device.
+            val ack = TransferAckPayload(status = "ACK").toJsonObject().toString().toByteArray(StandardCharsets.UTF_8)
+            if (!sendQuietly(output, FrameTag.TRANSFER_ACK, ack)) {
+                Log.w(TAG, "Files saved, but the confirmation was not sent for ${requestPayload.sessionId}")
+            }
             Log.i(TAG, TransferPerf.summary("receive", requestPayload.totalFiles, requestPayload.totalSizeBytes, System.nanoTime() - started))
 
             true
         } catch (e: Exception) {
-            failureReason = e.message ?: "File transfer failed"
-            activeTargets.forEach { target ->
-                storageManager.cleanupTarget(target)
-            }
-            // Anything already written but not yet finalized is cleaned up too.
-            completedTargets.forEach { target ->
-                storageManager.cleanupTarget(target)
-            }
             Log.e(TAG, "FileReceiver session failed for ${requestPayload.sessionId}: ${e.message}", e)
+            // The reason goes out first, at a frame boundary: only this thread
+            // writes, and it writes whole frames. Batch mode only; a DFP/1
+            // sender does not expect these frames.
+            val notice: Pair<FrameTag, String>? = when {
+                e is TransferCancelledException || isCancelled() -> FrameTag.TRANSFER_CANCEL to requestPayload.sessionId
+                e is PeerStoppedException -> null
+                e is LocalFailureException -> FrameTag.ERROR to e.notice
+                e is IOException -> null // the connection failed
+                else -> FrameTag.ERROR to MISMATCH_NOTICE
+            }
+            failureReason = e.message ?: "File transfer failed"
+            if (batch && notice != null) {
+                val payload = notice.second.toByteArray(StandardCharsets.UTF_8)
+                if (sendNotice != null) runCatching { sendNotice(notice.first, payload) } else output.notice(notice.first, payload)
+            }
+            // Everything this session allocated is removed, published or not.
+            pipeline?.discard()
             false
         }
     }
 
-    private fun readReceiveHeader(input: InputStream): FrameHeader {
-        val header = FrameUtils.readHeader(input)
-        check(header.tag != FrameTag.TRANSFER_CANCEL) { "Transfer cancelled by sender" }
-        return header
+    /** Writes a frame whose failure must not stop the caller. */
+    private fun sendQuietly(output: FrameOutput, tag: FrameTag, payload: ByteArray): Boolean = try {
+        FrameUtils.writeFrame(output, tag, payload)
+        true
+    } catch (e: IOException) {
+        Log.w(TAG, "Could not send $tag: ${e.message}")
+        false
+    }
+
+    /**
+     * The next frame of the stream. Handles the frames that may arrive at any
+     * point: a cancel, and in batch mode keep-alives and the sender's errors.
+     */
+    private fun nextFrame(input: InputStream, batch: Boolean): FrameHeader {
+        while (true) {
+            val header = FrameUtils.readHeader(input)
+            when {
+                header.tag == FrameTag.TRANSFER_CANCEL -> throw PeerStoppedException("Transfer cancelled by sender")
+                batch && header.tag == FrameTag.HEARTBEAT -> FrameUtils.readPayload(input, header.payloadLength)
+                batch && header.tag == FrameTag.ERROR -> throw PeerStoppedException(
+                    "The sending device stopped the transfer: ${noticeText(FrameUtils.readPayload(input, header.payloadLength))}"
+                )
+                else -> return header
+            }
+        }
     }
 }
