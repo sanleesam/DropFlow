@@ -47,6 +47,13 @@ export function SettingsPage() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [loadingVersion, setLoadingVersion] = useState(true);
+  // What this device can do for a direct link; absent on builds without it.
+  const [link, setLink] = useState<{ role: "host" | "join" | "none"; ready: boolean; detail: string } | null>(null);
+  useEffect(() => {
+    invoke<{ role: "host" | "join" | "none"; ready: boolean; detail: string }>("direct_link_status")
+      .then((status) => setLink(status && typeof status.role === "string" ? status : null))
+      .catch(() => setLink(null));
+  }, []);
   useEffect(() => {
     invoke<{ display_version: string; channel: string }>("get_release_info")
       .then(setRelease)
@@ -173,16 +180,29 @@ export function SettingsPage() {
                 />
               </SettingRow>
             </FormGroup>
-            {platformLabel() === "Windows" && (
+            {link && link.role !== "none" && (
               <FormGroup
                 title="Direct Link"
-                footer="Experimental. This PC creates a private Wi-Fi link and an Android phone joins it, so the router no longer limits the speed. Falls back to the normal network if the link can't be set up."
+                footer={
+                  link.role === "host"
+                    ? "Experimental. This PC creates a private Wi-Fi link and the other device joins it, so the router no longer limits the speed."
+                    : "Experimental. Works with a Windows PC that has Direct Link on. This Mac has no Wi-Fi internet during the transfer, and a link that fails ends the transfer instead of falling back."
+                }
               >
-                <SettingRow title="Use a direct link" description="Needs Faster transfers and a Wi-Fi Direct adapter.">
+                <SettingRow
+                  title="Use a direct link"
+                  description={
+                    !link.ready
+                      ? link.detail || "Not available on this device."
+                      : link.role === "host"
+                        ? "Needs Faster transfers."
+                        : "This Mac leaves its Wi-Fi while a transfer runs, then returns."
+                  }
+                >
                   <Switch
                     label="Use a direct link"
-                    checked={settings.directLink && settings.fastTransfer}
-                    disabled={!settings.fastTransfer}
+                    checked={settings.directLink && settings.fastTransfer && link.ready}
+                    disabled={!settings.fastTransfer || !link.ready}
                     onChange={() => updateSetting("directLink", !settings.directLink)}
                   />
                 </SettingRow>

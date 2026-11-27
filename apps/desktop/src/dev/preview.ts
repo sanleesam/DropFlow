@@ -103,6 +103,12 @@ export function installPreview() {
           return "/Users/preview/Downloads";
         case "nearby_link_lab_status":
           return { phase: "off", message: "Off", ssid: null, passphrase: null };
+        case "direct_link_status": {
+          const role = new URLSearchParams(location.search).get("link");
+          return role === "host"
+            ? { role: "host", ready: false, detail: "This PC's Wi-Fi adapter does not support Wi-Fi Direct." }
+            : { role: "join", ready: true, detail: "" };
+        }
         case "plugin:dialog|open":
           return [
             "/Users/preview/Downloads/Holiday footage.mov",
