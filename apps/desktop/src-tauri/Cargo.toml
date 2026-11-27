@@ -44,6 +44,11 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # Already used transitively by Tauri; direct access preserves native errors.
 window-vibrancy = "=0.6.0"
 
+# Apple Silicon: use the CPU's SHA-256 instructions (about 4x faster hashing).
+# x86-64 detects SHA-NI at run time without this.
+[target.'cfg(all(target_arch = "aarch64", target_os = "macos"))'.dependencies]
+sha2 = { version = "0.10", features = ["asm"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSAccessibility"] }
 

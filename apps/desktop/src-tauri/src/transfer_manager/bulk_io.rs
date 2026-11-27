@@ -1,6 +1,8 @@
 //! Bounded, reusable DFP/1 data path, independent of TCP and the UI.
 //! The wire format, control messages, integrity checks and final ACK are unchanged.
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
+#[cfg(test)]
+use std::io::Write;
 
 use super::protocol::{encode_frame_header, FrameTag, FRAME_HEADER_SIZE, MAX_CHUNK_SIZE};
 
@@ -21,7 +23,8 @@ impl ChunkWriter {
         &mut self.frame[FRAME_HEADER_SIZE..]
     }
 
-    pub(super) fn send(&mut self, writer: &mut impl Write, count: usize) -> io::Result<()> {
+    /// The complete frame (header + the first `count` payload bytes).
+    pub(super) fn frame(&mut self, count: usize) -> io::Result<&[u8]> {
         if count == 0 || count > BULK_CHUNK_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -30,7 +33,13 @@ impl ChunkWriter {
         }
         self.frame[..FRAME_HEADER_SIZE]
             .copy_from_slice(&encode_frame_header(FrameTag::DataChunk, count as u32));
-        writer.write_all(&self.frame[..FRAME_HEADER_SIZE + count])
+        Ok(&self.frame[..FRAME_HEADER_SIZE + count])
+    }
+
+    #[cfg(test)]
+    pub(super) fn send(&mut self, writer: &mut impl Write, count: usize) -> io::Result<()> {
+        let frame = self.frame(count)?;
+        writer.write_all(frame)
     }
 }
 

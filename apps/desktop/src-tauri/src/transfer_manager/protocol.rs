@@ -7,6 +7,8 @@ pub const HELLO_HANDSHAKE: &str = "HELLO DFP/1";
 pub const HELLO_ACK: &str = "HELLO_ACK DFP/1";
 
 pub const MAX_METADATA_SIZE: usize = 64 * 1024; // 64 KB
+/// Large manifests and resume lists (DFP/1.1 peers only).
+pub const MAX_LARGE_METADATA_SIZE: usize = 16 * 1024 * 1024;
 pub const MAX_CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
 pub const DEFAULT_CHUNK_SIZE: usize = 64 * 1024; // 64 KB
 
@@ -24,6 +26,10 @@ pub enum FrameTag {
     FileComplete = 0x09,
     Heartbeat = 0x0A,
     Error = 0x0B,
+    /// DFP/1.1: a `TransferRequest` whose manifest does not fit in 64 KB.
+    TransferRequestLarge = 0x0C,
+    /// DFP/1.1: what the receiver already holds from an interrupted attempt.
+    ResumeState = 0x0D,
 }
 
 impl TryFrom<u8> for FrameTag {
@@ -42,6 +48,8 @@ impl TryFrom<u8> for FrameTag {
             0x09 => Ok(FrameTag::FileComplete),
             0x0A => Ok(FrameTag::Heartbeat),
             0x0B => Ok(FrameTag::Error),
+            0x0C => Ok(FrameTag::TransferRequestLarge),
+            0x0D => Ok(FrameTag::ResumeState),
             _ => Err(format!("Unknown frame tag: 0x{value:02X}")),
         }
     }
@@ -56,7 +64,8 @@ pub struct FileMetadata {
     pub relative_path: String,
     pub size_bytes: u64,
     pub sha256_checksum: String,
-    #[serde(default)]
+    /// Local only. Never sent: it would reveal the sender's folder layout.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub final_path: String,
 }
 
@@ -75,6 +84,32 @@ pub struct TransferMetadata {
     pub total_files: u32,
     pub total_size_bytes: u64,
     pub files: Vec<FileMetadata>,
+    /// DFP/1.1 capabilities the sender offers. Older peers ignore the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<String>,
+}
+
+/// JSON `TransferAccept` payload. Older receivers send the text `ACCEPTED`
+/// or a JSON object without `features`; both mean "no extra capabilities".
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptPayload {
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<String>,
+}
+
+/// One staged file the receiver can continue: index, bytes held, and the
+/// SHA-256 of exactly those bytes.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct ResumeEntry {
+    #[serde(rename = "i")]
+    pub file_index: u32,
+    #[serde(rename = "o")]
+    pub offset: u64,
+    #[serde(rename = "h")]
+    pub sha256: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -106,7 +141,7 @@ pub struct TransferAckPayload {
 
 // ─── Binary Frame Encoding & Decoding Helpers ────────────────────────────────
 
-pub(super) const FRAME_HEADER_SIZE: usize = 10;
+pub const FRAME_HEADER_SIZE: usize = 10;
 
 pub(super) fn encode_frame_header(tag: FrameTag, payload_len: u32) -> [u8; FRAME_HEADER_SIZE] {
     let mut header = [0u8; FRAME_HEADER_SIZE];
@@ -144,13 +179,8 @@ pub fn write_frame<W: Write>(writer: &mut W, tag: FrameTag, payload: &[u8]) -> R
         .map_err(|e| format!("Failed to flush {tag:?} frame: {e}"))
 }
 
-/// Reads and validates the 10-byte global packet header.
-pub fn read_frame_header<R: Read>(reader: &mut R) -> Result<(FrameTag, u32), String> {
-    let mut header = [0u8; FRAME_HEADER_SIZE];
-    reader
-        .read_exact(&mut header)
-        .map_err(|e| format!("Failed to read frame header: {e}"))?;
-
+/// Validates a 10-byte global packet header that has already been read.
+pub fn parse_frame_header(header: &[u8; FRAME_HEADER_SIZE]) -> Result<(FrameTag, u32), String> {
     if &header[0..4] != MAGIC_BYTES {
         return Err("Invalid protocol magic bytes".to_string());
     }
@@ -163,10 +193,10 @@ pub fn read_frame_header<R: Read>(reader: &mut R) -> Result<(FrameTag, u32), Str
     let tag = FrameTag::try_from(header[5])?;
     let payload_len = u32::from_be_bytes([header[6], header[7], header[8], header[9]]);
 
-    let max_payload_len = if tag == FrameTag::DataChunk {
-        MAX_CHUNK_SIZE
-    } else {
-        MAX_METADATA_SIZE
+    let max_payload_len = match tag {
+        FrameTag::DataChunk => MAX_CHUNK_SIZE,
+        FrameTag::TransferRequestLarge | FrameTag::ResumeState => MAX_LARGE_METADATA_SIZE,
+        _ => MAX_METADATA_SIZE,
     };
     if payload_len as usize > max_payload_len {
         return Err(format!(
@@ -176,6 +206,15 @@ pub fn read_frame_header<R: Read>(reader: &mut R) -> Result<(FrameTag, u32), Str
     }
 
     Ok((tag, payload_len))
+}
+
+/// Reads and validates the 10-byte global packet header.
+pub fn read_frame_header<R: Read>(reader: &mut R) -> Result<(FrameTag, u32), String> {
+    let mut header = [0u8; FRAME_HEADER_SIZE];
+    reader
+        .read_exact(&mut header)
+        .map_err(|e| format!("Failed to read frame header: {e}"))?;
+    parse_frame_header(&header)
 }
 
 pub fn perform_outgoing_handshake<S: Read + Write>(stream: &mut S) -> Result<(), String> {
@@ -214,46 +253,48 @@ fn write_heartbeat<W: Write>(writer: &mut W, message: &str) -> Result<(), String
     write_frame(writer, FrameTag::Heartbeat, payload)
 }
 
-/// Sends a complete JSON `TransferRequest` frame.
+/// Reads a frame payload. Memory grows with the bytes that actually arrive,
+/// so a peer cannot reserve a large buffer by only claiming a length.
+pub fn read_payload<R: Read>(reader: &mut R, payload_len: u32) -> Result<Vec<u8>, String> {
+    let len = payload_len as usize;
+    let mut payload = Vec::with_capacity(len.min(MAX_METADATA_SIZE));
+    reader
+        .take(len as u64)
+        .read_to_end(&mut payload)
+        .map_err(|e| format!("Failed to read frame payload: {e}"))?;
+    if payload.len() != len {
+        return Err("Connection closed in the middle of a frame".to_string());
+    }
+    Ok(payload)
+}
+
+/// Sends the `TransferRequest`. A manifest over 64 KB uses the large frame,
+/// which only DFP/1.1 peers accept. Returns `true` when the large frame was used.
 pub fn write_transfer_request<W: Write>(
     writer: &mut W,
     metadata: &TransferMetadata,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let json_bytes = serde_json::to_vec(metadata)
         .map_err(|e| format!("Failed to serialize TransferMetadata: {e}"))?;
 
-    if json_bytes.len() > MAX_METADATA_SIZE {
-        return Err(format!(
-            "TransferMetadata payload exceeds 64KB limit: {} bytes",
-            json_bytes.len()
-        ));
+    if json_bytes.len() > MAX_LARGE_METADATA_SIZE {
+        return Err("Too many files for one transfer. Send them in smaller groups.".to_string());
     }
-
-    write_frame(writer, FrameTag::TransferRequest, &json_bytes)
+    let large = json_bytes.len() > MAX_METADATA_SIZE;
+    let tag = if large { FrameTag::TransferRequestLarge } else { FrameTag::TransferRequest };
+    write_frame(writer, tag, &json_bytes)?;
+    Ok(large)
 }
 
-/// Reads a JSON `TransferRequest` frame.
+/// Reads a JSON `TransferRequest` frame (either size class).
 pub fn read_transfer_request<R: Read>(reader: &mut R) -> Result<TransferMetadata, String> {
     let (tag, payload_len) = read_frame_header(reader)?;
-    if tag != FrameTag::TransferRequest {
+    if tag != FrameTag::TransferRequest && tag != FrameTag::TransferRequestLarge {
         return Err(format!("Expected TransferRequest tag, received {:?}", tag));
     }
-
-    if payload_len as usize > MAX_METADATA_SIZE {
-        return Err(format!(
-            "Metadata size {payload_len} exceeds max allowed 64KB"
-        ));
-    }
-
-    let mut payload = vec![0u8; payload_len as usize];
-    reader
-        .read_exact(&mut payload)
-        .map_err(|e| format!("Failed to read metadata payload: {e}"))?;
-
-    let metadata: TransferMetadata = serde_json::from_slice(&payload)
-        .map_err(|e| format!("Failed to parse TransferMetadata JSON: {e}"))?;
-
-    Ok(metadata)
+    let payload = read_payload(reader, payload_len)?;
+    serde_json::from_slice(&payload)
+        .map_err(|e| format!("Failed to parse TransferMetadata JSON: {e}"))
 }
 
 /// Sends a JSON `FileHeader` frame before streaming each file.
@@ -427,6 +468,7 @@ mod tests {
                     final_path: String::new(),
                 },
             ],
+            features: Vec::new(),
         };
 
         let mut buffer = Vec::new();
@@ -507,6 +549,49 @@ mod tests {
         let mut payload = vec![0u8; payload_len as usize];
         cursor.read_exact(&mut payload).unwrap();
         assert_eq!(payload, HELLO_HANDSHAKE.as_bytes());
+    }
+
+    #[test]
+    fn large_manifests_use_the_large_frame_and_local_paths_stay_local() {
+        let file = |index: u32| FileMetadata {
+            file_index: index,
+            relative_path: format!("Photos/2026/IMG_{index:05}.HEIC"),
+            size_bytes: 1,
+            sha256_checksum: String::new(),
+            final_path: format!("/Users/someone/Pictures/IMG_{index:05}.HEIC"),
+        };
+        let mut meta = TransferMetadata {
+            session_id: "s".into(),
+            sender_id: "d".into(),
+            sender_name: "Test".into(),
+            sender_platform: "Desktop".into(),
+            total_files: 1,
+            total_size_bytes: 1,
+            files: vec![FileMetadata { final_path: String::new(), ..file(0) }],
+            features: vec!["batch".into()],
+        };
+        let mut small = Vec::new();
+        assert!(!write_transfer_request(&mut small, &meta).unwrap());
+        assert_eq!(small[5], FrameTag::TransferRequest as u8);
+        assert!(!String::from_utf8_lossy(&small).contains("finalPath"));
+        // A peer that predates `features` sends none; that must still parse.
+        let legacy = br#"{"sessionId":"s","senderId":"d","senderName":"T","totalFiles":0,"totalSizeBytes":0,"files":[]}"#;
+        assert!(serde_json::from_slice::<TransferMetadata>(legacy).unwrap().features.is_empty());
+
+        meta.files = (0..5000).map(|i| FileMetadata { final_path: String::new(), ..file(i) }).collect();
+        meta.total_files = 5000;
+        meta.total_size_bytes = 5000;
+        let mut large = Vec::new();
+        assert!(write_transfer_request(&mut large, &meta).unwrap());
+        assert_eq!(large[5], FrameTag::TransferRequestLarge as u8);
+        assert_eq!(read_transfer_request(&mut std::io::Cursor::new(large)).unwrap(), meta);
+    }
+
+    #[test]
+    fn payload_reads_fail_on_truncation_without_trusting_the_claimed_length() {
+        let mut short = std::io::Cursor::new(vec![1u8; 10]);
+        assert!(read_payload(&mut short, MAX_LARGE_METADATA_SIZE as u32).is_err());
+        assert_eq!(read_payload(&mut std::io::Cursor::new(b"abc".to_vec()), 3).unwrap(), b"abc");
     }
 
     #[test]

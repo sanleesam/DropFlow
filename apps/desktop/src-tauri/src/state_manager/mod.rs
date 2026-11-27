@@ -115,6 +115,10 @@ pub struct UserSettings {
     /// existing installations are never silently moved to Development.
     #[serde(default)]
     pub update_channel: UpdateChannel,
+    /// Use the DFP/1.1 engine (batch streaming, resume) with peers that
+    /// support it. Off falls back to the original exchange everywhere.
+    #[serde(default = "default_true")]
+    pub fast_transfer: bool,
 }
 
 impl Default for UserSettings {
@@ -137,6 +141,7 @@ impl Default for UserSettings {
             require_confirmation: true,
             auto_accept_trusted_devices: false,
             update_channel: UpdateChannel::Beta,
+            fast_transfer: true,
         }
     }
 }

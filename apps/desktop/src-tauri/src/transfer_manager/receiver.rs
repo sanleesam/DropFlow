@@ -1,26 +1,33 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+//! Incoming transfers for the app: listens, asks the person, runs the session
+//! core, and reports to the window. The protocol itself lives in `session`.
 use std::net::TcpStream;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use log::{error, info};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::protocol::{
-    perform_incoming_handshake, read_file_complete, read_file_header, read_frame_header,
-    read_transfer_request, write_response_frame, write_transfer_ack, FileMetadata, FrameTag,
-    TransferAckPayload, TransferMetadata, DEFAULT_CHUNK_SIZE,
+    perform_incoming_handshake, read_transfer_request, write_response_frame, FileMetadata,
+    FrameTag, TransferMetadata,
 };
-use super::security::{
-    get_session_part_file_path, publish_received_file,
-    sanitize_relative_path, verify_safe_target_path,
-};
+use super::session::{Progress, ReceiveSetup, SessionEvent};
+
+/// File lists sent to the window and kept in history stop here. A transfer
+/// can hold many thousands of files; the counts and totals stay exact.
+pub const UI_FILE_LIMIT: usize = 200;
+
+pub fn format_size(bytes: u64) -> String {
+    let megabytes = bytes as f64 / (1024.0 * 1024.0);
+    if megabytes >= 1.0 {
+        format!("{megabytes:.1} MB")
+    } else {
+        format!("{} KB", bytes.div_ceil(1024))
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +56,36 @@ pub struct TransferProgressPayload {
     pub total_files: u32,
     pub percentage: f32,
     pub speed_bytes_per_sec: u64,
+}
+
+impl TransferProgressPayload {
+    pub fn from_progress(
+        session_id: &str,
+        direction: &str,
+        device_name: &str,
+        total_files: u32,
+        progress: &Progress<'_>,
+    ) -> Self {
+        let percentage = if progress.session_total > 0 {
+            ((progress.session_bytes as f64 / progress.session_total as f64) * 100.0).min(100.0) as f32
+        } else {
+            100.0
+        };
+        Self {
+            session_id: session_id.to_string(),
+            direction: direction.to_string(),
+            device_name: device_name.to_string(),
+            current_file_index: progress.file_index,
+            current_file_name: progress.file_name.to_string(),
+            current_file_bytes: progress.file_bytes,
+            current_file_total_bytes: progress.file_total,
+            session_bytes_sent: progress.session_bytes,
+            session_total_bytes: progress.session_total,
+            total_files,
+            percentage,
+            speed_bytes_per_sec: progress.speed_bytes_per_sec,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -98,6 +135,13 @@ impl TransferReceiver {
 
         thread::spawn(move || {
             info!("[Receiver] TCP receiver listening on port {bound_port}");
+            // Clear staged data that is too old to resume.
+            if let (Ok(dir), Some(state)) = (
+                super::engine::configured_receive_dir(&app_handle),
+                app_handle.try_state::<crate::transfer_manager::TransferState>(),
+            ) {
+                super::session::sweep_staging(&dir, &state.staging, super::session::STAGING_MAX_AGE);
+            }
             for stream_result in listener.incoming() {
                 if !running_flag.load(Ordering::Relaxed) {
                     break;
@@ -133,30 +177,6 @@ impl TransferReceiver {
 
     pub fn stop(&self) {
         self.is_running.store(false, Ordering::Relaxed);
-    }
-}
-
-fn cleanup_files(part_files: &[PathBuf]) {
-    for path in part_files {
-        if path.exists() {
-            let _ = fs::remove_file(path);
-        }
-    }
-}
-
-struct PartialFiles(Vec<PathBuf>);
-impl std::ops::Deref for PartialFiles { type Target=Vec<PathBuf>; fn deref(&self)->&Self::Target { &self.0 } }
-impl std::ops::DerefMut for PartialFiles { fn deref_mut(&mut self)->&mut Self::Target { &mut self.0 } }
-impl Drop for PartialFiles { fn drop(&mut self) { cleanup_files(&self.0); } }
-
-#[cfg(test)]
-mod cleanup_tests {
-    use super::*;
-    #[test] fn partial_files_are_cleaned_when_any_error_unwinds_the_session() {
-        let root=std::env::temp_dir().join(format!("dropflow-cleanup-{}",uuid::Uuid::new_v4()));
-        fs::create_dir(&root).unwrap();let part=root.join("test.dropflow-part");fs::write(&part,b"partial").unwrap();
-        { let _files=PartialFiles(vec![part.clone()]); }
-        assert!(!part.exists());fs::remove_dir(root).unwrap();
     }
 }
 
@@ -223,29 +243,26 @@ fn handle_incoming_connection(app: &AppHandle, stream: &mut TcpStream) -> Result
     })
 }
 
-fn receive_session(app: &AppHandle, stream: &mut super::transport::CancellableStream<'_>, metadata: &TransferMetadata, cancel_flag: Arc<AtomicBool>) -> Result<(),String> {
-
+fn receive_session(
+    app: &AppHandle,
+    stream: &mut super::transport::CancellableStream<'_>,
+    metadata: &TransferMetadata,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
     // 2. Check authorization settings & trusted devices
-    let require_confirmation = {
-        if let Some(container) = app.try_state::<crate::state_manager::AppStateContainer>() {
-            if let Ok(state) = container.state.lock() {
-                state.settings.require_confirmation
-            } else {
-                true
-            }
-        } else {
-            true
-        }
-    };
+    let require_confirmation = app
+        .try_state::<crate::state_manager::AppStateContainer>()
+        .and_then(|container| container.state.lock().ok().map(|state| state.settings.require_confirmation))
+        .unwrap_or(true);
 
     if super::lifecycle::needs_approval(require_confirmation, false, false) {
         let (tx, rx) = tokio::sync::oneshot::channel::<super::engine::AuthorizationResponse>();
 
         {
-            let state=app.state::<crate::transfer_manager::TransferState>();
-            let mut pending=state.pending_authorizations.lock().map_err(|e|e.to_string())?;
+            let state = app.state::<crate::transfer_manager::TransferState>();
+            let mut pending = state.pending_authorizations.lock().map_err(|e| e.to_string())?;
             if !pending.is_empty() {
-                write_response_frame(stream,FrameTag::TransferReject,"BUSY: Another incoming request is awaiting approval")?;
+                write_response_frame(stream, FrameTag::TransferReject, "BUSY: Another incoming request is awaiting approval")?;
                 return Err("Busy: another incoming request is awaiting approval".into());
             }
             pending.insert(metadata.session_id.clone(), tx);
@@ -260,17 +277,14 @@ fn receive_session(app: &AppHandle, stream: &mut super::transport::CancellableSt
                 sender_platform: metadata.sender_platform.clone(),
                 total_files: metadata.total_files,
                 total_size_bytes: metadata.total_size_bytes,
-                files: metadata.files.clone(),
+                files: metadata.files.iter().take(UI_FILE_LIMIT).cloned().collect(),
             },
         );
 
         let auth_response = tauri::async_runtime::block_on(async {
             match tokio::time::timeout(Duration::from_secs(60), rx).await {
                 Ok(Ok(resp)) => resp,
-                _ => super::engine::AuthorizationResponse {
-                    accept: false,
-                    trust_device: false,
-                },
+                _ => super::engine::AuthorizationResponse { accept: false, trust_device: false },
             }
         });
 
@@ -283,9 +297,7 @@ fn receive_session(app: &AppHandle, stream: &mut super::transport::CancellableSt
         let _ = app.emit("incoming-transfer-dismiss", &metadata.session_id);
 
         if !auth_response.accept {
-            info!("[Receiver] REJECTED transfer request for session {}",
-                metadata.session_id
-            );
+            info!("[Receiver] REJECTED transfer request for session {}", metadata.session_id);
             write_response_frame(stream, FrameTag::TransferReject, "REJECTED")?;
             return Err("Transfer declined by recipient".to_string());
         }
@@ -305,34 +317,37 @@ fn receive_session(app: &AppHandle, stream: &mut super::transport::CancellableSt
                     public_key: None,
                     platform: platform_name,
                 };
-                let _ =
-                    crate::state_manager::add_trusted_device(app.clone(), container, trusted_entry);
+                let _ = crate::state_manager::add_trusted_device(app.clone(), container, trusted_entry);
             }
         }
     }
 
-    // 3. Accept transfer
-    write_response_frame(stream, FrameTag::TransferAccept, "ACCEPTED")?;
-    info!("[Receiver] ACCEPT_SENT");
-    let _ = app.emit("transfer-progress", TransferProgressPayload {
-        session_id: metadata.session_id.clone(), direction: "receive".into(), device_name: metadata.sender_name.clone(),
-        current_file_index: 0, current_file_name: metadata.files[0].relative_path.clone(),
-        current_file_bytes: 0, current_file_total_bytes: metadata.files[0].size_bytes,
-        session_bytes_sent: 0, session_total_bytes: metadata.total_size_bytes,
-        total_files: metadata.total_files, percentage: 0.0, speed_bytes_per_sec: 0,
-    });
+    // 3. Accept and receive. The window shows the transfer straight away.
+    let first = &metadata.files[0];
+    let _ = app.emit(
+        "transfer-progress",
+        TransferProgressPayload {
+            session_id: metadata.session_id.clone(),
+            direction: "receive".into(),
+            device_name: metadata.sender_name.clone(),
+            current_file_index: 0,
+            current_file_name: first.relative_path.clone(),
+            current_file_bytes: 0,
+            current_file_total_bytes: first.size_bytes,
+            session_bytes_sent: 0,
+            session_total_bytes: metadata.total_size_bytes,
+            total_files: metadata.total_files,
+            percentage: 0.0,
+            speed_bytes_per_sec: 0,
+        },
+    );
 
     let receive_dir = super::engine::configured_receive_dir(app)?;
-
     crate::state_manager::update_incomplete_session(
         app,
         crate::state_manager::IncompleteTransferSchema {
             session_id: metadata.session_id.clone(),
-            file_name: metadata
-                .files
-                .first()
-                .map(|f| f.relative_path.clone())
-                .unwrap_or_default(),
+            file_name: first.relative_path.clone(),
             device_name: metadata.sender_name.clone(),
             total_files: metadata.total_files,
             total_size_bytes: metadata.total_size_bytes,
@@ -349,331 +364,66 @@ fn receive_session(app: &AppHandle, stream: &mut super::transport::CancellableSt
             ),
         },
     );
-    let mut total_received_bytes: u64 = 0;
-    let start_time = Instant::now();
-    let mut created_part_files = PartialFiles(Vec::new());
-    let mut final_dest_paths: Vec<(PathBuf, PathBuf)> = Vec::new();
-    let mut last_emit_time = Instant::now();
-    let emit_interval = Duration::from_millis(50); // Max 20 FPS progress updates
 
-    let mut received_files_meta: Vec<FileMetadata> = Vec::new();
-
-    let mut chunks = super::bulk_io::ChunkReader::default();
-    info!("[Receiver] STREAMING {} files", metadata.total_files);
-    for file_idx in 0..metadata.total_files {
-        if cancel_flag.load(Ordering::Relaxed) { return Err("Transfer cancelled".into()); }
-        // Read FileHeader frame
-        let file_header = match read_file_header(stream) {
-            Ok(h) => h,
-            Err(e) => {
-                cleanup_files(&created_part_files);
-                return Err(format!("Failed to read FileHeader: {e}"));
-            }
-        };
-        if let Err(error) = super::validation::validate_header(&metadata, file_idx as usize, &file_header) {
-            cleanup_files(&created_part_files);
-            return Err(error);
-        }
-
-        let safe_rel_path = match sanitize_relative_path(&file_header.relative_path) {
-            Ok(p) => p,
-            Err(e) => {
-                cleanup_files(&created_part_files);
-                return Err(e);
-            }
-        };
-
-        let final_target_path = match verify_safe_target_path(&receive_dir, &safe_rel_path) {
-            Ok(p) => p,
-            Err(e) => {
-                cleanup_files(&created_part_files);
-                return Err(e);
-            }
-        };
-
-        let collision_resolved_path = final_target_path.clone();
-        let part_file_path = get_session_part_file_path(&final_target_path, &metadata.session_id);
-        if fs::symlink_metadata(&part_file_path).is_ok_and(|meta| meta.file_type().is_symlink()) {
-            cleanup_files(&created_part_files);
-            return Err("Partial-file path must not be a symbolic link".into());
-        }
-
-        if let Some(parent) = part_file_path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                cleanup_files(&created_part_files);
-                return Err(format!(
-                    "Failed to create directory structure {:?}: {e}",
-                    parent
-                ));
-            }
-        }
-
-        let mut resume_offset: u64 = 0;
-        if part_file_path.exists() {
-            if let Ok(meta) = fs::metadata(&part_file_path) {
-                let len = meta.len();
-                if len > 0 && len < file_header.size_bytes {
-                    resume_offset = len;
-                    info!("[Receiver] RESUMING file '{}' from offset {}",
-                        file_header.relative_path, resume_offset
-                    );
-                }
-            }
-        }
-
-        // Send TransferAck with resume_offset negotiation to sender
-        let ack_payload = TransferAckPayload {
-            status: "ACCEPTED".to_string(),
-            resume_offset,
-        };
-        if let Err(e) = write_transfer_ack(stream, &ack_payload) {
-            cleanup_files(&created_part_files);
-            return Err(format!("Failed to send TransferAck to sender: {e}"));
-        }
-
-        created_part_files.push(part_file_path.clone());
-        final_dest_paths.push((part_file_path.clone(), collision_resolved_path.clone()));
-
-        let mut file_hasher = Sha256::new();
-
-        let mut out_file = if resume_offset > 0 {
-            // Hash existing bytes on disk for complete SHA-256 integrity verification
-            if let Ok(mut existing_file) = File::open(&part_file_path) {
-                let mut hasher_buf = vec![0u8; DEFAULT_CHUNK_SIZE];
-                let mut read_remaining = resume_offset;
-                while read_remaining > 0 {
-                    let to_read = (read_remaining as usize).min(hasher_buf.len());
-                    match existing_file.read(&mut hasher_buf[..to_read]) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            file_hasher.update(&hasher_buf[..n]);
-                            read_remaining -= n as u64;
-                        }
-                        Err(_) => break,
-                    }
-                }
-            }
-            match OpenOptions::new().append(true).open(&part_file_path) {
-                Ok(f) => f,
-                Err(e) => {
-                    cleanup_files(&created_part_files);
-                    return Err(format!("Failed to open part file in append mode: {e}"));
-                }
-            }
-        } else {
-            match File::create(&part_file_path) {
-                Ok(f) => f,
-                Err(e) => {
-                    cleanup_files(&created_part_files);
-                    return Err(format!("Failed to create part file: {e}"));
-                }
-            }
-        };
-
-        let mut file_bytes_received: u64 = resume_offset;
-        total_received_bytes += resume_offset;
-
-        while file_bytes_received < file_header.size_bytes {
-            let (tag, payload_len) = match read_frame_header(stream) {
-                Ok(res) => res,
-                Err(e) => {
-                    cleanup_files(&created_part_files);
-                    return Err(format!("Failed to read frame header: {e}"));
-                }
-            };
-
-            if cancel_flag.load(Ordering::Relaxed) || tag == FrameTag::Cancel {
-                cleanup_files(&created_part_files);
-                return Err("Transfer cancelled".to_string());
-            }
-
-            if tag != FrameTag::DataChunk {
-                cleanup_files(&created_part_files);
-                return Err(format!("Expected DataChunk frame tag, received {:?}", tag));
-            }
-
-            let remaining_bytes = file_header.size_bytes - file_bytes_received;
-            let chunk_buf = chunks.read(stream, payload_len as usize, remaining_bytes)
-                .map_err(|e| format!("Failed to read data frame for '{}': {e}", file_header.relative_path))?;
-
-            if let Err(e) = out_file.write_all(chunk_buf) {
-                cleanup_files(&created_part_files);
-                return Err(format!("Failed to write chunk to disk: {e}"));
-            }
-
-            file_hasher.update(chunk_buf);
-
-            file_bytes_received += payload_len as u64;
-            total_received_bytes += payload_len as u64;
-
-            let is_final = total_received_bytes == metadata.total_size_bytes;
-            if is_final || last_emit_time.elapsed() >= emit_interval {
-                last_emit_time = Instant::now();
-                let elapsed_secs = start_time.elapsed().as_secs_f64();
-                let speed = if elapsed_secs > 0.0 {
-                    (total_received_bytes as f64 / elapsed_secs) as u64
-                } else {
-                    0
-                };
-
-                let percentage = if metadata.total_size_bytes > 0 {
-                    ((total_received_bytes as f32 / metadata.total_size_bytes as f32) * 100.0)
-                        .min(100.0)
-                } else {
-                    100.0
-                };
-
-                let _ = app.emit(
-                    "transfer-progress",
-                    TransferProgressPayload {
-                        session_id: metadata.session_id.clone(),
-                        direction: "receive".into(),
-                        device_name: metadata.sender_name.clone(),
-                        current_file_index: file_header.file_index,
-                        current_file_name: file_header.relative_path.clone(),
-                        current_file_bytes: file_bytes_received,
-                        current_file_total_bytes: file_header.size_bytes,
-                        session_bytes_sent: total_received_bytes,
-                        session_total_bytes: metadata.total_size_bytes,
-                        total_files: metadata.total_files,
-                        percentage,
-                        speed_bytes_per_sec: speed,
-                    },
-                );
-            }
-        }
-
-        if let Err(e) = out_file.flush() {
-            cleanup_files(&created_part_files);
-            return Err(format!("Failed to flush file to disk: {e}"));
-        }
-
-        // Read FileComplete frame
-        let file_complete = match read_file_complete(stream) {
-            Ok(fc) => fc,
-            Err(e) => {
-                cleanup_files(&created_part_files);
-                return Err(format!("Failed to read FileComplete frame: {e}"));
-            }
-        };
-
-        if file_complete.file_index != file_header.file_index
-            || file_complete.bytes_written != file_bytes_received
-        {
-            cleanup_files(&created_part_files);
-            return Err(format!(
-                "Invalid FileComplete payload for '{}'",
-                file_header.relative_path
-            ));
-        }
-
-        // Verify streaming SHA-256 checksum if provided by sender
-        let rx_checksum = format!("{:x}", file_hasher.finalize());
-        if !file_complete.sha256_checksum.is_empty() && rx_checksum != file_complete.sha256_checksum
-        {
-            cleanup_files(&created_part_files);
-            let err_msg = format!(
-                "File checksum mismatch for file {}",
-                file_header.relative_path
+    let state = app.state::<crate::transfer_manager::TransferState>();
+    let setup = ReceiveSetup {
+        receive_dir: &receive_dir,
+        allow_features: super::engine::fast_transfer_enabled(app),
+        staging: &state.staging,
+    };
+    let mut on_event = |event: SessionEvent<'_>| match event {
+        SessionEvent::RequestSent => {}
+        SessionEvent::Accepted(mode) => info!(
+            "[Receiver] ACCEPT_SENT batch={} resume={}; streaming {} files",
+            mode.batch, mode.resume, metadata.total_files
+        ),
+        SessionEvent::Finishing => info!("[Receiver] FILE_COMPLETE"),
+        SessionEvent::Progress(progress) => {
+            let _ = app.emit(
+                "transfer-progress",
+                TransferProgressPayload::from_progress(
+                    &metadata.session_id,
+                    "receive",
+                    &metadata.sender_name,
+                    metadata.total_files,
+                    &progress,
+                ),
             );
-            return Err(err_msg);
-        }
-
-        received_files_meta.push(FileMetadata {
-            file_index: file_header.file_index,
-            relative_path: file_header.relative_path.clone(),
-            size_bytes: file_header.size_bytes,
-            sha256_checksum: rx_checksum,
-            final_path: collision_resolved_path.to_string_lossy().to_string(),
-        });
-    }
-
-    // 3. Receive TransferComplete frame
-    let (comp_tag, comp_len) = match read_frame_header(stream) {
-        Ok(res) => res,
-        Err(e) => {
-            cleanup_files(&created_part_files);
-            return Err(format!("Failed to read TransferComplete frame header: {e}"));
         }
     };
-
-    if comp_tag != FrameTag::TransferComplete {
-        cleanup_files(&created_part_files);
-        return Err(format!(
-            "Expected TransferComplete tag, received {:?}",
-            comp_tag
-        ));
-    }
-
-    let mut comp_payload = vec![0u8; comp_len as usize];
-    if comp_len > 0 {
-        if let Err(e) = stream.read_exact(&mut comp_payload) {
-            cleanup_files(&created_part_files);
-            return Err(format!("Failed reading TransferComplete payload: {e}"));
-        }
-    }
-    info!("[Receiver] FILE_COMPLETE");
-    if comp_payload != metadata.session_id.as_bytes() {
-        cleanup_files(&created_part_files);
-        return Err("TransferComplete session ID mismatch".into());
-    }
-
-    // 4. Verify total session byte count match
-    if total_received_bytes != metadata.total_size_bytes {
-        cleanup_files(&created_part_files);
-        let err_msg = format!(
-            "Byte count mismatch: expected {} bytes, received {} bytes",
-            metadata.total_size_bytes, total_received_bytes
-        );
-        return Err(err_msg);
-    }
-
-    // Acknowledge only after every verified file has been saved successfully.
-    if cancel_flag.load(Ordering::Relaxed) { return Err("Transfer cancelled".into()); }
-    for ((part_path, final_path), file) in final_dest_paths.iter().zip(received_files_meta.iter_mut()) {
-        // Recheck ancestors before publishing; never follow a destination link.
-        let relative = final_path.strip_prefix(&receive_dir).map_err(|e| e.to_string())?;
-        verify_safe_target_path(&receive_dir, relative)?;
-        let saved_path = publish_received_file(part_path, final_path)?;
-        file.final_path = saved_path.to_string_lossy().into_owned();
-    }
-    write_response_frame(stream, FrameTag::TransferAck, "ACK")
-        .map_err(|e| format!("Files saved, but failed to send TransferAck: {e}"))?;
+    let summary = super::session::receive_session(stream, metadata, &setup, &cancel_flag, &mut on_event)
+        .map_err(|failure| {
+            if failure.resumable {
+                info!("[Receiver] Interrupted; kept the received part for a retry");
+            }
+            failure.message
+        })?;
     info!("[Receiver] ACK_SENT");
-    info!("{}", super::perf::summary("receive", metadata.files.len(), total_received_bytes, start_time.elapsed()));
+    info!(
+        "{} batch={} resumed_bytes={}",
+        super::perf::summary("receive", metadata.files.len(), summary.bytes_received, summary.elapsed),
+        summary.negotiated.batch,
+        summary.bytes_resumed
+    );
     info!("[Receiver] CONNECTION_CLOSED");
 
     crate::state_manager::remove_incomplete_session(app, &metadata.session_id);
-
-    // Format human-readable file size string
-    let size_mb = (metadata.total_size_bytes as f64) / (1024.0 * 1024.0);
-    let formatted_size = if size_mb >= 1.0 {
-        format!("{:.1} MB", size_mb)
-    } else {
-        format!("{} KB", metadata.total_size_bytes.div_ceil(1024))
-    };
-
-    let main_filename = metadata
-        .files
-        .first()
-        .map(|f| f.relative_path.as_str())
-        .unwrap_or("Received File");
 
     let _ = app.emit(
         "transfer-completed",
         TransferCompletedPayload {
             session_id: metadata.session_id.clone(),
-            file_name: main_filename.to_string(),
+            file_name: first.relative_path.clone(),
             device_name: metadata.sender_name.clone(),
-            size: formatted_size,
+            size: format_size(metadata.total_size_bytes),
             timestamp: "Just now".to_string(),
             total_files: metadata.total_files,
             total_size_bytes: metadata.total_size_bytes,
-            files: received_files_meta,
+            files: summary.files.into_iter().take(UI_FILE_LIMIT).collect(),
             receive_dir: receive_dir.to_string_lossy().to_string(),
         },
     );
 
-    info!("[Receiver] Transfer completed successfully ({total_received_bytes} bytes written)");
+    info!("[Receiver] Transfer completed successfully ({} bytes written)", summary.bytes_received);
     Ok(())
 }

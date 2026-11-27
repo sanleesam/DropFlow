@@ -150,6 +150,7 @@ pub fn run() {
                 receiver: Mutex::new(Some(receiver)),
                 active_cancellations: Mutex::new(std::collections::HashMap::new()),
                 pending_authorizations: Mutex::new(std::collections::HashMap::new()),
+                staging: Default::default(),
             });
 
             Ok(())

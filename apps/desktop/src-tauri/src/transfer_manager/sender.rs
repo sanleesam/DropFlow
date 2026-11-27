@@ -1,22 +1,72 @@
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::net::{Shutdown, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+//! Outgoing transfers for the app: connects, runs the session core, and
+//! reports to the window. The protocol itself lives in `session`.
+use std::collections::HashSet;
+use std::net::TcpStream;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use log::info;
-use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
-use super::bulk_io::ChunkWriter;
-use super::protocol::{
-    perform_outgoing_handshake, read_frame_header, read_transfer_ack, write_file_complete,
-    write_file_header, write_frame_header, write_transfer_request, FileCompletePayload,
-    FileHeaderPayload, FileMetadata, FrameTag, TransferMetadata,
-};
-use super::receiver::{TransferCompletedPayload, TransferFailedPayload, TransferProgressPayload};
+use super::protocol::FileMetadata;
+use super::receiver::{format_size, TransferCompletedPayload, TransferProgressPayload, UI_FILE_LIMIT};
+use super::session::{send_session, SendFile, SendJob, SessionEvent};
+
+/// Two selected files can share a name ("a.txt" from two folders). The
+/// receiver rejects duplicate paths, so later ones become "a (2).txt".
+fn unique_relative_paths(files: &mut [SendFile]) {
+    let mut seen: HashSet<String> = HashSet::new();
+    for file in files.iter_mut() {
+        if seen.insert(file.relative_path.to_lowercase()) {
+            continue;
+        }
+        let (folder, name) = match file.relative_path.rfind('/') {
+            Some(slash) => file.relative_path.split_at(slash + 1),
+            None => ("", file.relative_path.as_str()),
+        };
+        let (stem, extension) = match name.rfind('.') {
+            Some(dot) if dot > 0 => name.split_at(dot),
+            _ => (name, ""),
+        };
+        let renamed = (2u32..)
+            .map(|number| format!("{folder}{stem} ({number}){extension}"))
+            .find(|candidate| seen.insert(candidate.to_lowercase()))
+            .unwrap_or_default();
+        file.relative_path = renamed;
+    }
+}
+
+pub fn build_job(
+    session_id: String,
+    sender_id: &str,
+    sender_name: &str,
+    sender_platform: String,
+    file_paths: &[String],
+    offer_features: bool,
+) -> Result<SendJob, String> {
+    let mut files = Vec::new();
+    let mut total: u64 = 0;
+    for (path, relative_path) in super::selection::expand_selection(file_paths)? {
+        let size_bytes = std::fs::metadata(&path)
+            .map_err(|e| format!("Failed to read metadata for {}: {e}", path.display()))?
+            .len();
+        total = total
+            .checked_add(size_bytes)
+            .ok_or_else(|| "Selected files are too large".to_string())?;
+        files.push(SendFile { path, relative_path, size_bytes });
+    }
+    unique_relative_paths(&mut files);
+    Ok(SendJob {
+        session_id,
+        sender_id: sender_id.to_string(),
+        sender_name: sender_name.to_string(),
+        sender_platform,
+        files,
+        offer_features,
+    })
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn send_files_over_tcp(
@@ -38,84 +88,36 @@ pub fn send_files_over_tcp(
     }
 
     let session_id = session_id.unwrap_or_else(|| format!("tx-{}", Uuid::new_v4()));
-    let mut files_metadata = Vec::new();
-    let mut total_size_bytes: u64 = 0;
+    let job = build_job(
+        session_id.clone(),
+        local_uuid,
+        local_device_name,
+        crate::device_discovery::get_system_platform(),
+        &file_paths,
+        super::engine::fast_transfer_enabled(app),
+    )?;
+    let total_files = job.files.len() as u32;
+    let total_size_bytes = job.total_bytes();
 
-    let expanded = super::selection::expand_selection(&file_paths)?;
-    for (idx, (path, filename)) in expanded.iter().enumerate() {
-        let metadata = std::fs::metadata(path)
-            .map_err(|e| format!("Failed to read metadata for {}: {e}", path.display()))?;
-
-        let file_size = metadata.len();
-        total_size_bytes = total_size_bytes.checked_add(file_size)
-            .ok_or_else(|| "Selected files are too large".to_string())?;
-
-        files_metadata.push(FileMetadata {
-            file_index: idx as u32,
-            relative_path: filename.clone(),
-            size_bytes: file_size,
-            sha256_checksum: String::new(), // Populated dynamically during streaming
-            final_path: path.to_string_lossy().into_owned(),
-        });
-    }
-
-    let total_files_count = files_metadata.len() as u32;
-
-    let transfer_meta = TransferMetadata {
-        session_id: session_id.clone(),
-        sender_id: local_uuid.to_string(),
-        sender_name: local_device_name.to_string(),
-        sender_platform: crate::device_discovery::get_system_platform(),
-        total_files: total_files_count,
-        total_size_bytes,
-        files: files_metadata.clone(),
-    };
-    super::validation::validate_request(&transfer_meta)?;
-
-    let target_socket_addr = std::net::SocketAddr::new(
-        peer_address.parse().map_err(|e| format!("Invalid peer IP address {peer_address}: {e}"))?,
+    let target = std::net::SocketAddr::new(
+        peer_address
+            .parse()
+            .map_err(|e| format!("Invalid peer IP address {peer_address}: {e}"))?,
         peer_port,
     );
-
-    let mut stream = TcpStream::connect_timeout(
-        &target_socket_addr,
-        Duration::from_secs(10),
-    )
-    .map_err(|e| format!("Failed to connect to peer at {target_socket_addr}: {e}"))?;
-
-    info!("[Sender] CONNECTED to {target_socket_addr}");
-    let mut stream = super::transport::CancellableStream::new(&mut stream,cancel_flag.clone())
+    let mut socket = TcpStream::connect_timeout(&target, Duration::from_secs(10))
+        .map_err(|e| format!("Failed to connect to peer at {target}: {e}"))?;
+    info!("[Sender] CONNECTED to {target}");
+    let mut stream = super::transport::CancellableStream::new(&mut socket, cancel_flag.clone())
         .map_err(|e| format!("Failed to configure cancellable socket: {e}"))?;
-
-    stream
-        .set_read_timeout(Some(Duration::from_secs(15)))
-        .map_err(|e| format!("Failed to set stream timeout: {e}"))?;
-    stream.set_write_timeout(Some(Duration::from_secs(15)))
-        .map_err(|e| format!("Failed to set write timeout: {e}"))?;
-
-    perform_outgoing_handshake(&mut stream)?;
-    info!("[Sender] HANDSHAKE_COMPLETE");
-
-    // The recipient has 60 seconds to authorize. Do not apply the shorter
-    // streaming timeout while a person is still deciding on the prompt.
-    stream.set_read_timeout(Some(Duration::from_secs(75)))
-        .map_err(|e| format!("Failed to set authorization timeout: {e}"))?;
-
-    // 1. Send TransferRequest metadata frame
-    write_transfer_request(&mut stream, &transfer_meta)?;
-    info!("[Sender] REQUEST_SENT");
 
     crate::state_manager::update_incomplete_session(
         app,
         crate::state_manager::IncompleteTransferSchema {
             session_id: session_id.clone(),
-            file_name: transfer_meta
-                .files
-                .first()
-                .map(|f| f.relative_path.clone())
-                .unwrap_or_default(),
+            file_name: job.files.first().map(|f| f.relative_path.clone()).unwrap_or_default(),
             device_name: peer_address.to_string(),
-            total_files: total_files_count,
+            total_files,
             total_size_bytes,
             bytes_completed: 0,
             direction: "send".to_string(),
@@ -131,264 +133,87 @@ pub fn send_files_over_tcp(
         },
     );
 
-    // 2. Read acceptance frame header & payload
-    let (resp_tag, resp_len) = read_frame_header(&mut stream)
-        .map_err(|e| format!("Failed to read peer acceptance response header: {e}"))?;
-
-    let mut resp_payload = vec![0u8; resp_len as usize];
-    stream.read_exact(&mut resp_payload).map_err(|e|format!("Failed to read peer response: {e}"))?;
-    if resp_tag != FrameTag::TransferAccept {
-        let err_msg = if resp_tag == FrameTag::TransferReject {
-            if String::from_utf8_lossy(&resp_payload).to_lowercase().contains("busy") {
-                "The other device is busy. Try again shortly.".to_string()
-            } else { "Transfer declined by recipient".to_string() }
-        } else {
-            format!("Peer rejected transfer with frame tag {:?}", resp_tag)
-        };
-        let _ = app.emit(
-            "transfer-failed",
-            TransferFailedPayload {
-                session_id: session_id.clone(),
-                error: err_msg.clone(),
-            },
-        );
-        return Err(err_msg);
-    }
-
-    info!("[Sender] ACCEPT_RECEIVED");
-    stream.set_read_timeout(Some(Duration::from_secs(15)))
-        .map_err(|e| format!("Failed to restore streaming timeout: {e}"))?;
-
-    let start_time = Instant::now();
-    let mut total_sent_bytes: u64 = 0;
-    let mut last_emit_time = Instant::now();
-    let emit_interval = Duration::from_millis(50); // Max 20 FPS progress emissions
-
-    // 3. Stream data for each file
-    info!("[Sender] STREAMING {} files", total_files_count);
-    let mut chunks = ChunkWriter::new();
-    for (idx, file_meta) in transfer_meta.files.iter().enumerate() {
-        let path_str = &file_meta.final_path;
-        if cancel_flag.load(Ordering::Relaxed) {
-            let _ = write_frame_header(&mut stream, FrameTag::Cancel, 0);
-            let err_msg = "Transfer cancelled by user".to_string();
+    let mut on_event = |event: SessionEvent<'_>| match event {
+        SessionEvent::RequestSent => info!("[Sender] REQUEST_SENT"),
+        SessionEvent::Accepted(mode) => info!(
+            "[Sender] ACCEPT_RECEIVED batch={} resume={}; streaming {total_files} files",
+            mode.batch, mode.resume
+        ),
+        SessionEvent::Finishing => info!("[Sender] TRANSFER_COMPLETE_SENT"),
+        SessionEvent::Progress(progress) => {
             let _ = app.emit(
-                "transfer-failed",
-                TransferFailedPayload {
-                    session_id: session_id.clone(),
-                    error: err_msg.clone(),
-                },
-            );
-            return Err(err_msg);
-        }
-
-        let mut file = File::open(path_str)
-            .map_err(|e| format!("Failed to open file for reading {path_str}: {e}"))?;
-
-
-        // 3a. Send FileHeader frame
-        let file_header_payload = FileHeaderPayload {
-            file_index: idx as u32,
-            relative_path: file_meta.relative_path.clone(),
-            size_bytes: file_meta.size_bytes,
-            sha256_checksum: String::new(),
-            resume_offset: 0,
-        };
-        write_file_header(&mut stream, &file_header_payload)?;
-
-        // Read TransferAck from receiver to negotiate resume_offset
-        let ack = read_transfer_ack(&mut stream)?;
-        if !ack.status.eq_ignore_ascii_case("ACCEPTED") {
-            return Err(format!(
-                "Receiver rejected file '{}': {}",
-                file_meta.relative_path, ack.status
-            ));
-        }
-
-        let mut file_bytes_sent: u64 = 0;
-        let mut hasher = Sha256::new();
-        if ack.resume_offset > 0 && ack.resume_offset < file_meta.size_bytes {
-            file.seek(SeekFrom::Start(0))
-                .map_err(|e| format!("Failed to seek file for checksum: {e}"))?;
-            let mut remaining = ack.resume_offset;
-            while remaining > 0 {
-                let buffer = chunks.payload();
-                let to_read = remaining.min(buffer.len() as u64) as usize;
-                let read = file
-                    .read(&mut buffer[..to_read])
-                    .map_err(|e| format!("Failed to read resume prefix: {e}"))?;
-                if read == 0 {
-                    return Err("Unexpected EOF while hashing resume prefix".to_string());
-                }
-                hasher.update(&buffer[..read]);
-                remaining -= read as u64;
-            }
-            file.seek(SeekFrom::Start(ack.resume_offset))
-                .map_err(|e| format!("Failed to seek to resume offset: {e}"))?;
-            file_bytes_sent = ack.resume_offset;
-            total_sent_bytes += ack.resume_offset;
-            info!("[Sender] RESUMING file '{}' from offset {}",
-                file_meta.relative_path, ack.resume_offset
+                "transfer-progress",
+                TransferProgressPayload::from_progress(&session_id, "send", peer_address, total_files, &progress),
             );
         }
-
-        while file_bytes_sent < file_meta.size_bytes {
-            if cancel_flag.load(Ordering::Relaxed) {
-                let _ = write_frame_header(&mut stream, FrameTag::Cancel, 0);
-                let err_msg = "Transfer cancelled by user".to_string();
-                let _ = app.emit(
-                    "transfer-failed",
-                    TransferFailedPayload {
-                        session_id: session_id.clone(),
-                        error: err_msg.clone(),
-                    },
-                );
-                return Err(err_msg);
-            }
-
-            let buffer = chunks.payload();
-            let limit = (file_meta.size_bytes - file_bytes_sent).min(buffer.len() as u64) as usize;
-            let n = file
-                .read(&mut buffer[..limit])
-                .map_err(|e| format!("Failed reading file chunk: {e}"))?;
-
-            if n == 0 {
-                return Err(format!("'{}' shrank after it was selected", file_meta.relative_path));
-            }
-
-            hasher.update(&buffer[..n]);
-            chunks.send(&mut stream, n)
-                .map_err(|e| format!("Failed writing data frame to socket: {e}"))?;
-
-            file_bytes_sent += n as u64;
-            total_sent_bytes += n as u64;
-
-            let is_final = total_sent_bytes == total_size_bytes;
-            if is_final || last_emit_time.elapsed() >= emit_interval {
-                last_emit_time = Instant::now();
-                let elapsed_secs = start_time.elapsed().as_secs_f64();
-                let speed = if elapsed_secs > 0.0 {
-                    (total_sent_bytes as f64 / elapsed_secs) as u64
-                } else {
-                    0
-                };
-
-                let percentage = if total_size_bytes > 0 {
-                    ((total_sent_bytes as f32 / total_size_bytes as f32) * 100.0).min(100.0)
-                } else {
-                    100.0
-                };
-
-                let _ = app.emit(
-                    "transfer-progress",
-                    TransferProgressPayload {
-                        session_id: session_id.clone(),
-                        direction: "send".into(),
-                        device_name: peer_address.into(),
-                        current_file_index: idx as u32,
-                        current_file_name: file_meta.relative_path.clone(),
-                        current_file_bytes: file_bytes_sent,
-                        current_file_total_bytes: file_meta.size_bytes,
-                        session_bytes_sent: total_sent_bytes,
-                        session_total_bytes: total_size_bytes,
-                        total_files: total_files_count,
-                        percentage,
-                        speed_bytes_per_sec: speed,
-                    },
-                );
-            }
-        }
-
-        if file.read(&mut [0]).map_err(|e| format!("Failed checking end of file: {e}"))? != 0 {
-            return Err(format!("'{}' grew after it was selected", file_meta.relative_path));
-        }
-        let file_checksum = format!("{:x}", hasher.finalize());
-
-        // 3b. Send FileComplete frame
-        let file_comp_payload = FileCompletePayload {
-            file_index: idx as u32,
-            bytes_written: file_bytes_sent,
-            sha256_checksum: file_checksum,
-        };
-        write_file_complete(&mut stream, &file_comp_payload)?;
-    }
-
-    stream
-        .flush()
-        .map_err(|e| format!("Failed to flush TCP stream: {e}"))?;
-
-    // 4. Send TransferComplete frame
-    super::protocol::write_frame(&mut stream, FrameTag::TransferComplete, session_id.as_bytes())?;
-    info!("[Sender] TRANSFER_COMPLETE_SENT");
-
-    // 5. Wait for TransferAck frame from receiver
-    let (ack_tag, ack_len) = read_frame_header(&mut stream)
-        .map_err(|e| format!("Failed waiting for TransferAck from receiver: {e}"))?;
-
-    if ack_tag != FrameTag::TransferAck {
-        let err_msg = format!("Expected TransferAck, received {:?}", ack_tag);
-        let _ = app.emit(
-            "transfer-failed",
-            TransferFailedPayload {
-                session_id: session_id.clone(),
-                error: err_msg.clone(),
-            },
-        );
-        return Err(err_msg);
-    }
-
-    if ack_len > 0 {
-        let mut ack_buf = vec![0u8; ack_len as usize];
-        stream.read_exact(&mut ack_buf)
-            .map_err(|e| format!("Incomplete final acknowledgement: {e}"))?;
-        let status = serde_json::from_slice::<super::protocol::TransferAckPayload>(&ack_buf)
-            .map(|ack| ack.status)
-            .unwrap_or_else(|_| String::from_utf8_lossy(&ack_buf).into_owned());
-        if !status.eq_ignore_ascii_case("ACK") {
-            return Err("Invalid final acknowledgement".into());
-        }
-    } else {
-        return Err("Missing final acknowledgement".into());
-    }
+    };
+    // The command's result is the single failure report; no failure event here.
+    let summary = send_session(&mut stream, &job, &cancel_flag, &mut on_event)?;
     info!("[Sender] ACK_RECEIVED");
-    info!("{}", super::perf::summary("send", total_files_count as usize, total_sent_bytes, start_time.elapsed()));
-
-    // 6. Graceful shutdown
-    stream
-        .shutdown(Shutdown::Write)
-        .map_err(|e| format!("Failed to shutdown TCP write stream: {e}"))?;
-    info!("[Sender] SHUTDOWN");
+    info!(
+        "{} batch={} resumed_bytes={}",
+        super::perf::summary("send", total_files as usize, summary.bytes_sent, summary.elapsed),
+        summary.negotiated.batch,
+        summary.bytes_resumed
+    );
 
     crate::state_manager::remove_incomplete_session(app, &session_id);
 
-    let size_mb = (total_size_bytes as f64) / (1024.0 * 1024.0);
-    let formatted_size = if size_mb >= 1.0 {
-        format!("{:.1} MB", size_mb)
-    } else {
-        format!("{} KB", total_size_bytes.div_ceil(1024))
-    };
-
-    let main_filename = transfer_meta
+    let files: Vec<FileMetadata> = job
         .files
-        .first()
-        .map(|f| f.relative_path.as_str())
-        .unwrap_or("File");
-
+        .iter()
+        .take(UI_FILE_LIMIT)
+        .enumerate()
+        .map(|(index, file)| FileMetadata {
+            file_index: index as u32,
+            relative_path: file.relative_path.clone(),
+            size_bytes: file.size_bytes,
+            sha256_checksum: String::new(),
+            final_path: file.path.to_string_lossy().into_owned(),
+        })
+        .collect();
     let _ = app.emit(
         "transfer-completed",
         TransferCompletedPayload {
             session_id: session_id.clone(),
-            file_name: main_filename.to_string(),
+            file_name: job.files.first().map(|f| f.relative_path.clone()).unwrap_or_else(|| "File".into()),
             device_name: "Target Device".to_string(),
-            size: formatted_size,
+            size: format_size(total_size_bytes),
             timestamp: "Just now".to_string(),
-            total_files: total_files_count,
+            total_files,
             total_size_bytes,
-            files: transfer_meta.files,
+            files,
             receive_dir: String::new(),
         },
     );
 
-    info!("[Sender] Successfully completed streaming {total_sent_bytes} bytes over TCP");
+    info!("[Sender] Completed: {total_size_bytes} bytes in {total_files} files");
     Ok(session_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn same_named_files_from_different_folders_get_distinct_names() {
+        let file = |name: &str| SendFile { path: name.into(), relative_path: name.into(), size_bytes: 1 };
+        let mut files = vec![
+            file("a.txt"),
+            file("A.TXT"),
+            file("a.txt"),
+            file("Folder/a.txt"),
+            file("Folder/a.txt"),
+            file("notes"),
+            file("notes"),
+            file(".env"),
+            file(".env"),
+        ];
+        unique_relative_paths(&mut files);
+        let names: Vec<&str> = files.iter().map(|f| f.relative_path.as_str()).collect();
+        assert_eq!(
+            names,
+            ["a.txt", "A (2).TXT", "a (3).txt", "Folder/a.txt", "Folder/a (2).txt", "notes", "notes (2)", ".env", ".env (2)"]
+        );
+    }
 }

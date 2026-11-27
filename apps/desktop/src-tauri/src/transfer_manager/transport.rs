@@ -12,6 +12,9 @@ use std::{
 };
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// Small reads (frame headers, control payloads) are served from this buffer,
+/// so a stream of small files does not cost several system calls per frame.
+const READ_BUFFER: usize = 64 * 1024;
 
 pub struct CancellableStream<'a> {
     socket: &'a mut TcpStream,
@@ -20,6 +23,12 @@ pub struct CancellableStream<'a> {
     write_timeout: Option<Duration>,
     poller: Poller,
     events: Events,
+    read_buffer: Vec<u8>,
+    read_start: usize,
+    read_end: usize,
+    /// True while part of a `write_all` has left and the rest has not: the
+    /// peer is in the middle of a frame, so nothing else may be written.
+    mid_frame: bool,
 }
 
 impl<'a> CancellableStream<'a> {
@@ -44,6 +53,10 @@ impl<'a> CancellableStream<'a> {
             write_timeout: Some(Duration::from_secs(15)),
             poller,
             events: Events::new(),
+            read_buffer: vec![0; READ_BUFFER],
+            read_start: 0,
+            read_end: 0,
+            mid_frame: false,
         };
         Ok(stream)
     }
@@ -66,6 +79,106 @@ impl<'a> CancellableStream<'a> {
 
     pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
         self.socket.shutdown(how)
+    }
+
+    /// True when the peer has sent something (or closed) that has not been read.
+    /// Never blocks; lets a sender notice a cancel or error while streaming.
+    pub fn pending_input(&mut self) -> io::Result<bool> {
+        if self.read_start < self.read_end {
+            return Ok(true);
+        }
+        match self.socket.peek(&mut [0u8; 1]) {
+            Ok(_) => Ok(true),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                ) =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Writes without honouring cancellation, for a bounded time.
+    fn write_quietly(&mut self, bytes: &[u8], patience: Duration) -> bool {
+        let deadline = Instant::now() + patience;
+        let mut sent = 0;
+        while sent < bytes.len() {
+            match self.socket.write(&bytes[sent..]) {
+                Ok(0) => return false,
+                Ok(count) => sent += count,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline || self.poll(Event::writable(0)).is_err() {
+                        return false;
+                    }
+                }
+                Err(_) => return false,
+            }
+        }
+        true
+    }
+
+    /// Best-effort final frame (cancel or error) that ignores cancellation.
+    /// Skipped when a frame is half written, because it would corrupt framing.
+    pub fn notify_peer(&mut self, frame: &[u8]) -> bool {
+        if self.mid_frame {
+            return false;
+        }
+        let sent = self.write_quietly(frame, Duration::from_secs(1));
+        self.mid_frame = !sent;
+        sent
+    }
+
+    /// Sends a final notice, then waits briefly for the peer to read it and
+    /// close. Closing with unread input would reset the connection and could
+    /// discard the notice before the peer sees it.
+    pub fn close_with_notice(&mut self, frame: &[u8]) {
+        if !self.notify_peer(frame) {
+            return;
+        }
+        let _ = self.socket.shutdown(Shutdown::Write);
+        let deadline = Instant::now() + Duration::from_millis(1500);
+        let mut sink = [0u8; 16 * 1024];
+        while Instant::now() < deadline {
+            match self.socket.read(&mut sink) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    if self.poll(Event::readable(0)).is_err() {
+                        break;
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(_) => break,
+            }
+        }
+    }
+
+    fn poll(&mut self, event: Event) -> io::Result<()> {
+        self.poller.modify(&*self.socket, event)?;
+        self.events.clear();
+        match self.poller.wait(&mut self.events, Some(POLL_INTERVAL)) {
+            Ok(_) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn read_socket(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let start = Instant::now();
+        loop {
+            self.check_wait(start, self.read_timeout)?;
+            match self.socket.read(buffer) {
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    self.wait_ready(Event::readable(0), start, self.read_timeout)?;
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                result => return result,
+            }
+        }
     }
 
     fn check_wait(&self, start: Instant, timeout: Option<Duration>) -> io::Result<()> {
@@ -130,17 +243,25 @@ impl Read for CancellableStream<'_> {
         if buffer.is_empty() {
             return Ok(0);
         }
-        let start = Instant::now();
-        loop {
-            self.check_wait(start, self.read_timeout)?;
-            match self.socket.read(buffer) {
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                    self.wait_ready(Event::readable(0), start, self.read_timeout)?;
-                }
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                result => return result,
+        if self.read_start == self.read_end {
+            // Bulk payloads go straight to the caller's buffer.
+            if buffer.len() >= READ_BUFFER {
+                return self.read_socket(buffer);
+            }
+            let mut own = std::mem::take(&mut self.read_buffer);
+            let filled = self.read_socket(&mut own);
+            self.read_buffer = own;
+            self.read_start = 0;
+            self.read_end = filled?;
+            if self.read_end == 0 {
+                return Ok(0);
             }
         }
+        let count = buffer.len().min(self.read_end - self.read_start);
+        buffer[..count]
+            .copy_from_slice(&self.read_buffer[self.read_start..self.read_start + count]);
+        self.read_start += count;
+        Ok(count)
     }
 }
 
@@ -160,6 +281,34 @@ impl Write for CancellableStream<'_> {
                 result => return result,
             }
         }
+    }
+    /// Every protocol frame is exactly one `write_all`, so this is where a
+    /// half-written frame is detected.
+    fn write_all(&mut self, mut buffer: &[u8]) -> io::Result<()> {
+        let mut wrote_any = false;
+        while !buffer.is_empty() {
+            match self.write(buffer) {
+                Ok(0) => {
+                    self.mid_frame = wrote_any;
+                    return Err(io::ErrorKind::WriteZero.into());
+                }
+                Ok(count) => {
+                    wrote_any = true;
+                    buffer = &buffer[count..];
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => {
+                    // A cancel that lands inside a frame: finish that frame if
+                    // the peer is still reading, so a goodbye can follow it.
+                    let cancelled = self.cancellation.load(Ordering::Relaxed);
+                    self.mid_frame = wrote_any
+                        && !(cancelled && self.write_quietly(buffer, Duration::from_millis(250)));
+                    return Err(error);
+                }
+            }
+        }
+        self.mid_frame = false;
+        Ok(())
     }
     fn flush(&mut self) -> io::Result<()> {
         self.check_wait(Instant::now(), None)?;
@@ -307,6 +456,7 @@ mod tests {
                     sha256_checksum: String::new(),
                     final_path: String::new(),
                 }],
+                features: Vec::new(),
             },
         )
         .unwrap();
@@ -348,6 +498,69 @@ mod tests {
         let mut ack = vec![0; len as usize];
         stream.read_exact(&mut ack).unwrap();
         assert_eq!(ack, b"ACK");
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn buffered_small_reads_keep_order_and_report_pending_input() {
+        let (mut client, mut peer) = pair();
+        let mut stream =
+            CancellableStream::new(&mut client, Arc::new(AtomicBool::new(false))).unwrap();
+        assert!(!stream.pending_input().unwrap());
+        let big: Vec<u8> = (0..READ_BUFFER * 2 + 7).map(|i| (i % 251) as u8).collect();
+        peer.write_all(b"ab").unwrap();
+        peer.write_all(&big).unwrap();
+        peer.write_all(b"yz").unwrap();
+        thread::sleep(Duration::from_millis(60));
+        assert!(stream.pending_input().unwrap());
+        let mut small = [0; 2];
+        stream.read_exact(&mut small).unwrap();
+        assert_eq!(&small, b"ab");
+        assert!(stream.pending_input().unwrap());
+        let mut bulk = vec![0; big.len()];
+        stream.read_exact(&mut bulk).unwrap();
+        assert_eq!(bulk, big);
+        stream.read_exact(&mut small).unwrap();
+        assert_eq!(&small, b"yz");
+        assert!(!stream.pending_input().unwrap());
+        drop(peer);
+        thread::sleep(Duration::from_millis(60));
+        assert!(stream.pending_input().unwrap()); // a closed peer is also "something to read"
+        assert_eq!(stream.read(&mut small).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_cancelled_sender_can_still_say_goodbye_at_a_frame_boundary() {
+        let (mut client, mut peer) = pair();
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut stream = CancellableStream::new(&mut client, flag.clone()).unwrap();
+        stream.write_all(b"frame-1").unwrap();
+        flag.store(true, Ordering::Relaxed);
+        assert_eq!(
+            stream.write_all(b"never").unwrap_err().kind(),
+            io::ErrorKind::ConnectionAborted
+        );
+        assert!(stream.notify_peer(b"bye"));
+        let mut seen = [0; 10];
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        peer.read_exact(&mut seen).unwrap();
+        assert_eq!(&seen, b"frame-1bye");
+    }
+
+    #[test]
+    fn a_half_written_frame_blocks_the_goodbye() {
+        let (mut client, _peer) = pair();
+        let flag = Arc::new(AtomicBool::new(false));
+        let worker_flag = flag.clone();
+        let worker = thread::spawn(move || {
+            let mut stream = CancellableStream::new(&mut client, worker_flag).unwrap();
+            // Far more than the socket buffers hold; the peer never reads.
+            let error = stream.write_all(&vec![7; 64 * 1024 * 1024]).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::ConnectionAborted);
+            assert!(!stream.notify_peer(b"bye"));
+        });
+        thread::sleep(Duration::from_millis(200));
+        flag.store(true, Ordering::Relaxed);
         worker.join().unwrap();
     }
 

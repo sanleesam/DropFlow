@@ -32,6 +32,15 @@ pub struct TransferState {
     pub active_cancellations: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub pending_authorizations:
         Mutex<HashMap<String, tokio::sync::oneshot::Sender<AuthorizationResponse>>>,
+    pub staging: super::session::StagingRegistry,
+}
+
+/// Whether the DFP/1.1 engine may be used. A missing state means "yes":
+/// negotiation still falls back when the other device does not support it.
+pub(crate) fn fast_transfer_enabled(app: &AppHandle) -> bool {
+    app.try_state::<crate::state_manager::AppStateContainer>()
+        .and_then(|container| container.state.lock().ok().map(|state| state.settings.fast_transfer))
+        .unwrap_or(true)
 }
 
 impl Default for TransferState {
@@ -40,6 +49,7 @@ impl Default for TransferState {
             receiver: Mutex::new(None),
             active_cancellations: Mutex::new(HashMap::new()),
             pending_authorizations: Mutex::new(HashMap::new()),
+            staging: Default::default(),
         }
     }
 }
