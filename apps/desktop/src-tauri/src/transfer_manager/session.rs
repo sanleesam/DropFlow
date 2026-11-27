@@ -715,6 +715,22 @@ pub fn sweep_staging(receive_dir: &Path, registry: &StagingRegistry, max_age: Du
     let _ = fs::remove_dir(&root); // only succeeds when empty
 }
 
+/// A dot-prefixed name hides the folder on macOS and Linux only. On Windows
+/// it needs the hidden attribute; failing to set it just leaves it visible.
+#[cfg(windows)]
+fn hide_folder(path: &Path) {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn SetFileAttributesW(path: *const u16, attributes: u32) -> i32;
+    }
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED. NUL terminated.
+    unsafe { SetFileAttributesW(wide.as_ptr(), 0x2 | 0x2000) };
+}
+#[cfg(not(windows))]
+fn hide_folder(_path: &Path) {}
+
 struct Staging<'a> {
     dir: PathBuf,
     root: PathBuf,
@@ -746,6 +762,7 @@ impl<'a> Staging<'a> {
             }
         };
         real_dir(&root)?;
+        hide_folder(&root);
         let unique = || root.join(format!("s-{}", uuid::Uuid::new_v4().simple()));
         let mut dir = unique();
         if negotiated.resume {
