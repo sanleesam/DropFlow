@@ -13,6 +13,8 @@ pub mod validation;
 mod lifecycle;
 pub mod transport;
 mod bulk_io;
+#[cfg(target_os = "macos")]
+mod direct_macos;
 #[cfg(any(windows, test))]
 mod direct_windows;
 #[cfg(test)]

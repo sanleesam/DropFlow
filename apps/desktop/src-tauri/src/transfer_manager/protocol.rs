@@ -125,14 +125,30 @@ pub struct DirectOffer {
     /// listens and answers with `DirectJoined`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_port: Option<u16>,
+    /// The host can find a joiner that has to leave the shared network to
+    /// join (see `DirectJoined::leaving`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub leaving_ok: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Sent by a listening joiner over the existing connection.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DirectJoined {
+    /// Empty when `leaving`: the joiner does not know its address yet.
+    #[serde(default)]
     pub address: String,
     pub port: u16,
+    /// Sent *before* joining by a device that can hold only one Wi-Fi
+    /// connection: it is about to leave the shared network, so this is the
+    /// last frame on it. The host connects to whatever address its own
+    /// platform reports for the device that joins.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub leaving: bool,
 }
 
 pub const MAX_FEATURES: usize = 16;

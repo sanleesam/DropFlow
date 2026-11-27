@@ -826,6 +826,30 @@ pub trait DirectLink {
     fn connect(&mut self, address: Option<&str>, port: u16) -> Result<TcpStream, String>;
     /// Releases the network. Called once the session no longer needs it.
     fn close(&mut self);
+
+    /// True when this device can hold only one Wi-Fi connection, so joining
+    /// means leaving the shared network for the length of the transfer.
+    fn leaves_network(&self) -> bool {
+        false
+    }
+    /// For a device that leaves: start listening on every interface before
+    /// it joins, and return the port.
+    fn listen(&mut self) -> Result<u16, String> {
+        Err("this device cannot listen before joining".into())
+    }
+    /// For a host: true when `connect_joined` works on this platform.
+    fn accepts_leaving(&self) -> bool {
+        false
+    }
+    /// For a host: wait for a device to join the private network and connect
+    /// to it on `port`, at the address the platform itself reports for it.
+    fn connect_joined(
+        &mut self,
+        _port: u16,
+        _tick: &mut dyn FnMut() -> Result<(), String>,
+    ) -> Result<TcpStream, String> {
+        Err("this device cannot find a joiner by itself".into())
+    }
 }
 
 /// Which side creates the network. The higher rank hosts; the other must be
@@ -968,6 +992,49 @@ impl LinkSetup<'_, '_> {
         }
     }
 
+    /// After one side has left the shared network there is nothing to fall
+    /// back to: the transfer ends, and a retry continues it where resume applies.
+    fn no_way_back(&self, reason: &str) -> Fail {
+        if self.cancel.load(Ordering::Relaxed) {
+            return Fail::local("Transfer cancelled by user");
+        }
+        Fail::network(format!("the direct link could not be set up ({reason})"))
+    }
+
+    /// The joiner's side when it can hold only one Wi-Fi connection.
+    fn leave_and_join(&mut self, offer: &DirectOffer) -> Result<Option<TcpStream>, Fail> {
+        if !offer.leaving_ok || offer.host_port.is_some() {
+            return self.stay("this device would have to leave the network, and the other device cannot work with that");
+        }
+        let port = match self.link.listen() {
+            Ok(port) => port,
+            Err(reason) => return self.stay(&reason),
+        };
+        // The last frame on the shared connection.
+        let leaving = DirectJoined { address: String::new(), port, leaving: true };
+        write_frame(self.stream, FrameTag::DirectJoined, &json(&leaving)?).map_err(Fail::network)?;
+
+        let cancel = self.cancel;
+        if let Err(reason) = self.link.join(offer, &mut || cancel_tick(cancel)) {
+            return Err(self.no_way_back(&reason));
+        }
+        let deadline = Instant::now() + LINK_CONNECT_TIMEOUT;
+        loop {
+            if Instant::now() >= deadline || self.cancel.load(Ordering::Relaxed) {
+                return Err(self.no_way_back("the other device did not connect in time"));
+            }
+            match self.link.accept(LINK_POLL) {
+                Ok(Some(socket)) => {
+                    if let Ok(socket) = greet(socket, &offer.token, false) {
+                        return Ok(Some(socket));
+                    }
+                }
+                Ok(None) => {}
+                Err(reason) => return Err(self.no_way_back(&reason)),
+            }
+        }
+    }
+
     fn host(&mut self) -> Result<Option<TcpStream>, Fail> {
         let hosted = {
             let (stream, cancel, last_write) = (&mut *self.stream, self.cancel, &mut self.last_write);
@@ -983,6 +1050,7 @@ impl LinkSetup<'_, '_> {
             passphrase: hosted.passphrase,
             token: token.clone(),
             host_port: hosted.listen_port,
+            leaving_ok: hosted.listen_port.is_none() && self.link.accepts_leaving(),
         };
         write_frame(self.stream, FrameTag::DirectOffer, &json(&offer)?).map_err(Fail::network)?;
         self.last_write = Instant::now();
@@ -1006,6 +1074,19 @@ impl LinkSetup<'_, '_> {
                 },
                 (tag, _) => return self.stay(&format!("unexpected {tag:?} frame")),
             };
+            if joined.leaving {
+                // The other device has left the shared network to join ours:
+                // this connection is finished, whatever happens next.
+                let cancel = self.cancel;
+                let connected = self
+                    .link
+                    .connect_joined(joined.port, &mut || cancel_tick(cancel))
+                    .and_then(|socket| greet(socket, &token, true));
+                return match connected {
+                    Ok(socket) => Ok(Some(socket)),
+                    Err(reason) => Err(self.no_way_back(&reason)),
+                };
+            }
             let connected = self
                 .link
                 .connect(Some(&joined.address), joined.port)
@@ -1033,6 +1114,9 @@ impl LinkSetup<'_, '_> {
                 (tag, _) => return self.stay(&format!("unexpected {tag:?} frame")),
             }
         };
+        if self.link.leaves_network() {
+            return self.leave_and_join(&offer);
+        }
         let joined = {
             let (stream, cancel, last_write) = (&mut *self.stream, self.cancel, &mut self.last_write);
             self.link.join(&offer, &mut || link_tick(stream, cancel, last_write))
@@ -1049,10 +1133,20 @@ impl LinkSetup<'_, '_> {
                 Err(reason) => self.stay(&reason),
             };
         }
-        let here = DirectJoined { address: joined.address, port: joined.port };
+        let here = DirectJoined { address: joined.address, port: joined.port, leaving: false };
         write_frame(self.stream, FrameTag::DirectJoined, &json(&here)?).map_err(Fail::network)?;
         self.last_write = Instant::now();
         self.await_connection(&offer.token, LINK_CONNECT_TIMEOUT, "the other device did not connect in time")
+    }
+}
+
+/// For work that happens after the shared connection is gone: only a cancel
+/// can stop it.
+fn cancel_tick(cancel: &AtomicBool) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) {
+        Err("cancelled".into())
+    } else {
+        Ok(())
     }
 }
 

@@ -8,8 +8,9 @@
 //! `--legacy` turns the DFP/1.1 features off, which makes this peer behave
 //! like a release from before they existed.
 //!
-//! `--link host` or `--link join` offers a direct link whose "private
-//! network" is simply this machine's loopback. It exercises the whole link
+//! `--link host`, `--link join` or `--link leave` offers a direct link whose
+//! "private network" is simply this machine's loopback (`leave` behaves like
+//! a device that must give up its own network to join). It exercises the whole link
 //! negotiation against another implementation without any radio.
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -31,17 +32,20 @@ use dropflow_lib::transfer_manager::validation::validate_request;
 /// A stand-in for a private network: both ends are on this machine.
 struct LoopbackLink {
     caps: DirectCaps,
+    /// Behave like a device with one Wi-Fi connection (`--link leave`).
+    leaves: bool,
     listener: Option<TcpListener>,
 }
 
 impl LoopbackLink {
     fn from_flag(flag: Option<&str>) -> Option<Self> {
-        let caps = match flag? {
+        let flag = flag?;
+        let caps = match flag {
             "host" => DirectCaps { host_rank: 2, join: false },
-            "join" => DirectCaps { host_rank: 0, join: true },
+            "join" | "leave" => DirectCaps { host_rank: 0, join: true },
             _ => return None,
         };
-        Some(Self { caps, listener: None })
+        Some(Self { caps, leaves: flag == "leave", listener: None })
     }
 }
 
@@ -53,11 +57,27 @@ impl DirectLink for LoopbackLink {
         Ok(HostedLink { ssid: "DIRECT-DF-loopback".into(), passphrase: "loopback-passphrase".into(), listen_port: None })
     }
     fn join(&mut self, _offer: &DirectOffer, _tick: &mut dyn FnMut() -> Result<(), String>) -> Result<JoinedLink, String> {
+        let port = match &self.listener {
+            Some(listener) => listener.local_addr().map_err(|e| e.to_string())?.port(),
+            None => self.listen()?,
+        };
+        Ok(JoinedLink { address: "127.0.0.1".into(), port })
+    }
+    fn leaves_network(&self) -> bool {
+        self.leaves
+    }
+    fn listen(&mut self) -> Result<u16, String> {
         let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
         listener.set_nonblocking(true).map_err(|e| e.to_string())?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         self.listener = Some(listener);
-        Ok(JoinedLink { address: "127.0.0.1".into(), port })
+        Ok(port)
+    }
+    fn accepts_leaving(&self) -> bool {
+        true
+    }
+    fn connect_joined(&mut self, port: u16, _tick: &mut dyn FnMut() -> Result<(), String>) -> Result<TcpStream, String> {
+        TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())
     }
     fn accept(&mut self, wait: Duration) -> Result<Option<TcpStream>, String> {
         let listener = self.listener.as_ref().ok_or("not listening")?;
@@ -163,6 +183,6 @@ fn main() -> Result<(), String> {
             }
             Ok(())
         }
-        _ => Err("usage: dfp_peer send <host> <port> [--legacy] [--link host|join] <path>... | dfp_peer receive <folder> [--port N] [--legacy] [--count N] [--link host|join]".into()),
+        _ => Err("usage: dfp_peer send <host> <port> [--legacy] [--link host|join|leave] <path>... | dfp_peer receive <folder> [--port N] [--legacy] [--count N] [--link host|join|leave]".into()),
     }
 }

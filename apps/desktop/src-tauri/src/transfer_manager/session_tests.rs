@@ -239,6 +239,10 @@ struct LoopbackLink {
     host_listens: bool,
     fail_host: bool,
     fail_join: bool,
+    /// One Wi-Fi connection only: joining means leaving the shared network.
+    leaves: bool,
+    /// As host: able to find a joiner that left (`connect_joined`).
+    finds_joiner: bool,
     listener: Option<TcpListener>,
     closed: Arc<AtomicBool>,
 }
@@ -250,6 +254,8 @@ impl LoopbackLink {
             host_listens: false,
             fail_host: false,
             fail_join: false,
+            leaves: false,
+            finds_joiner: true,
             listener: None,
             closed: Arc::new(AtomicBool::new(false)),
         }
@@ -281,8 +287,25 @@ impl DirectLink for LoopbackLink {
         if self.fail_join {
             return Err("could not join the network".into());
         }
-        let port = if offer.host_port.is_none() { self.listen() } else { 0 };
+        let port = match (&self.listener, offer.host_port) {
+            (Some(listener), _) => listener.local_addr().unwrap().port(), // already listening (leaving)
+            (None, None) => self.listen(),
+            (None, Some(_)) => 0,
+        };
         Ok(JoinedLink { address: "127.0.0.1".into(), port })
+    }
+    fn leaves_network(&self) -> bool {
+        self.leaves
+    }
+    fn listen(&mut self) -> Result<u16, String> {
+        Ok(LoopbackLink::listen(self))
+    }
+    fn accepts_leaving(&self) -> bool {
+        self.finds_joiner
+    }
+    fn connect_joined(&mut self, port: u16, tick: &mut dyn FnMut() -> Result<(), String>) -> Result<TcpStream, String> {
+        tick()?;
+        TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())
     }
     fn accept(&mut self, wait: Duration) -> Result<Option<TcpStream>, String> {
         let listener = self.listener.as_ref().ok_or("not listening")?;
@@ -952,4 +975,69 @@ fn cancelling_while_the_link_is_being_set_up_ends_the_transfer_cleanly() {
         canceller.join().unwrap();
     });
     assert_eq!(fs::read_dir(sandbox.dst()).unwrap().count(), 0);
+}
+
+/// A device with one Wi-Fi connection says where it will listen, leaves the
+/// shared network, and the host finds it on the private one.
+#[test]
+fn a_device_that_must_leave_its_network_still_gets_a_direct_link() {
+    for sender_leaves in [true, false] {
+        let sandbox = Sandbox::new();
+        let registry = StagingRegistry::default();
+        let files = vec![("a.bin", bytes(3 * 1024 * 1024, 1)), ("b.txt", b"b".to_vec())];
+        let job = sandbox.job(&files, true);
+        let mut options = Options::new(&registry);
+        options.link = Link::CutAfter(256 * 1024);
+        let (mut joiner, host) = (LoopbackLink::new(0, true), LoopbackLink::new(2, false));
+        joiner.leaves = true;
+        if sender_leaves {
+            (options.sender_link, options.receiver_link) = (Some(joiner), Some(host));
+        } else {
+            (options.sender_link, options.receiver_link) = (Some(host), Some(joiner));
+        }
+        let result = run(&job, &sandbox.dst(), options);
+        let sent = result.sent.unwrap_or_else(|e| panic!("sender_leaves={sender_leaves}: {e}"));
+        assert!(sent.direct && result.received.unwrap().direct, "sender_leaves={sender_leaves}");
+        sandbox.assert_received(&files);
+    }
+}
+
+#[test]
+fn a_device_never_leaves_for_a_host_that_could_not_find_it() {
+    for host_listens in [false, true] {
+        let sandbox = Sandbox::new();
+        let registry = StagingRegistry::default();
+        let files = mixed_files();
+        let job = sandbox.job(&files, true);
+        let mut options = Options::new(&registry);
+        let (mut joiner, mut host) = (LoopbackLink::new(0, true), LoopbackLink::new(2, false));
+        joiner.leaves = true;
+        host.finds_joiner = host_listens; // a listening host cannot take a leaver either
+        host.host_listens = host_listens;
+        (options.sender_link, options.receiver_link) = (Some(joiner), Some(host));
+        let result = run(&job, &sandbox.dst(), options);
+        // It stayed, so the transfer simply used the shared network.
+        assert!(!result.sent.unwrap().direct, "host_listens={host_listens}");
+        assert!(!result.received.unwrap().direct);
+        sandbox.assert_received(&files);
+    }
+}
+
+#[test]
+fn once_a_device_has_left_a_failed_link_ends_the_transfer_and_keeps_what_arrived() {
+    let sandbox = Sandbox::new();
+    let registry = StagingRegistry::default();
+    let job = sandbox.job(&[("a.bin", bytes(1024 * 1024, 1))], true);
+    let mut options = Options::new(&registry);
+    let (mut joiner, host) = (LoopbackLink::new(0, true), LoopbackLink::new(2, false));
+    joiner.leaves = true;
+    joiner.fail_join = true;
+    let (joiner_closed, host_closed) = (joiner.closed.clone(), host.closed.clone());
+    (options.sender_link, options.receiver_link) = (Some(joiner), Some(host));
+    let result = run(&job, &sandbox.dst(), options);
+    // No quiet fallback: there is no shared connection left to fall back to.
+    assert!(result.sent.unwrap_err().contains("direct link could not be set up"));
+    let failure = result.received.unwrap_err();
+    assert!(failure.resumable, "{}", failure.message);
+    assert!(joiner_closed.load(Ordering::Relaxed) && host_closed.load(Ordering::Relaxed), "links must be released so each device returns to its network");
 }

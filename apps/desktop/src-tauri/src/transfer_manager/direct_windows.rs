@@ -649,7 +649,7 @@ mod tests {
             assert!(link.connect(Some("192.168.137.24"), 0).unwrap_err().contains("no port"));
             assert!(link.connect(None, 4000).is_err());
             assert!(link.accept(short).is_err());
-            let offer = DirectOffer { ssid: "DIRECT-x".into(), passphrase: "p".into(), token: "t".into(), host_port: None };
+            let offer = DirectOffer { ssid: "DIRECT-x".into(), passphrase: "p".into(), token: "t".into(), host_port: None, leaving_ok: false };
             assert!(link.join(&offer, &mut || Ok(())).is_err());
 
             let helper = link.helper.as_ref().unwrap();

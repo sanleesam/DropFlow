@@ -290,6 +290,27 @@ Both sides send keep-alives while they work.
 5. Both sides continue the session (section 7.3 onward) on the new
    connection. Nothing more is sent on the shared one.
 
+**A joiner with one Wi-Fi connection** (a Mac, many phones) has to leave the
+shared network to join the private one, so the steps change:
+
+- The host sets `"leavingOk": true` in `DIRECT_OFFER` when it can find a
+  joined device by itself (its platform reports the joiner's address) and it
+  is not listening. A joiner that would have to leave uses the link only then;
+  otherwise it answers `DIRECT_RESULT` `FAILED: …` and stays.
+- The joiner starts listening on every interface, sends `DIRECT_JOINED`
+  `{"address": "", "port": n, "leaving": true}` **before** joining, and then
+  joins. That frame is the last one on the shared connection for both sides.
+- The host waits for a device to join (up to 75 seconds), connects to the
+  address its own platform reports for it on that port, and greets as in
+  step 4. The joiner waits 30 seconds for that connection once it has joined.
+- There is no falling back after the joiner has left: if the link cannot be
+  completed the transfer ends as a lost connection, both sides release the
+  network, and a retry continues from what was received where `resume`
+  applies.
+- A device must never do this without its owner having turned it on, and the
+  setting must say that Wi-Fi is left for the length of the transfer. A device
+  joins only a network whose name starts with `DIRECT-`.
+
 **Giving up.** At any step either side may send `DIRECT_RESULT`
 `FAILED: reason` on the shared connection; both then continue there as if
 `direct` had not been granted. Limits: the joiner waits 25 seconds for the

@@ -56,13 +56,26 @@ pub(crate) fn direct_link_enabled(app: &AppHandle) -> bool {
 /// Where the Wi-Fi Direct helper sits among the app's resources, in Windows
 /// builds that bundle it. The Nearby Link lab uses the same program, but the
 /// direct link does not need the lab to be switched on.
+#[cfg(not(target_os = "macos"))]
 const DIRECT_HELPER: &str = "nearby-lab/dropflow-nearby-windows-lab.exe";
 
 /// This device's way to set up a direct link for one session. `None` (the
 /// setting is off, or this platform or build has no way) keeps the transfer
 /// on the normal network. Dropping the link releases its network.
 pub(crate) fn direct_link(app: &AppHandle) -> Option<Box<dyn super::session::DirectLink>> {
-    if !cfg!(windows) || !direct_link_enabled(app) {
+    if !direct_link_enabled(app) {
+        return None;
+    }
+    // A Mac can only join, and only by leaving its own Wi-Fi for the transfer.
+    #[cfg(target_os = "macos")]
+    return Some(Box::new(super::direct_macos::MacJoinLink::new()?));
+    #[cfg(not(target_os = "macos"))]
+    windows_host_link(app)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn windows_host_link(app: &AppHandle) -> Option<Box<dyn super::session::DirectLink>> {
+    if !cfg!(windows) {
         return None;
     }
     let device_id = app
@@ -76,7 +89,7 @@ pub(crate) fn direct_link(app: &AppHandle) -> Option<Box<dyn super::session::Dir
 fn windows_link(helper: std::path::PathBuf, device_id: &str) -> Option<Box<dyn super::session::DirectLink>> {
     Some(Box::new(super::direct_windows::WindowsHostLink::new(helper, device_id)?))
 }
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn windows_link(_helper: std::path::PathBuf, _device_id: &str) -> Option<Box<dyn super::session::DirectLink>> {
     None
 }
