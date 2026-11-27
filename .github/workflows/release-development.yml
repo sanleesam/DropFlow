@@ -93,7 +93,14 @@ jobs:
         working-directory: ./apps/desktop
 
       - name: Run Rust Regression Tests
-        run: cargo test --locked
+        shell: bash
+        # Job logs need a sign-in; annotations do not. Name what failed.
+        run: |
+          set -o pipefail
+          if ! cargo test --locked 2>&1 | tee "$RUNNER_TEMP/rust-tests.log"; then
+            grep -E -A2 "^test .* FAILED$|panicked at|^error(\[|:)" "$RUNNER_TEMP/rust-tests.log" | head -40 | while IFS= read -r line; do echo "::error::${line}"; done
+            exit 1
+          fi
         working-directory: ./apps/desktop/src-tauri
 
       - name: Sync Application Version with Development Release

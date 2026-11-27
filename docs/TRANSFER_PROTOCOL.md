@@ -197,9 +197,9 @@ then waits for the final `TRANSFER_ACK` (`ACK`). Differences from DFP/1:
   `ERROR` (short UTF-8 text with no local paths, for example
   `not enough storage space`). The sender checks for pending input without
   blocking roughly every 100 ms while streaming, and treats those two tags at
-  the final acknowledgement the same way. After sending a notice the receiver
-  shuts down its write side and keeps reading and discarding input for up to
-  1.5 seconds or until the peer closes; closing with unread input resets the
+  the final acknowledgement the same way. After sending a notice a peer (sender or
+  receiver) shuts down its write side and keeps reading and discarding input
+  for up to 1.5 seconds or until the other side closes; closing with unread input resets the
   connection and can destroy the notice. Never send a notice in the middle of a
   frame.
 - Senders may group small frames into one socket write. Frame contents do not

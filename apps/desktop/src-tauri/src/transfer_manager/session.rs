@@ -413,7 +413,10 @@ pub fn send_session(
         Ok(summary) => Ok(summary),
         Err(mut fail) => {
             if cancel.load(Ordering::Relaxed) {
-                stream.notify_peer(&frame_bytes(FrameTag::Cancel, b""));
+                // Wait for the receiver to read it: closing with its
+                // keep-alives unread would reset the connection and could
+                // turn "cancelled" into "connection lost" on the other side.
+                stream.close_with_notice(&frame_bytes(FrameTag::Cancel, b""));
                 return Err("Transfer cancelled by user".to_string());
             }
             if negotiated.batch {
@@ -428,7 +431,7 @@ pub fn send_session(
                         }
                     }
                     FailKind::Local => {
-                        stream.notify_peer(&frame_bytes(FrameTag::Error, b"it could not read a file"));
+                        stream.close_with_notice(&frame_bytes(FrameTag::Error, b"it could not read a file"));
                     }
                     FailKind::Peer => {}
                 }

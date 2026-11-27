@@ -155,7 +155,14 @@ pub fn publish_received_file(part: &Path, target: &Path) -> Result<PathBuf, Stri
     for _ in 0..10_000 {
         match crate::safe_fs::rename_noreplace(part, &candidate) {
             Ok(()) => return Ok(candidate),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Windows reports an existing folder or read-only file at the
+            // destination as "access denied", not "already exists". Anything
+            // occupying the name is a collision; a real failure repeats on the
+            // free name that follows and is returned then.
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AlreadyExists
+                    || fs::symlink_metadata(&candidate).is_ok() =>
+            {
                 candidate = resolve_collision_path(target);
             }
             Err(error) => return Err(format!("Failed to save {}: {error}", candidate.display())),

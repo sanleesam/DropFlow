@@ -168,7 +168,9 @@ internal class RecordingOutput(private val raw: OutputStream) : OutputStream() {
 internal class FakeStorage(root: File, override val publishesInAnyOrder: Boolean = true) : ReceiveStorage {
     val staging = File(root, "staging").apply { mkdirs() }
     val published = File(root, "published").apply { mkdirs() }
-    val events: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    // Tests iterate this while worker threads add to it; a synchronized list
+    // only guards single calls, so iteration needs a copy-on-write list.
+    val events: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val created = AtomicInteger()
     private val unused = AtomicInteger()
     /** The most targets that were prepared but not yet written to or closed. */

@@ -367,9 +367,16 @@ fn new_sender_speaks_unchanged_dfp1_to_an_original_receiver() {
             let header: FileHeaderPayload = serde_json::from_slice(&header).unwrap();
             assert_eq!((header.file_index, header.resume_offset), (expected.file_index, 0));
             // Nothing may follow the header until it is acknowledged.
-            socket.set_read_timeout(Some(Duration::from_millis(150))).unwrap();
-            assert!(socket.peek(&mut [0]).is_err(), "sender did not wait for the acknowledgement");
-            socket.set_read_timeout(None).unwrap();
+            // Non-blocking, not a receive timeout: a timed-out blocking read
+            // leaves a Winsock socket in an indeterminate state.
+            thread::sleep(Duration::from_millis(150));
+            socket.set_nonblocking(true).unwrap();
+            let early = socket.peek(&mut [0]);
+            socket.set_nonblocking(false).unwrap();
+            assert!(
+                early.is_err_and(|error| error.kind() == std::io::ErrorKind::WouldBlock),
+                "sender did not wait for the acknowledgement"
+            );
             write_transfer_ack(&mut socket, &TransferAckPayload { status: "ACCEPTED".into(), resume_offset: 0 }).unwrap();
             let mut left = expected.size_bytes;
             while left > 0 {

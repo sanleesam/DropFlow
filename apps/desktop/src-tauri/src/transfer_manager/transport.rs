@@ -573,8 +573,16 @@ mod tests {
         let worker_flag = flag.clone();
         let worker = thread::spawn(move || {
             let mut stream = CancellableStream::new(&mut client, worker_flag).unwrap();
-            // Far more than the socket buffers hold; the peer never reads.
-            let error = stream.write_all(&vec![7; 64 * 1024 * 1024]).unwrap_err();
+            // The peer never reads, so writing must eventually stall. Whether
+            // the stall lands inside a write or between two is up to the OS
+            // (Windows may take a large write whole); either way nothing more
+            // can be delivered, so the goodbye must report that it was not sent.
+            let chunk = vec![7; 4 * 1024 * 1024];
+            let error = loop {
+                if let Err(error) = stream.write_all(&chunk) {
+                    break error;
+                }
+            };
             assert_eq!(error.kind(), io::ErrorKind::ConnectionAborted);
             assert!(!stream.notify_peer(b"bye"));
         });

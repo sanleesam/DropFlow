@@ -187,7 +187,7 @@ class TransferEngine(
                 progressTracker = tracker,
                 setReadTimeout = { socket.readTimeoutMs = it },
                 isCancelled = { socket.isCancelled },
-                sendNotice = { tag, payload -> socket.sendNotice(tag, payload, drain = false) }
+                sendNotice = { tag, payload -> socket.sendNotice(tag, payload, drain = true) }
             )
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
