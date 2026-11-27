@@ -63,6 +63,27 @@ both protocol modes and verified by SHA-256; a 1 GiB send killed part-way kept
 
 Still unmeasured: every pair in the device matrix below, on real hardware.
 
+## Testing the engine without a second device
+
+These exercise the real engine and catch protocol and storage bugs. They say
+nothing about Wi-Fi.
+
+- **Engine tests**: `cargo test --locked --lib session_tests` in
+  `apps/desktop/src-tauri`. Both protocol generations, every old/new pairing,
+  resume, cancellation, hostile input.
+- **Command-line peer**: `cargo build --release --example dfp_peer`, then
+  `dfp_peer receive <folder> --port N` and `dfp_peer send <host> <port> <paths>`.
+  `--legacy` makes it behave like a release from before DFP/1.1. It accepts
+  everything, so use it only on a network you control.
+- **The real desktop app, isolated**: `pnpm tauri build --debug --no-bundle`,
+  then start `target/debug/Dropflow` with `HOME` set to an empty folder. It
+  gets its own settings, history and `Downloads/DropFlow`, so your installed
+  app and files are untouched. Its log names the port to send to.
+- **Android emulator**: install the debug APK and the `InteropInstrumentation`
+  test APK (see [ANDROID_MAC_EMULATOR_TEST.md](ANDROID_MAC_EMULATOR_TEST.md)).
+  Desktop → Android goes through `adb forward tcp:<local> tcp:42100` with
+  `-e decision accept -e peerId dfp-peer`; Android → desktop uses `-e sendDir`.
+
 ## Phase 1 changes (no protocol change; old and new builds interoperate)
 
 1. **`TCP_NODELAY` on every transfer socket** (desktop `CancellableStream`,
