@@ -36,6 +36,7 @@ export default function Toast({ toast, onDismiss }: ToastProps) {
   return (
     <Glass
       size="md"
+      variant="thick"
       role={variant === "error" || variant === "warning" ? "alert" : "status"}
       className={`toast ${variant}`}
     >

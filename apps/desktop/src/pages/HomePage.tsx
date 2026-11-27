@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useSettings } from "../components/SettingsProvider";
 import { useDropFlow } from "../session/DropFlowProvider";
-import { platformLabel } from "../ui/artwork";
+import { isResumable, platformLabel } from "../ui/artwork";
 import {
   DeviceCard,
   EmptyState,
@@ -23,17 +23,18 @@ import {
 } from "../components/ui/Desktop";
 import { DiscoveryState } from "../components/ui/DiscoveryState";
 import { Glass } from "../ui/glass/LiquidGlass";
-import { formatRelativeTimestamp } from "../utils/transferSessionManager";
-
-const LIVE = ["Preparing...", "Sending...", "Receiving...", "Finishing..."];
+import {
+  formatRelativeTimestamp,
+  isLive,
+  isPending,
+  transferSubtitle,
+} from "../utils/transferSessionManager";
 
 export function HomePage() {
   const { settings } = useSettings();
   const flow = useDropFlow();
   const selected = flow.devices.find((device) => device.id === flow.selectedDeviceId);
-  const active = Object.values(flow.sessionStore.activeTransfers).filter((session) =>
-    LIVE.includes(session.status),
-  );
+  const active = Object.values(flow.sessionStore.activeTransfers).filter(isLive);
   const recent = flow.sessionStore.recentTransfers.slice(0, Math.max(0, 5 - active.length));
 
   useEffect(() => {
@@ -114,12 +115,14 @@ export function HomePage() {
                 <div className="row-title ellipsis">
                   {session.totalFiles > 1 ? `${session.totalFiles} files` : session.fileName}
                 </div>
-                <div className="row-sub ellipsis">
-                  {session.direction === "receive" ? "From" : "To"} {session.deviceName} · {session.speed}
-                </div>
-                <Progress value={session.progress} label={`Transfer of ${session.fileName}`} />
+                <div className="row-sub ellipsis num">{transferSubtitle(session)}</div>
+                <Progress
+                  value={session.progress}
+                  indeterminate={isPending(session)}
+                  label={`Transfer of ${session.fileName}`}
+                />
               </div>
-              <span className="row-trail num">{session.progress}%</span>
+              <span className="row-trail num">{isPending(session) ? "" : `${session.progress}%`}</span>
               <button
                 type="button"
                 className="icon-btn"
@@ -146,7 +149,12 @@ export function HomePage() {
                   </div>
                 </div>
                 <span className="row-trail">
-                  {failed && <span className="tag bad">Failed</span>}
+                  {failed &&
+                    (isResumable(item.error) ? (
+                      <span className="tag warn">Interrupted</span>
+                    ) : (
+                      <span className="tag bad">Failed</span>
+                    ))}
                   <span className="num">
                     {item.timestampMs ? formatRelativeTimestamp(item.timestampMs) : item.timestamp}
                   </span>
@@ -169,7 +177,8 @@ export function HomePage() {
 function SendDock() {
   const flow = useDropFlow();
   const [listOpen, setListOpen] = useState(false);
-  const anchor = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLElement>(null);
   const selected = flow.devices.find((device) => device.id === flow.selectedDeviceId);
   const count = flow.files.length;
 
@@ -179,7 +188,8 @@ function SendDock() {
   useEffect(() => {
     if (!listOpen) return;
     const close = (event: PointerEvent) => {
-      if (!anchor.current?.contains(event.target as Node)) setListOpen(false);
+      const target = event.target as Node;
+      if (!trigger.current?.contains(target) && !menu.current?.contains(target)) setListOpen(false);
     };
     const esc = (event: KeyboardEvent) => event.key === "Escape" && setListOpen(false);
     document.addEventListener("pointerdown", close);
@@ -190,32 +200,70 @@ function SendDock() {
     };
   }, [listOpen]);
 
+  const popover = listOpen && (
+    <Glass
+      ref={menu}
+      size="md"
+      variant="thick"
+      className="popover"
+      role="group"
+      aria-label="Files selected for transfer"
+    >
+      {flow.files.map((file) => (
+        <div className="row" key={file.uid}>
+          <File size={15} className="tertiary" />
+          <span className="grow ellipsis" title={file.path}>
+            {file.name}
+          </span>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={`Remove ${file.name}`}
+            onClick={() => flow.removeFile(file.uid)}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      ))}
+      <div className="row">
+        <button type="button" className="btn btn-plain" onClick={flow.browseFiles}>
+          <Plus size={14} /> Add Files
+        </button>
+        <button type="button" className="btn btn-plain" onClick={flow.browseFolder}>
+          <FolderOpen size={14} /> Add Folder
+        </button>
+      </div>
+    </Glass>
+  );
+
   return (
     <div className="dock-wrap">
-      <Glass size="md" className="dock" role="toolbar" aria-label="Send files">
-        {count === 0 ? (
-          <>
-            <button type="button" className="btn" onClick={flow.browseFiles}>
-              <Plus size={16} strokeWidth={2} />
-              Choose Files
-            </button>
-            <button
-              type="button"
-              className="btn"
-              aria-label="Choose folder"
-              title="Choose folder"
-              onClick={flow.browseFolder}
-              style={{ padding: "0 12px" }}
-            >
-              <FolderOpen size={16} />
-            </button>
-            <span className="dock-sep" aria-hidden="true" />
-            <span className="dock-hint">or drop them anywhere</span>
-          </>
-        ) : (
-          <>
-            <div ref={anchor} style={{ position: "relative" }}>
+      <div className="dock-stack">
+        {popover}
+        <Glass size="md" className="dock" role="toolbar" aria-label="Send files">
+          {count === 0 ? (
+            <>
+              <button type="button" className="btn" onClick={flow.browseFiles}>
+                <Plus size={16} strokeWidth={2} />
+                Choose Files
+              </button>
               <button
+                type="button"
+                className="btn"
+                aria-label="Choose folder"
+                title="Choose folder"
+                onClick={flow.browseFolder}
+                style={{ padding: "0 12px" }}
+              >
+                <FolderOpen size={16} />
+              </button>
+              <span className="dock-sep" aria-hidden="true" />
+              <span className="dock-hint">or drop them anywhere</span>
+            </>
+          ) : (
+            <>
+              <button
+                ref={trigger}
                 type="button"
                 className="btn"
                 aria-expanded={listOpen}
@@ -223,65 +271,37 @@ function SendDock() {
                 onClick={() => setListOpen((open) => !open)}
               >
                 <File size={15} />
-                {count === 1 ? flow.files[0].name : `${count} files`}
+                <span className="ellipsis" style={{ maxWidth: 220 }}>
+                  {count === 1 ? flow.files[0].name : `${count} items`}
+                </span>
                 <ChevronDown size={13} className="tertiary" />
               </button>
-              {listOpen && (
-                <Glass size="md" className="popover" aria-label="Files selected for transfer">
-                  {flow.files.map((file) => (
-                    <div className="row" key={file.uid}>
-                      <File size={15} className="tertiary" />
-                      <span className="grow ellipsis" title={file.name}>
-                        {file.name}
-                      </span>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        aria-label={`Remove ${file.name}`}
-                        onClick={() => flow.removeFile(file.uid)}
-                      >
-                        <X size={13} />
-                      </button>
-                    </div>
-                  ))}
-                  <div className="row">
-                    <button type="button" className="btn btn-plain" onClick={flow.browseFiles}>
-                      <Plus size={14} /> Add more
-                    </button>
-                  </div>
-                </Glass>
-              )}
-            </div>
-            <span className="dock-sep" aria-hidden="true" />
-            <select
-              id="send-device"
-              aria-label="Send to"
-              className="select"
-              value={selected?.id || ""}
-              onChange={(event) => flow.selectDevice(event.target.value)}
-              disabled={flow.devices.length === 0}
-            >
-              <option value="" disabled>
-                {flow.devices.length ? "Choose device" : "No devices"}
-              </option>
-              {flow.devices.map((device) => (
-                <option key={device.id} value={device.id}>
-                  {device.name}
+              <span className="dock-sep" aria-hidden="true" />
+              <select
+                id="send-device"
+                aria-label="Send to"
+                className="select"
+                value={selected?.id || ""}
+                onChange={(event) => flow.selectDevice(event.target.value)}
+                disabled={flow.devices.length === 0}
+              >
+                <option value="" disabled>
+                  {flow.devices.length ? "Choose device" : "No devices"}
                 </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn send"
-              disabled={!selected}
-              onClick={flow.sendSelected}
-            >
-              <ArrowUp size={16} strokeWidth={2.4} />
-              Send
-            </button>
-          </>
-        )}
-      </Glass>
+                {flow.devices.map((device) => (
+                  <option key={device.id} value={device.id}>
+                    {device.name}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="btn send" disabled={!selected} onClick={flow.sendSelected}>
+                <ArrowUp size={16} strokeWidth={2.4} />
+                Send
+              </button>
+            </>
+          )}
+        </Glass>
+      </div>
     </div>
   );
 }

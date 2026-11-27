@@ -9,7 +9,12 @@ import {
   formatHumanEta,
   formatRelativeTimestamp,
   clearHistorySessions,
+  applyPhaseEvent,
+  isLive,
+  isPending,
+  transferSubtitle,
 } from "./transferSessionManager.ts";
+import { friendlyTransferError, isResumable } from "../ui/artwork.ts";
 
 function assertEqual(actual: any, expected: any, message: string) {
   const actualStr = JSON.stringify(actual);
@@ -26,7 +31,7 @@ function assertTrue(condition: boolean, message: string) {
 }
 
 export function runLifecycleTests() {
-  console.log("Running Transfer Session Lifecycle Tests (21 Scenarios)...");
+  console.log("Running Transfer Session Lifecycle Tests (26 Scenarios)...");
 
   // ── Scenario 1: create → progress → complete ────────────────────────────────
   {
@@ -417,6 +422,66 @@ export function runLifecycleTests() {
     const store=applyCompletionEvent(createInitialSessionStore(),{sessionId:"verified",fileName:"a"});
     assertTrue(applyFailureEvent(store,{sessionId:"verified",error:"late"})===store,"Verified completion is terminal");
     assertTrue(applyProgressEvent(store,{sessionId:"verified",percentage:50})===store,"Completed progress is terminal");
+  }
+  // 22: phases between progress updates, and what the row says in each.
+  {
+    let store=startSendSession(createInitialSessionStore(),"ph","Pixel","a.mov",1);
+    assertTrue(isPending(store.activeTransfers["ph"]),"Connecting is pending");
+    assertEqual(transferSubtitle(store.activeTransfers["ph"]),"To Pixel · Connecting","Connecting line");
+    store=applyPhaseEvent(store,{sessionId:"ph",phase:"waiting"});
+    assertEqual(store.activeTransfers["ph"].status,"Waiting...","Waiting for approval");
+    assertEqual(transferSubtitle(store.activeTransfers["ph"]),"Waiting for Pixel to accept","Waiting line");
+    assertTrue(isLive(store.activeTransfers["ph"])&&isPending(store.activeTransfers["ph"]),"Waiting is live and pending");
+    store=applyPhaseEvent(store,{sessionId:"ph",phase:"transferring"});
+    assertEqual(store.activeTransfers["ph"].status,"Sending...","Accepted moves to sending");
+    store=applyProgressEvent(store,{sessionId:"ph",percentage:40,speedBytesPerSec:1048576,sessionBytesSent:40,sessionTotalBytes:100});
+    assertTrue(!isPending(store.activeTransfers["ph"]),"Sending is not pending");
+    store=applyPhaseEvent(store,{sessionId:"ph",phase:"finishing"});
+    assertEqual([store.activeTransfers["ph"].status,store.activeTransfers["ph"].progress],["Finishing...",100],"Finishing");
+    assertEqual(transferSubtitle(store.activeTransfers["ph"]),"To Pixel · Confirming","Finishing line");
+    const late=applyProgressEvent(store,{sessionId:"ph",percentage:99.9,speedBytesPerSec:5});
+    assertEqual(late.activeTransfers["ph"].status,"Finishing...","Late progress does not leave finishing");
+    assertTrue(applyPhaseEvent(store,{sessionId:"missing",phase:"waiting"})===store,"Unknown session ignored");
+    const done=applyCompletionEvent(store,{sessionId:"ph"});
+    assertTrue(applyPhaseEvent(done,{sessionId:"ph",phase:"waiting"})===done,"Phase cannot reopen a completed transfer");
+  }
+  // 23: 100% only when every byte has moved.
+  {
+    let store=startSendSession(createInitialSessionStore(),"near","Peer","big.bin",1);
+    store=applyProgressEvent(store,{sessionId:"near",percentage:99.6});
+    assertEqual([store.activeTransfers["near"].progress,store.activeTransfers["near"].status],[99,"Sending..."],"99.6% is still 99% and sending");
+    store=applyProgressEvent(store,{sessionId:"near",percentage:100});
+    assertEqual(store.activeTransfers["near"].progress,100,"Exactly 100");
+  }
+  // 24: a capped file list never changes the reported count.
+  {
+    const files=Array.from({length:200},(_,i)=>({fileIndex:i,relativePath:`IMG_${i}.jpg`,sizeBytes:1}));
+    const store=applyCompletionEvent(createInitialSessionStore(),{sessionId:"many",totalFiles:3000,files,totalSizeBytes:3000});
+    assertEqual(store.recentTransfers[0].totalFiles,3000,"Count comes from the transfer");
+    assertEqual(store.recentTransfers[0].fileName,"IMG_0.jpg (+2999 other files)","Name counts every file");
+  }
+  // 25: failures read plainly, most specific first.
+  {
+    const cases:[string,string][]=[
+      ["Connection lost: the other device closed the connection [resumable]","Connection lost. Send again to continue where it stopped."],
+      ["Transfer cancelled by recipient","The other device cancelled the transfer."],
+      ["Transfer cancelled by sender","The sender cancelled the transfer."],
+      ["Transfer cancelled by user","This transfer was cancelled."],
+      ["The other device stopped the transfer: not enough storage space","The other device is out of storage space."],
+      ["Not enough storage space on this device","This device is out of storage space."],
+      ["The other device needs a newer version of DropFlow to receive this many files at once.","The other device needs a newer DropFlow for this many files."],
+      ["'a.mov' shrank after it was selected","A file changed while it was being sent. Try again."],
+      ["Connection lost: Transfer socket timed out","The other device didn't respond in time."],
+      ["Transfer declined by recipient","The other device declined this transfer."],
+    ];
+    for (const [raw,shown] of cases) assertEqual(friendlyTransferError(raw),shown,`Message for: ${raw}`);
+    assertTrue(isResumable(cases[0][0])&&!isResumable(cases[1][0]),"Only marked failures are resumable");
+  }
+  // 26: an interrupted send stays in history with its reason.
+  {
+    let store=startSendSession(createInitialSessionStore(),"cut","Peer","a.mov",1);
+    store=applyFailureEvent(store,{sessionId:"cut",error:"Connection lost: reset [resumable]"});
+    assertTrue(isResumable(store.recentTransfers[0].error),"History keeps the resumable marker");
   }
   console.log("All Transfer Session Lifecycle & Path Propagation Tests PASSED cleanly! ✓");
 }

@@ -133,7 +133,7 @@ impl Default for UserSettings {
             receive_directory: default_dir,
             auto_accept: false,
             sound_notifications: true,
-            theme: "dark".to_string(),
+            theme: "system".to_string(),
             accent_color: "blue".to_string(),
             max_concurrent_transfers: 3,
             ask_before_overwrite: true,

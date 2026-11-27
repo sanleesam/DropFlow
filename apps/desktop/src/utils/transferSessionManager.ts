@@ -65,7 +65,15 @@ export interface ActiveTransferSession {
   totalFiles: number;
   direction: "send" | "receive";
   progress: number;
-  status: "Preparing..." | "Sending..." | "Receiving..." | "Finishing..." | "Completed" | "Cancelled" | "Failed";
+  status:
+    | "Preparing..."
+    | "Waiting..."
+    | "Sending..."
+    | "Receiving..."
+    | "Finishing..."
+    | "Completed"
+    | "Cancelled"
+    | "Failed";
   speed: string;
   timeRemaining: string;
   bytesInfo: string;
@@ -95,6 +103,60 @@ export interface SessionStateStore {
   activeTransfers: Record<string, ActiveTransferSession>;
   recentTransfers: RecentTransfer[];
   completedSessionIds: Set<string>;
+}
+
+const LIVE_STATUSES = ["Preparing...", "Waiting...", "Sending...", "Receiving...", "Finishing..."];
+
+/** Still running: not completed, failed or cancelled. */
+export function isLive(session: Pick<ActiveTransferSession, "status">): boolean {
+  return LIVE_STATUSES.includes(session.status);
+}
+
+/** Not moving bytes yet: nothing to measure. */
+export function isPending(session: Pick<ActiveTransferSession, "status">): boolean {
+  return session.status === "Preparing..." || session.status === "Waiting...";
+}
+
+/** One line under a running transfer: who, and what it is doing right now. */
+export function transferSubtitle(session: ActiveTransferSession, withEta = false): string {
+  const who = `${session.direction === "receive" ? "From" : "To"} ${session.deviceName}`;
+  if (session.status === "Waiting...") return `Waiting for ${session.deviceName} to accept`;
+  if (session.status === "Preparing...") return `${who} · Connecting`;
+  if (session.status === "Finishing...") {
+    return `${who} · ${session.direction === "receive" ? "Saving" : "Confirming"}`;
+  }
+  const parts = [who, session.speed];
+  if (withEta && session.timeRemaining && session.timeRemaining !== "Calculating...") {
+    parts.push(session.timeRemaining);
+  }
+  return parts.filter(Boolean).join(" · ");
+}
+
+export interface PhasePayload {
+  sessionId: string;
+  phase?: "waiting" | "transferring" | "finishing" | string;
+}
+
+/** Between progress updates: waiting for approval, or verifying and saving. */
+export function applyPhaseEvent(store: SessionStateStore, payload: PhasePayload): SessionStateStore {
+  const existing = store.activeTransfers[payload.sessionId];
+  if (!existing || !isLive(existing) || store.completedSessionIds.has(payload.sessionId)) return store;
+  let next: ActiveTransferSession;
+  if (payload.phase === "waiting") {
+    next = { ...existing, status: "Waiting...", speed: "", timeRemaining: "" };
+  } else if (payload.phase === "finishing") {
+    next = { ...existing, status: "Finishing...", progress: 100, speed: "", timeRemaining: "" };
+  } else if (payload.phase === "transferring") {
+    if (existing.status !== "Waiting..." && existing.status !== "Preparing...") return store;
+    next = {
+      ...existing,
+      status: existing.direction === "receive" ? "Receiving..." : "Sending...",
+      timeRemaining: "Calculating...",
+    };
+  } else {
+    return store;
+  }
+  return { ...store, activeTransfers: { ...store.activeTransfers, [payload.sessionId]: next } };
 }
 
 export function createInitialSessionStore(): SessionStateStore {
@@ -184,7 +246,8 @@ export function applyProgressEvent(
   const existing = store.activeTransfers[sessionId];
   if (store.completedSessionIds.has(sessionId) || existing?.status === "Failed" || existing?.status === "Cancelled") return store;
   const pct = payload.percentage ?? 0;
-  const roundedProgress = Math.min(100, Math.max(0, Math.round(pct)));
+  // 100% is shown only when every byte has moved; 99.6% is still 99%.
+  const roundedProgress = Math.min(100, Math.max(0, Math.floor(pct + 1e-6)));
 
   const speedBytes = payload.speedBytesPerSec ?? 0;
   const speedStr = formatSpeed(speedBytes);
@@ -220,9 +283,14 @@ export function applyProgressEvent(
     totalFiles: fileCount,
     direction,
     progress: roundedProgress,
-    status: roundedProgress >= 100 ? "Finishing..." : direction === "receive" ? "Receiving..." : "Sending...",
-    speed: speedStr,
-    timeRemaining: timeStr,
+    status:
+      roundedProgress >= 100 || existing?.status === "Finishing..."
+        ? "Finishing..."
+        : direction === "receive"
+          ? "Receiving..."
+          : "Sending...",
+    speed: roundedProgress >= 100 ? "" : speedStr,
+    timeRemaining: roundedProgress >= 100 ? "" : timeStr,
     bytesInfo: bytesStr,
     currentFileLabel: label,
     completedFiles: existing?.completedFiles ?? [],
@@ -297,9 +365,10 @@ export function applyCompletionEvent(
 
   let displayName = payload.fileName || active?.fileName || "File";
   if (totalFiles > 1 && payload.files && payload.files.length > 0) {
+    // `files` may be a capped list; the count comes from the transfer itself.
     const first = payload.files[0].relativePath;
-    const count = payload.files.length;
-    displayName = `${first} (+${count - 1} other ${count - 1 === 1 ? "file" : "files"})`;
+    const others = Math.max(totalFiles, payload.files.length) - 1;
+    displayName = `${first} (+${others} other ${others === 1 ? "file" : "files"})`;
   }
 
   const rawCompletedFiles = payload.files ?? active?.completedFiles ?? [];

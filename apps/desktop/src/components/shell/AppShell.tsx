@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   ArrowLeftRight,
+  Check,
   Folder,
   House,
   PanelLeft,
@@ -18,6 +19,7 @@ import { FilesPage } from "../../pages/FilesPage";
 import { SettingsPage } from "../../pages/SettingsPage";
 import { useDiskUsage } from "../../ui/useDisk";
 import { formatBytes } from "../../utils/formatters";
+import { isLive } from "../../utils/transferSessionManager";
 import { DeviceVisual, useGlide } from "../ui/Desktop";
 import { Glass, installGlassLight } from "../../ui/glass/LiquidGlass";
 
@@ -28,8 +30,6 @@ const NAV: { id: AppPage; label: string; icon: React.ElementType }[] = [
   { id: "files", label: "Files", icon: Folder },
   { id: "settings", label: "Settings", icon: Settings },
 ];
-
-const LIVE = ["Preparing...", "Sending...", "Receiving...", "Finishing..."];
 
 export const AppShell: React.FC = () => {
   const {
@@ -44,9 +44,7 @@ export const AppShell: React.FC = () => {
     sessionStore,
     droppedOver,
   } = useDropFlow();
-  const running = Object.values(sessionStore.activeTransfers).filter((item) =>
-    LIVE.includes(item.status),
-  ).length;
+  const running = Object.values(sessionStore.activeTransfers).filter(isLive).length;
   const disk = useDiskUsage();
   const [sidebar, setSidebar] = useState(true);
   const { container, indicator } = useGlide<HTMLElement>(page, "y");
@@ -116,14 +114,15 @@ export const AppShell: React.FC = () => {
               type="button"
               className="side-device"
               aria-pressed={selectedDeviceId === device.id}
-              title={`Send to ${device.name}`}
+              title={selectedDeviceId === device.id ? `Sending to ${device.name}` : `Send to ${device.name}`}
               onClick={() => {
                 selectDevice(device.id);
                 setPage("home");
               }}
             >
               <DeviceVisual type={device.type} small />
-              <span>{device.name}</span>
+              <span className="side-name">{device.name}</span>
+              <Check className="target-mark" size={13} strokeWidth={2.6} aria-hidden="true" />
             </button>
           ))}
           {devices.length === 0 && (

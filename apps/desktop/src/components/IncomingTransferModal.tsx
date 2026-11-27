@@ -6,6 +6,8 @@ import { File } from "lucide-react";
 import { useToast } from "./ToastProvider";
 import { formatBytes } from "../utils/formatters";
 
+const SHOWN = 5;
+
 export interface IncomingTransferRequestData {
   sessionId: string;
   senderId: string;
@@ -60,9 +62,12 @@ export const IncomingTransferModal: React.FC<IncomingTransferModalProps> = ({
   const folder = settings.receiveDirectory
     ? settings.receiveDirectory.split(/[/\\]/).filter(Boolean).pop()
     : "Downloads";
+  // The list is a sample; counts and sizes come from the request itself.
+  const more = Math.max(request.totalFiles, request.files.length) - Math.min(SHOWN, request.files.length);
   return (
     <Modal
       title="Incoming transfer"
+      quietFocus
       onEscape={isSubmitting ? undefined : () => handleRespond(false)}
     >
       <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
@@ -70,23 +75,29 @@ export const IncomingTransferModal: React.FC<IncomingTransferModalProps> = ({
         <div className="grow">
           <h2 className="ellipsis">{request.senderName}</h2>
           <p className="lede num">
-            {request.totalFiles} {request.totalFiles === 1 ? "file" : "files"} ·{" "}
+            {request.totalFiles.toLocaleString()} {request.totalFiles === 1 ? "file" : "files"} ·{" "}
             {formatBytes(request.totalSizeBytes)} · to {folder}
           </p>
         </div>
       </div>
       <div className="card list">
-        {request.files.slice(0, 6).map((file) => (
-          <div key={file.fileIndex} className="row">
-            <File size={15} className="tertiary" />
-            <span className="grow ellipsis" title={file.relativePath}>
-              {file.relativePath}
-            </span>
-            <span className="row-trail num">{formatBytes(file.sizeBytes)}</span>
+        {request.files.slice(0, SHOWN).map((file) => {
+          const cut = file.relativePath.lastIndexOf("/");
+          const name = file.relativePath.slice(cut + 1);
+          const folder = cut > 0 ? file.relativePath.slice(0, cut) : "";
+          return (
+            <div key={file.fileIndex} className="row" title={file.relativePath}>
+              <File size={15} className="tertiary" />
+              <span className="grow ellipsis">{name}</span>
+              {folder && <span className="folder ellipsis">{folder}</span>}
+              <span className="row-trail num">{formatBytes(file.sizeBytes)}</span>
+            </div>
+          );
+        })}
+        {more > 0 && (
+          <div className="row more num">
+            and {more.toLocaleString()} more
           </div>
-        ))}
-        {request.files.length > 6 && (
-          <div className="row footnote">+ {request.files.length - 6} more</div>
         )}
       </div>
       <div className="toggle-line">

@@ -11,7 +11,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 use super::protocol::FileMetadata;
-use super::receiver::{format_size, TransferCompletedPayload, TransferProgressPayload, UI_FILE_LIMIT};
+use super::receiver::{
+    emit_phase, format_size, TransferCompletedPayload, TransferProgressPayload, UI_FILE_LIMIT,
+};
 use super::session::{send_session, SendFile, SendJob, SessionEvent};
 
 /// Two selected files can share a name ("a.txt" from two folders). The
@@ -133,13 +135,24 @@ pub fn send_files_over_tcp(
         },
     );
 
+    let mut resume_granted = false;
     let mut on_event = |event: SessionEvent<'_>| match event {
-        SessionEvent::RequestSent => info!("[Sender] REQUEST_SENT"),
-        SessionEvent::Accepted(mode) => info!(
-            "[Sender] ACCEPT_RECEIVED batch={} resume={}; streaming {total_files} files",
-            mode.batch, mode.resume
-        ),
-        SessionEvent::Finishing => info!("[Sender] TRANSFER_COMPLETE_SENT"),
+        SessionEvent::RequestSent => {
+            info!("[Sender] REQUEST_SENT");
+            emit_phase(app, &session_id, "waiting");
+        }
+        SessionEvent::Accepted(mode) => {
+            info!(
+                "[Sender] ACCEPT_RECEIVED batch={} resume={}; streaming {total_files} files",
+                mode.batch, mode.resume
+            );
+            resume_granted = mode.resume;
+            emit_phase(app, &session_id, "transferring");
+        }
+        SessionEvent::Finishing => {
+            info!("[Sender] TRANSFER_COMPLETE_SENT");
+            emit_phase(app, &session_id, "finishing");
+        }
         SessionEvent::Progress(progress) => {
             let _ = app.emit(
                 "transfer-progress",
@@ -148,7 +161,14 @@ pub fn send_files_over_tcp(
         }
     };
     // The command's result is the single failure report; no failure event here.
-    let summary = send_session(&mut stream, &job, &cancel_flag, &mut on_event)?;
+    let summary = send_session(&mut stream, &job, &cancel_flag, &mut on_event).map_err(|error| {
+        // The receiver kept what arrived; sending the same files again continues.
+        if resume_granted && error.starts_with("Connection lost") {
+            format!("{error} [resumable]")
+        } else {
+            error
+        }
+    })?;
     info!("[Sender] ACK_RECEIVED");
     info!(
         "{} batch={} resumed_bytes={}",

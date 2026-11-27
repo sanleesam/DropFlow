@@ -102,6 +102,19 @@ pub struct TransferCompletedPayload {
     pub receive_dir: String,
 }
 
+/// Where a transfer is between progress updates: `waiting` for the other
+/// person, `transferring`, or `finishing` (verifying and saving).
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferPhasePayload<'a> {
+    pub session_id: &'a str,
+    pub phase: &'a str,
+}
+
+pub fn emit_phase(app: &AppHandle, session_id: &str, phase: &str) {
+    let _ = app.emit("transfer-phase", TransferPhasePayload { session_id, phase });
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferFailedPayload {
@@ -377,7 +390,10 @@ fn receive_session(
             "[Receiver] ACCEPT_SENT batch={} resume={}; streaming {} files",
             mode.batch, mode.resume, metadata.total_files
         ),
-        SessionEvent::Finishing => info!("[Receiver] FILE_COMPLETE"),
+        SessionEvent::Finishing => {
+            info!("[Receiver] FILE_COMPLETE");
+            emit_phase(app, &metadata.session_id, "finishing");
+        }
         SessionEvent::Progress(progress) => {
             let _ = app.emit(
                 "transfer-progress",

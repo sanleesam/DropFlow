@@ -8,12 +8,13 @@ import { useSettings } from "../components/SettingsProvider";
 import { useToast } from "../components/ToastProvider";
 import { IncomingTransferRequestData } from "../components/IncomingTransferModal";
 import { AppPage, Device } from "../types/device";
-import { friendlyTransferError } from "../ui/artwork";
+import { friendlyTransferError, isResumable } from "../ui/artwork";
 import {
   SessionStateStore,
   RecentTransfer,
   applyCompletionEvent,
   applyFailureEvent,
+  applyPhaseEvent,
   applyProgressEvent,
   createInitialSessionStore,
   dismissActiveSession,
@@ -89,6 +90,8 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [lostDeviceName, setLostDeviceName] = useState<string | null>(null);
   const [filesDeviceId, setFilesDeviceId] = useState("this");
   const discoveryEventRevision = useRef(0);
+  /** Sessions this person cancelled, so their own cancel is not reported as an error. */
+  const cancelledHere = useRef(new Set<string>());
   const devicesRef = useRef<Device[]>([]);
   const discoveryRestarting = useRef(false);
   const lastDiscoveryRefresh = useRef(Date.now());
@@ -137,6 +140,7 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     let unlistenProgress: (() => void) | undefined;
+    let unlistenPhase: (() => void) | undefined;
     let unlistenCompleted: (() => void) | undefined;
     let unlistenFailed: (() => void) | undefined;
     let unlistenRequest: (() => void) | undefined;
@@ -160,6 +164,9 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           });
         }
       });
+      unlistenPhase = await listen<any>("transfer-phase", (event) => {
+        setSessionStore((prev) => applyPhaseEvent(prev, event.payload));
+      });
       unlistenCompleted = await listen<any>("transfer-completed", (event) => {
         const payload = event.payload;
         setSessionStore((prev) => {
@@ -181,7 +188,11 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const payload = event.payload;
         console.error("[Transfer] failed:", payload?.error);
         setSessionStore((prev) => applyFailureEvent(prev, { sessionId: payload.sessionId, error: payload.error }));
-        addToast(friendlyTransferError(payload?.error), "error");
+        const reason = String(payload?.error || "");
+        // Cancelling here was this person's own action: no alert for it.
+        if (cancelledHere.current.delete(payload.sessionId)) return;
+        if (/cancell?ed/i.test(reason)) addToast(friendlyTransferError(reason), "info");
+        else addToast(friendlyTransferError(reason), "error");
       });
       unlistenHistory = await listen<RecentTransfer[]>("history-updated", (event) => {
         if (!Array.isArray(event.payload)) return;
@@ -201,6 +212,7 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unlistenRequest?.();
       unlistenDismiss?.();
       unlistenProgress?.();
+      unlistenPhase?.();
       unlistenCompleted?.();
       unlistenFailed?.();
       unlistenHistory?.();
@@ -432,16 +444,18 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       );
     } catch (err) {
       console.error("[DropFlow] Send failed:", err);
-      const message = friendlyTransferError(String(err));
+      const reason = String(err);
       // Keep the failed selection available for an explicit retry, preserving
       // anything the user selected while this transfer was running.
       setFiles((current) => [...files.filter((old) => !current.some((item) => item.path === old.path)), ...current]);
-      setSessionStore((prev) => applyFailureEvent(prev, { sessionId, error: String(err) }));
-      addToast(message, "error");
+      setSessionStore((prev) => applyFailureEvent(prev, { sessionId, error: reason }));
+      if (cancelledHere.current.delete(sessionId)) return;
+      addToast(friendlyTransferError(reason), isResumable(reason) ? "warning" : "error", isResumable(reason) ? 6000 : undefined);
     }
   }, [files, devices, selectedDeviceId, localUuid, settings.deviceName, addToast]);
 
   const cancelTransfer = useCallback((id: string) => {
+    cancelledHere.current.add(id);
     invoke("cancel_transfer", { sessionId: id }).catch(console.error);
     setSessionStore((prev) => applyFailureEvent(prev, { sessionId: id, error: "Transfer cancelled by user" }));
   }, []);

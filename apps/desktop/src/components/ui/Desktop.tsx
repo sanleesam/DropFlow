@@ -286,21 +286,30 @@ export function DeviceCard({
 
 /* ---------- feedback ---------- */
 
-export function Progress({ value, label }: { value: number; label: string }) {
+export function Progress({
+  value,
+  label,
+  indeterminate = false,
+}: {
+  value: number;
+  label: string;
+  /** No measurable progress yet (connecting, waiting to be accepted). */
+  indeterminate?: boolean;
+}) {
   const percent = Math.max(
     0,
     Math.min(100, Number.isFinite(value) ? value : 0),
   );
   return (
     <div
-      className="progress"
+      className={indeterminate ? "progress indeterminate" : "progress"}
       role="progressbar"
       aria-label={label}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuenow={percent}
+      aria-valuenow={indeterminate ? undefined : percent}
     >
-      <span style={{ width: `${percent}%` }} />
+      <span style={indeterminate ? undefined : { width: `${percent}%` }} />
     </div>
   );
 }
@@ -401,11 +410,14 @@ export function Modal({
   children,
   onEscape,
   alert = false,
+  quietFocus = false,
 }: {
   title: string;
   children: ReactNode;
   onEscape?: () => void;
   alert?: boolean;
+  /** Start with no control focused, so a stray Return or Space does nothing. */
+  quietFocus?: boolean;
 }) {
   const ref = useRef<HTMLElement>(null);
   const escape = useRef(onEscape);
@@ -419,7 +431,7 @@ export function Modal({
           'button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]',
         ) || [],
       );
-    (elements()[0] || dialog)?.focus();
+    (quietFocus ? dialog : elements()[0] || dialog)?.focus();
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && escape.current) {
         event.preventDefault();
@@ -459,6 +471,7 @@ export function Modal({
       <Glass
         ref={ref}
         size="lg"
+        variant="thick"
         className="sheet"
         role={alert ? "alertdialog" : "dialog"}
         aria-modal="true"

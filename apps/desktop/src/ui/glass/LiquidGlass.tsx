@@ -164,6 +164,9 @@ const SIZE_TUNING = {
   lg: { bezel: 0.12, strength: 34, blur: 6, saturation: 1.5 },
 } as const;
 
+/** Text-bearing surfaces: diffuse the backdrop well past legibility. */
+const THICK_TUNING: LensTuning = { blur: 18, saturation: 1.35 };
+
 /**
  * Attaches a live lens to `ref` while refraction is available. The CSS frost
  * stack stays underneath as the fallback, so nothing is lost when this is off.
@@ -282,8 +285,12 @@ type GlassProps = HTMLAttributes<HTMLElement> & {
   size?: keyof typeof SIZE_TUNING;
   /** Accent-tinted glass for the one primary action in a group. */
   tint?: boolean;
-  /** "clear" only over rich media; "regular" everywhere else (HIG). */
-  variant?: "regular" | "clear";
+  /**
+   * "clear" only over rich media; "regular" for controls. "thick" for
+   * surfaces that carry text over arbitrary content (sheets, menus, toasts):
+   * heavier diffusion and tint so what is behind never competes with it.
+   */
+  variant?: "regular" | "clear" | "thick";
   lens?: LensTuning;
   children?: ReactNode;
   style?: CSSProperties;
@@ -295,11 +302,12 @@ export const Glass = forwardRef<HTMLElement, GlassProps>(function Glass(
 ) {
   const ref = useRef<HTMLElement>(null);
   useImperativeHandle(forwarded, () => ref.current as HTMLElement);
-  useLiquidGlass(ref, size, lens);
+  useLiquidGlass(ref, size, variant === "thick" ? { ...THICK_TUNING, ...lens } : lens);
   const classes = [
     "glass",
     `glass-${size}`,
     variant === "clear" ? "glass-clear" : "",
+    variant === "thick" ? "glass-thick" : "",
     tint ? "glass-tint" : "",
     className || "",
   ]

@@ -31,11 +31,56 @@ const entries = [
   { name: "notes.md", path: "/Users/preview/Downloads/notes.md", isDir: false, sizeBytes: 9_200, modifiedMs: now - 4 * 86_400_000 },
 ];
 
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A send that goes through every phase the real engine reports. */
+async function simulateSend(args: { sessionId: string; filePaths: string[] }) {
+  const { sessionId, filePaths } = args;
+  const total = 640_000_000;
+  const fail = new URLSearchParams(location.search).get("send");
+  await pause(400);
+  await emit("transfer-phase", { sessionId, phase: "waiting" });
+  await pause(2600);
+  if (fail === "declined") throw "Transfer declined by recipient";
+  await emit("transfer-phase", { sessionId, phase: "transferring" });
+  for (let sent = 0; sent < total; ) {
+    sent = Math.min(total, sent + 42_000_000);
+    await emit("transfer-progress", {
+      sessionId,
+      direction: "send",
+      currentFileIndex: 0,
+      currentFileName: filePaths[0]?.split("/").pop(),
+      totalFiles: filePaths.length,
+      percentage: (sent / total) * 100,
+      speedBytesPerSec: 61_000_000 + Math.random() * 9_000_000,
+      sessionBytesSent: sent,
+      sessionTotalBytes: total,
+    });
+    await pause(260);
+    if (fail === "lost" && sent > total * 0.6) throw "Connection lost: the other device closed the connection [resumable]";
+  }
+  await emit("transfer-phase", { sessionId, phase: "finishing" });
+  await pause(1500);
+  await emit("transfer-completed", {
+    sessionId,
+    fileName: filePaths[0]?.split("/").pop(),
+    deviceName: "Target Device",
+    size: "610.4 MB",
+    totalFiles: filePaths.length,
+    totalSizeBytes: total,
+    files: filePaths.map((path, fileIndex) => ({ fileIndex, relativePath: path.split("/").pop(), sizeBytes: total / filePaths.length, finalPath: path })),
+    receiveDir: "",
+  });
+  return sessionId;
+}
+
 export function installPreview() {
   mockWindows("main");
   mockIPC(
-    (cmd) => {
+    (cmd, args) => {
       switch (cmd) {
+        case "send_files":
+          return simulateSend(args as { sessionId: string; filePaths: string[] });
         case "get_local_uuid":
           return "preview-local";
         case "get_system_device_type":
@@ -58,6 +103,12 @@ export function installPreview() {
           return "/Users/preview/Downloads";
         case "nearby_link_lab_status":
           return { phase: "off", message: "Off", ssid: null, passphrase: null };
+        case "plugin:dialog|open":
+          return [
+            "/Users/preview/Downloads/Holiday footage.mov",
+            "/Users/preview/Downloads/beach.jpg",
+            "/Users/preview/Downloads/a-very-long-file-name-that-should-truncate-gracefully-in-the-dock.pdf",
+          ];
         case "read_image_preview":
           throw new Error("no preview");
         default:

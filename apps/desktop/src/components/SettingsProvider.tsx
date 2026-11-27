@@ -27,9 +27,13 @@ export interface Settings {
   requireConfirmation: boolean;
   autoAcceptTrustedDevices: boolean;
   maxConcurrentTransfers: number;
+  /** What the person chose. `darkTheme` is the result after "system" resolves. */
+  themeMode: "system" | "light" | "dark";
   darkTheme: boolean;
   reduceAnimations: boolean;
   updateChannel: UpdateChannel;
+  /** Use the newer transfer engine with devices that support it. */
+  fastTransfer: boolean;
   trustedDevices: TrustedDevice[];
 }
 
@@ -193,6 +197,12 @@ export const ACCENT_COLOR_MAPS: Record<AccentColor, AccentStyles> = {
 
 // ─── Settings Context ─────────────────────────────────────────────────────────
 
+function systemPrefersDark(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-color-scheme: dark)").matches
+    : true;
+}
+
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -208,8 +218,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     requireConfirmation: true,
     autoAcceptTrustedDevices: false,
     maxConcurrentTransfers: 3,
-    darkTheme: true,
+    themeMode: "system",
+    darkTheme: systemPrefersDark(),
     reduceAnimations: false,
+    fastTransfer: true,
     updateChannel: "beta",
     trustedDevices: [],
   });
@@ -220,6 +232,16 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     document.documentElement.classList.toggle("reduce-animations", settings.reduceAnimations);
     document.documentElement.classList.toggle("dark", settings.darkTheme);
   }, [settings.reduceAnimations, settings.darkTheme]);
+
+  // "System" follows the OS appearance, including while the app is open.
+  useEffect(() => {
+    if (settings.themeMode !== "system" || typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => setSettings((prev) => (prev.darkTheme === query.matches ? prev : { ...prev, darkTheme: query.matches }));
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, [settings.themeMode]);
 
   // Dynamically inject CSS variables onto document root based on active accent color
   useEffect(() => {
@@ -255,7 +277,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           autoOpenCompleted: typeof rustSet.autoOpenCompleted === "boolean" ? rustSet.autoOpenCompleted : prev.autoOpenCompleted,
           autoAcceptTrustedDevices: false,
           maxConcurrentTransfers: rustSet.maxConcurrentTransfers || prev.maxConcurrentTransfers,
-          darkTheme: rustSet.theme === "dark",
+          themeMode: rustSet.theme === "dark" || rustSet.theme === "light" ? rustSet.theme : "system",
+          darkTheme: rustSet.theme === "dark" || (rustSet.theme !== "light" && systemPrefersDark()),
+          fastTransfer: typeof rustSet.fastTransfer === "boolean" ? rustSet.fastTransfer : true,
           updateChannel:
             rustSet.updateChannel === "development" || rustSet.updateChannel === "beta"
               ? rustSet.updateChannel
@@ -311,13 +335,16 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((prev) => {
       const next = { ...prev, [key]: value };
+      if (key === "themeMode") {
+        next.darkTheme = value === "dark" || (value === "system" && systemPrefersDark());
+      }
       invoke("save_settings", {
         settings: {
           deviceName: next.deviceName,
           receiveDirectory: next.receiveDirectory,
           autoAccept: !next.requireConfirmation,
           soundNotifications: soundNotifications.current,
-          theme: next.darkTheme ? "dark" : "light",
+          theme: next.themeMode,
           accentColor: next.accentColor,
           maxConcurrentTransfers: next.maxConcurrentTransfers,
           askBeforeOverwrite: next.askBeforeOverwrite,
@@ -325,6 +352,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           requireConfirmation: next.requireConfirmation,
           autoAcceptTrustedDevices: false,
           updateChannel: next.updateChannel,
+          fastTransfer: next.fastTransfer,
         },
       }).catch(console.error);
       return next;

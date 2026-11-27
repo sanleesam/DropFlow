@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useToast } from "../components/ToastProvider";
 import { useDropFlow } from "../session/DropFlowProvider";
-import { friendlyTransferError } from "../ui/artwork";
+import { friendlyTransferError, isResumable } from "../ui/artwork";
 import {
   DeviceVisual,
   EmptyState,
@@ -27,9 +27,15 @@ import {
   ActiveTransferSession,
   RecentTransfer,
   formatRelativeTimestamp,
+  isLive,
+  isPending,
+  transferSubtitle,
 } from "../utils/transferSessionManager";
 
 type Filter = "all" | "send" | "receive" | "completed" | "failed";
+
+/** Rows drawn in the detail list; the rest are summarized. */
+const LISTED = 50;
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "All" },
@@ -37,10 +43,6 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "receive", label: "Received" },
   { id: "failed", label: "Failed" },
 ];
-
-function live(session: ActiveTransferSession): boolean {
-  return ["Preparing...", "Sending...", "Receiving...", "Finishing..."].includes(session.status);
-}
 
 function fileKind(name: string): { tone: string; icon: React.ReactNode; label: string } {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
@@ -50,7 +52,8 @@ function fileKind(name: string): { tone: string; icon: React.ReactNode; label: s
     return { tone: "blue", icon: <ImageIcon size={16} />, label: "Image" };
   if (["mp4", "mov", "mkv", "avi", "webm"].includes(ext))
     return { tone: "blue", icon: <Play size={16} />, label: "Video" };
-  if (ext === "pdf") return { tone: "red", icon: <FileText size={16} />, label: "PDF" };
+  // Red is reserved for failures, so documents stay neutral.
+  if (ext === "pdf") return { tone: "", icon: <FileText size={16} />, label: "PDF" };
   return { tone: "", icon: <FileText size={16} />, label: ext && ext !== name.toLowerCase() ? ext.toUpperCase() : "File" };
 }
 
@@ -88,7 +91,7 @@ export const TransfersPage: React.FC = () => {
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<string | null>(null);
 
-  const active = Object.values(flow.sessionStore.activeTransfers).filter(live);
+  const active = Object.values(flow.sessionStore.activeTransfers).filter(isLive);
   const history = flow.sessionStore.recentTransfers;
 
   const matches = (direction: string, status: string, name: string, device: string) => {
@@ -213,8 +216,6 @@ export const TransfersPage: React.FC = () => {
                 session={selectedActive}
                 speeds={flow.speedHistory[selectedActive.id] || []}
                 onCancel={() => flow.cancelTransfer(selectedActive.id)}
-                onOpen={openPathSafe}
-                onReveal={revealSafe}
               />
             ) : selectedHistory ? (
               <HistoryDetail item={selectedHistory} onOpen={openPathSafe} onReveal={revealSafe} />
@@ -249,13 +250,14 @@ function ActiveRow({
         <div className="row-title ellipsis">
           {session.totalFiles > 1 ? `${session.totalFiles} files` : session.fileName}
         </div>
-        <div className="row-sub ellipsis num">
-          {session.direction === "receive" ? "From" : "To"} {session.deviceName} · {session.speed} ·{" "}
-          {session.timeRemaining}
-        </div>
-        <Progress value={session.progress} label={`Transfer of ${session.fileName}`} />
+        <div className="row-sub ellipsis num">{transferSubtitle(session, true)}</div>
+        <Progress
+          value={session.progress}
+          indeterminate={isPending(session)}
+          label={`Transfer of ${session.fileName}`}
+        />
       </button>
-      <span className="row-trail num">{session.progress}%</span>
+      <span className="row-trail num">{isPending(session) ? "" : `${session.progress}%`}</span>
       <button
         type="button"
         className="icon-btn"
@@ -287,7 +289,7 @@ function HistoryRow({
   const path = item.files?.find((file) => file.finalPath)?.finalPath;
   return (
     <div className="row hit has-leading" aria-selected={selected} onClick={onPick}>
-      <span className={`tile ${kind.tone}`}>{kind.icon}</span>
+      <span className={`tile ${failed ? (isResumable(item.error) ? "orange" : "red") : kind.tone}`}>{kind.icon}</span>
       <button type="button" className="grow" style={{ textAlign: "left" }} onClick={onPick}>
         <div className="row-title ellipsis">
           {item.totalFiles > 1 ? `${item.totalFiles} files` : item.fileName}
@@ -318,7 +320,12 @@ function HistoryRow({
             </button>
           </span>
         )}
-        {failed && <span className="tag bad">Failed</span>}
+        {failed &&
+          (isResumable(item.error) ? (
+            <span className="tag warn">Interrupted</span>
+          ) : (
+            <span className="tag bad">Failed</span>
+          ))}
         <span className="num">
           {item.timestampMs ? formatRelativeTimestamp(item.timestampMs) : item.timestamp}
         </span>
@@ -331,19 +338,14 @@ function ActiveDetail({
   session,
   speeds,
   onCancel,
-  onOpen,
-  onReveal,
 }: {
   session: ActiveTransferSession;
   speeds: number[];
   onCancel: () => void;
-  onOpen: (path: string) => void;
-  onReveal: (path: string) => void;
 }) {
   const flow = useDropFlow();
   const kind = fileKind(session.fileName);
   const peer = flow.devices.find((device) => device.name === session.deviceName);
-  const path = session.completedFiles.find((file) => file.finalPath)?.finalPath;
   const receiving = session.direction === "receive";
   return (
     <>
@@ -363,12 +365,16 @@ function ActiveDetail({
         </div>
       </div>
       <div>
-        <div className="big-percent">{session.progress}%</div>
+        <div className="big-percent">{isPending(session) ? "—" : `${session.progress}%`}</div>
         <div style={{ marginTop: 12 }}>
-          <Progress value={session.progress} label={`Transfer of ${session.fileName}`} />
+          <Progress
+            value={session.progress}
+            indeterminate={isPending(session)}
+            label={`Transfer of ${session.fileName}`}
+          />
         </div>
         <div className="stat-line">
-          <span>{session.speed}</span>
+          <span>{session.speed || transferSubtitle(session).split(" · ").pop()}</span>
           <span>{session.timeRemaining}</span>
         </div>
         <Spark values={speeds} />
@@ -392,30 +398,12 @@ function ActiveDetail({
         </div>
         <div>
           <dt>Status</dt>
-          <dd>{session.status.replace("...", "")}</dd>
+          <dd>{session.status === "Waiting..." ? "Waiting to be accepted" : session.status.replace("...", "")}</dd>
         </div>
       </dl>
-      {session.status === "Failed" && (
-        <p className="footnote" style={{ color: "var(--red)" }}>
-          {friendlyTransferError(session.error)}
-        </p>
-      )}
       <div className="inspector-actions">
-        {path && (
-          <>
-            <button type="button" className="btn btn-primary" onClick={() => onOpen(path)}>
-              Open
-            </button>
-            <button type="button" className="btn" onClick={() => onReveal(path)}>
-              Show
-            </button>
-          </>
-        )}
         <button type="button" className="btn btn-destructive" onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="button" className="btn" onClick={() => flow.dismissTransfer(session.id)}>
-          Dismiss
+          Cancel Transfer
         </button>
       </div>
     </>
@@ -438,7 +426,15 @@ function HistoryDetail({
       <div className="inspector-hero">
         <span className={`tile lg ${kind.tone}`}>{kind.icon}</span>
         <h2>{item.totalFiles > 1 ? `${item.totalFiles} files` : item.fileName}</h2>
-        <span className={failed ? "tag bad" : "tag ok"}>{failed ? "Failed" : "Delivered"}</span>
+        <span className={failed ? (isResumable(item.error) ? "tag warn" : "tag bad") : "tag ok"}>
+          {failed
+            ? isResumable(item.error)
+              ? "Interrupted"
+              : "Failed"
+            : item.direction === "receive"
+              ? "Received"
+              : "Sent"}
+        </span>
       </div>
       <dl className="facts">
         <div>
@@ -463,13 +459,13 @@ function HistoryDetail({
         </div>
       </dl>
       {failed && (
-        <p className="footnote" style={{ color: "var(--red)" }}>
+        <p className="footnote" style={{ color: isResumable(item.error) ? "var(--orange)" : "var(--red)" }}>
           {friendlyTransferError(item.error)}
         </p>
       )}
       {(item.files || []).length > 0 && (
         <div className="list" style={{ padding: 0 }}>
-          {(item.files || []).map((file, index) => (
+          {(item.files || []).slice(0, LISTED).map((file, index) => (
             <div key={`${file.relativePath}-${index}`} className="row" style={{ minHeight: 36, padding: "4px 0" }}>
               <span className="grow ellipsis" title={file.relativePath}>
                 {file.relativePath}
@@ -491,6 +487,11 @@ function HistoryDetail({
               )}
             </div>
           ))}
+          {(item.totalFiles || 0) > Math.min(LISTED, (item.files || []).length) && (
+            <div className="row footnote num" style={{ minHeight: 30, padding: "4px 0" }}>
+              and {((item.totalFiles || 0) - Math.min(LISTED, (item.files || []).length)).toLocaleString()} more
+            </div>
+          )}
         </div>
       )}
     </>

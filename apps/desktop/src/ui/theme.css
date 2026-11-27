@@ -293,6 +293,27 @@ html.dark .glass[data-lit] {
 html.dark .glass-clear {
   background: rgb(0 0 0 / 0.18);
 }
+/* Sheets, menus and toasts hold text over anything, so they read first. */
+/* Entrance animations use `backwards`, never `both`: an animation that keeps
+   holding opacity after it ends makes the element a backdrop root in Chromium,
+   and glass inside it stops blurring what is behind. */
+.glass-thick {
+  --glass-blur: 36px;
+  --glass-sat: 180%;
+  background: rgb(250 250 252 / 0.8);
+}
+.glass-thick[data-lens="on"] {
+  background: rgb(250 250 252 / 0.74);
+}
+html.dark .glass-thick {
+  background: rgb(42 42 46 / 0.8);
+}
+html.dark .glass-thick[data-lens="on"] {
+  background: rgb(42 42 46 / 0.72);
+}
+html[data-glass="solid"] .glass.glass-thick {
+  background: var(--glass-solid);
+}
 .glass-tint {
   background: color-mix(in srgb, var(--accent) 88%, transparent);
   color: #fff;
@@ -476,13 +497,24 @@ html.dark .side-lens {
 .side-device:hover {
   background: var(--fill-2);
 }
-.side-device[aria-pressed="true"] {
-  background: var(--accent-fill);
-}
-.side-device span {
+.side-device .side-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The send target gets a quiet mark; the page selection stays the only fill. */
+.side-device .target-mark {
+  flex: none;
+  color: var(--accent);
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 160ms var(--ease-out), transform var(--spring-snappy-ms) var(--spring-snappy);
+}
+.side-device[aria-pressed="true"] .target-mark {
+  opacity: 1;
+  transform: none;
 }
 .side-empty {
   padding: 4px 10px;
@@ -547,14 +579,14 @@ html.dark .side-lens {
 }
 .page-body {
   max-width: 1080px;
-  animation: page-in var(--spring-smooth-ms) var(--spring-smooth) both;
+  animation: page-in var(--spring-smooth-ms) var(--spring-smooth) backwards;
 }
 .page-fill {
   position: absolute;
   inset: calc(var(--toolbar-h) + 6px) 12px 12px 12px;
   display: flex;
   gap: 12px;
-  animation: page-in var(--spring-smooth-ms) var(--spring-smooth) both;
+  animation: page-in var(--spring-smooth-ms) var(--spring-smooth) backwards;
 }
 @keyframes page-in {
   from {
@@ -1001,6 +1033,29 @@ html:not(.dark) .glass .seg-thumb {
   transition: width 400ms var(--ease-out);
 }
 
+.progress.indeterminate > span {
+  width: 32%;
+  transition: none;
+  background: linear-gradient(90deg, transparent, var(--accent) 45%, var(--accent) 55%, transparent);
+  animation: progress-sweep 1.5s var(--ease-in-out, ease-in-out) infinite;
+}
+@keyframes progress-sweep {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(330%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress.indeterminate > span {
+    animation: none;
+    width: 100%;
+    opacity: 0.35;
+    background: var(--accent);
+  }
+}
+
 .dot {
   width: 7px;
   height: 7px;
@@ -1312,7 +1367,7 @@ html.dark .avatar.local {
   background: var(--accent);
   color: #fff;
   box-shadow: 0 0 0 2px var(--window);
-  animation: pop var(--spring-bouncy-ms) var(--spring-bouncy) both;
+  animation: pop var(--spring-bouncy-ms) var(--spring-bouncy) backwards;
 }
 @keyframes pop {
   from {
@@ -1513,7 +1568,7 @@ html.dark .avatar.local {
   height: 52px;
   padding: 6px;
   max-width: calc(100% - 40px);
-  animation: dock-in var(--spring-bouncy-ms) var(--spring-bouncy) both;
+  animation: dock-in var(--spring-bouncy-ms) var(--spring-bouncy) backwards;
 }
 @keyframes dock-in {
   from {
@@ -1564,6 +1619,15 @@ html.dark .avatar.local {
   background-color: var(--fill-2);
 }
 
+/* Holds the dock and the menu above it as siblings: glass nested in glass
+   cannot blur the page (the outer glass confines its backdrop). */
+.dock-stack {
+  position: relative;
+  pointer-events: none;
+}
+.dock-stack > * {
+  pointer-events: auto;
+}
 .popover {
   position: absolute;
   z-index: 8;
@@ -1575,7 +1639,7 @@ html.dark .avatar.local {
   padding: 6px;
   border-radius: 20px;
   transform-origin: 20% 100%;
-  animation: popover-in var(--spring-snappy-ms) var(--spring-snappy) both;
+  animation: popover-in var(--spring-snappy-ms) var(--spring-snappy) backwards;
 }
 @keyframes popover-in {
   from {
@@ -1598,7 +1662,7 @@ html.dark .avatar.local {
   background: rgb(var(--accent-rgb) / 0.07);
   box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / 0.7);
   pointer-events: none;
-  animation: fade-scale var(--spring-snappy-ms) var(--spring-snappy) both;
+  animation: fade-scale var(--spring-snappy-ms) var(--spring-snappy) backwards;
 }
 .drop-overlay .glass {
   display: flex;
@@ -1792,11 +1856,41 @@ html.dark .avatar.local {
   overflow: auto;
   padding: 6px;
 }
+.browser {
+  container-type: inline-size;
+}
 .table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12.5px;
+}
+.table th:nth-child(2) {
+  width: 84px;
+}
+.table th:nth-child(3) {
+  width: 132px;
+}
+.table th:nth-child(4) {
+  width: 148px;
+}
+.table th,
+.table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Narrow panes drop Kind first, then shorten the last column. */
+@container (max-width: 480px) {
+  .table th:nth-child(3),
+  .table td:nth-child(3) {
+    display: none;
+  }
+}
+@container (max-width: 400px) {
+  .table th:nth-child(4) {
+    width: 112px;
+  }
 }
 .table th {
   position: sticky;
@@ -1822,7 +1916,6 @@ html.dark .table th {
 }
 .table td:first-child {
   color: var(--label);
-  max-width: 340px;
 }
 .table td:first-child,
 .table th:first-child {
@@ -1853,6 +1946,7 @@ html.dark .table tbody tr:nth-child(even) td {
   min-width: 0;
 }
 .name-cell svg {
+  flex: none;
   color: var(--accent);
 }
 .name-cell span {
@@ -1895,6 +1989,14 @@ html.dark .table tbody tr:nth-child(even) td {
 .icon-grid small {
   font-size: 11px;
   color: var(--label-2);
+}
+@media (max-width: 1240px) {
+  .source-list {
+    width: 176px;
+  }
+  .file-inspector {
+    width: 236px !important;
+  }
 }
 .file-inspector {
   width: 272px;
@@ -1982,7 +2084,7 @@ html.dark .table tbody tr:nth-child(even) td {
   display: grid;
   gap: 8px;
   transform-origin: 90% 0;
-  animation: popover-in var(--spring-snappy-ms) var(--spring-snappy) both;
+  animation: popover-in var(--spring-snappy-ms) var(--spring-snappy) backwards;
 }
 
 /* ---------- Settings ---------- */
@@ -2074,14 +2176,17 @@ details.notes pre {
   display: grid;
   place-items: center;
   background: rgb(0 0 0 / 0.16);
-  animation: fade 220ms ease both;
+  /* Fade the colour, not the element. In Chromium an ancestor with an opacity
+     effect confines backdrop-filter to itself, so the sheet's glass would stop
+     blurring the window behind it. */
+  animation: scrim-in 220ms ease backwards;
 }
 html.dark .scrim {
   background: rgb(0 0 0 / 0.38);
 }
-@keyframes fade {
+@keyframes scrim-in {
   from {
-    opacity: 0;
+    background-color: transparent;
   }
 }
 .sheet {
@@ -2090,13 +2195,16 @@ html.dark .scrim {
   overflow: auto;
   padding: 22px;
   border-radius: var(--r-window);
-  animation: sheet-in var(--spring-snappy-ms) var(--spring-snappy) both;
+  animation: sheet-in var(--spring-snappy-ms) var(--spring-snappy) backwards;
 }
 @keyframes sheet-in {
   from {
     opacity: 0;
     transform: scale(0.92) translateY(8px);
   }
+}
+.sheet:focus {
+  outline: none;
 }
 .sheet h2 {
   font: 700 17px/1.25 var(--font-display);
@@ -2118,8 +2226,31 @@ html.dark .scrim {
 .sheet .list {
   padding: 4px;
   margin-top: 16px;
-  max-height: 172px;
+  max-height: 212px;
   overflow: auto;
+}
+.sheet .eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--label-2);
+  margin-bottom: 12px;
+}
+.sheet .row .grow {
+  flex: 1 1 auto;
+}
+.sheet .row .folder {
+  flex: 0 20 auto; /* the folder gives way long before the name does */
+  min-width: 0;
+  max-width: 42%;
+  color: var(--label-3);
+  font-size: 11.5px;
+  direction: rtl; /* keep the nearest folder visible when it is cut */
+  text-align: left;
+}
+.sheet .row.more {
+  justify-content: center;
+  color: var(--label-2);
+  font-size: 12px;
 }
 .sheet .row {
   min-height: 34px;
@@ -2157,7 +2288,7 @@ html.dark .scrim {
   padding: 6px 6px 6px 16px;
   font-size: 13px;
   font-weight: 500;
-  animation: toast-in var(--spring-bouncy-ms) var(--spring-bouncy) both;
+  animation: toast-in var(--spring-bouncy-ms) var(--spring-bouncy) backwards;
 }
 .toast > svg {
   color: var(--accent);

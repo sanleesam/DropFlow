@@ -388,7 +388,7 @@ export const FilesPage: React.FC = () => {
               </button>
             </ToolGroup>
             {making && (
-              <Glass size="md" className="new-menu">
+              <Glass size="md" variant="thick" className="new-menu">
                 <input
                   className="field"
                   aria-label="New folder name"

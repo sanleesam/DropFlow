@@ -164,6 +164,15 @@ export function SettingsPage() {
                 />
               </SettingRow>
             </FormGroup>
+            <FormGroup title="Speed" footer="Sends many files without pausing between them, and continues after a dropped connection.">
+              <SettingRow title="Faster transfers" description="With devices that support it.">
+                <Switch
+                  label="Faster transfers"
+                  checked={settings.fastTransfer}
+                  onChange={() => updateSetting("fastTransfer", !settings.fastTransfer)}
+                />
+              </SettingRow>
+            </FormGroup>
             <FormGroup
               title="Security"
               footer={
@@ -229,9 +238,10 @@ export function SettingsPage() {
                 <Segmented
                   glass={false}
                   label="Theme"
-                  value={settings.darkTheme ? "dark" : "light"}
-                  onChange={(value) => updateSetting("darkTheme", value === "dark")}
+                  value={settings.themeMode}
+                  onChange={(value) => updateSetting("themeMode", value)}
                   options={[
+                    { id: "system", label: "Auto" },
                     { id: "light", label: "Light" },
                     { id: "dark", label: "Dark" },
                   ]}

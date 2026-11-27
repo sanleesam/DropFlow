@@ -20,12 +20,30 @@ export function greeting(date = new Date()): string {
   return "Good evening";
 }
 
+/** The engine marks a failed send that the receiver can continue. */
+export function isResumable(raw: string | undefined): boolean {
+  return (raw || "").includes("[resumable]");
+}
+
 export function friendlyTransferError(raw: string | undefined): string {
   const text = (raw || "").toLowerCase();
   if (!text) return "The transfer didn't finish.";
+  if (text.includes("[resumable]")) return "Connection lost. Send again to continue where it stopped.";
   if (text.includes("busy") || text.includes("transfer limit")) return "The other device is busy. Try again shortly.";
+  if (text.includes("cancelled by recipient")) return "The other device cancelled the transfer.";
+  if (text.includes("cancelled by sender")) return "The sender cancelled the transfer.";
   if (text.includes("cancel")) return "This transfer was cancelled.";
   if (text.includes("declin") || text.includes("reject")) return "The other device declined this transfer.";
+  if (text.includes("newer version")) return "The other device needs a newer DropFlow for this many files.";
+  if (text.includes("too many files")) return "Too many files for one transfer. Send them in smaller groups.";
+  if (text.includes("storage space")) {
+    return text.includes("on this device")
+      ? "This device is out of storage space."
+      : "The other device is out of storage space.";
+  }
+  if (text.includes("shrank") || text.includes("grew")) return "A file changed while it was being sent. Try again.";
+  if (text.includes("no regular files")) return "That folder has nothing to send.";
+  if (text.includes("stopped the transfer")) return "The other device stopped the transfer.";
   if (text.includes("timeout") || text.includes("timed out")) return "The other device didn't respond in time.";
   if (
     text.includes("connection") ||
