@@ -411,6 +411,8 @@ fn receive_session(
         .map_err(|failure| {
             if failure.resumable {
                 info!("[Receiver] Interrupted; kept the received part for a retry");
+                // The window labels this "Interrupted" rather than "Failed".
+                return format!("{} [kept]", failure.message);
             }
             failure.message
         })?;

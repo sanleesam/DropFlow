@@ -464,6 +464,7 @@ export function runLifecycleTests() {
   {
     const cases:[string,string][]=[
       ["Connection lost: the other device closed the connection [resumable]","Connection lost. Send again to continue where it stopped."],
+      ["Connection lost: Transfer socket timed out [kept]","Connection lost. It continues when the sender tries again."],
       ["Transfer cancelled by recipient","The other device cancelled the transfer."],
       ["Transfer cancelled by sender","The sender cancelled the transfer."],
       ["Transfer cancelled by user","This transfer was cancelled."],
@@ -475,7 +476,7 @@ export function runLifecycleTests() {
       ["Transfer declined by recipient","The other device declined this transfer."],
     ];
     for (const [raw,shown] of cases) assertEqual(friendlyTransferError(raw),shown,`Message for: ${raw}`);
-    assertTrue(isResumable(cases[0][0])&&!isResumable(cases[1][0]),"Only marked failures are resumable");
+    assertTrue(isResumable(cases[0][0])&&isResumable(cases[1][0])&&!isResumable(cases[2][0]),"Only marked failures are resumable");
   }
   // 26: an interrupted send stays in history with its reason.
   {

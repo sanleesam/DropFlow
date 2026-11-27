@@ -22,13 +22,15 @@ export function greeting(date = new Date()): string {
 
 /** The engine marks a failed send that the receiver can continue. */
 export function isResumable(raw: string | undefined): boolean {
-  return (raw || "").includes("[resumable]");
+  const text = raw || "";
+  return text.includes("[resumable]") || text.includes("[kept]");
 }
 
 export function friendlyTransferError(raw: string | undefined): string {
   const text = (raw || "").toLowerCase();
   if (!text) return "The transfer didn't finish.";
   if (text.includes("[resumable]")) return "Connection lost. Send again to continue where it stopped.";
+  if (text.includes("[kept]")) return "Connection lost. It continues when the sender tries again.";
   if (text.includes("busy") || text.includes("transfer limit")) return "The other device is busy. Try again shortly.";
   if (text.includes("cancelled by recipient")) return "The other device cancelled the transfer.";
   if (text.includes("cancelled by sender")) return "The sender cancelled the transfer.";

@@ -192,7 +192,7 @@ export const DropFlowProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         // Cancelling here was this person's own action: no alert for it.
         if (cancelledHere.current.delete(payload.sessionId)) return;
         if (/cancell?ed/i.test(reason)) addToast(friendlyTransferError(reason), "info");
-        else addToast(friendlyTransferError(reason), "error");
+        else addToast(friendlyTransferError(reason), isResumable(reason) ? "warning" : "error", isResumable(reason) ? 6000 : undefined);
       });
       unlistenHistory = await listen<RecentTransfer[]>("history-updated", (event) => {
         if (!Array.isArray(event.payload)) return;
