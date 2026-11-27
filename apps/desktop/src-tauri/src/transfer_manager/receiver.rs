@@ -386,6 +386,11 @@ fn receive_session(
     };
     let mut on_event = |event: SessionEvent<'_>| match event {
         SessionEvent::RequestSent => {}
+        SessionEvent::Linking => emit_phase(app, &metadata.session_id, "linking"),
+        SessionEvent::Linked => {
+            info!("[Receiver] DIRECT_LINK up");
+            emit_phase(app, &metadata.session_id, "direct");
+        }
         SessionEvent::Accepted(mode) => info!(
             "[Receiver] ACCEPT_SENT batch={} resume={}; streaming {} files",
             mode.batch, mode.resume, metadata.total_files
@@ -407,7 +412,7 @@ fn receive_session(
             );
         }
     };
-    let summary = super::session::receive_session(stream, metadata, &setup, &cancel_flag, &mut on_event)
+    let summary = super::session::receive_session(stream, metadata, &setup, &cancel_flag, None, &mut on_event)
         .map_err(|failure| {
             if failure.resumable {
                 info!("[Receiver] Interrupted; kept the received part for a retry");

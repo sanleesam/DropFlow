@@ -119,6 +119,10 @@ pub struct UserSettings {
     /// support it. Off falls back to the original exchange everywhere.
     #[serde(default = "default_true")]
     pub fast_transfer: bool,
+    /// Experimental and off by default: move a transfer onto a private Wi-Fi
+    /// link between the two devices when both can set one up.
+    #[serde(default)]
+    pub direct_link: bool,
 }
 
 impl Default for UserSettings {
@@ -142,6 +146,7 @@ impl Default for UserSettings {
             auto_accept_trusted_devices: false,
             update_channel: UpdateChannel::Beta,
             fast_transfer: true,
+            direct_link: false,
         }
     }
 }

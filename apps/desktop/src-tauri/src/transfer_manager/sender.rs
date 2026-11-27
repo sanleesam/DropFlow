@@ -149,6 +149,11 @@ pub fn send_files_over_tcp(
             resume_granted = mode.resume;
             emit_phase(app, &session_id, "transferring");
         }
+        SessionEvent::Linking => emit_phase(app, &session_id, "linking"),
+        SessionEvent::Linked => {
+            info!("[Sender] DIRECT_LINK up");
+            emit_phase(app, &session_id, "direct");
+        }
         SessionEvent::Finishing => {
             info!("[Sender] TRANSFER_COMPLETE_SENT");
             emit_phase(app, &session_id, "finishing");
@@ -161,7 +166,7 @@ pub fn send_files_over_tcp(
         }
     };
     // The command's result is the single failure report; no failure event here.
-    let summary = send_session(&mut stream, &job, &cancel_flag, &mut on_event).map_err(|error| {
+    let summary = send_session(&mut stream, &job, &cancel_flag, None, &mut on_event).map_err(|error| {
         // The receiver kept what arrived; sending the same files again continues.
         if resume_granted && error.starts_with("Connection lost") {
             format!("{error} [resumable]")

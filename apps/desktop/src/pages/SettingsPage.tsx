@@ -173,6 +173,21 @@ export function SettingsPage() {
                 />
               </SettingRow>
             </FormGroup>
+            {platformLabel() === "Windows" && (
+              <FormGroup
+                title="Direct Link"
+                footer="Experimental. This PC creates a private Wi-Fi link and an Android phone joins it, so the router no longer limits the speed. Falls back to the normal network if the link can't be set up."
+              >
+                <SettingRow title="Use a direct link" description="Needs Faster transfers and a Wi-Fi Direct adapter.">
+                  <Switch
+                    label="Use a direct link"
+                    checked={settings.directLink && settings.fastTransfer}
+                    disabled={!settings.fastTransfer}
+                    onChange={() => updateSetting("directLink", !settings.directLink)}
+                  />
+                </SettingRow>
+              </FormGroup>
+            )}
             <FormGroup
               title="Security"
               footer={

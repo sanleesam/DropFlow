@@ -163,6 +163,9 @@ struct Options<'a> {
     cancel_receiver_at: Option<u64>,
     /// Cancel the receiver once every file is verified and saving has begun.
     cancel_receiver_while_saving: bool,
+    /// What each side can do for a direct link (none by default).
+    sender_link: Option<LoopbackLink>,
+    receiver_link: Option<LoopbackLink>,
 }
 
 impl<'a> Options<'a> {
@@ -174,12 +177,16 @@ impl<'a> Options<'a> {
             cancel_sender_at: None,
             cancel_receiver_at: None,
             cancel_receiver_while_saving: false,
+            sender_link: None,
+            receiver_link: None,
         }
     }
 }
 
-fn run(job: &SendJob, dst: &Path, options: Options<'_>) -> Run {
+fn run(job: &SendJob, dst: &Path, mut options: Options<'_>) -> Run {
     let (mut sender_socket, mut receiver_socket) = connect(options.link);
+    let mut sender_link = options.sender_link.take();
+    let mut receiver_link = options.receiver_link.take();
     thread::scope(|scope| {
         let receiver = scope.spawn(|| {
             let cancel = Arc::new(AtomicBool::new(false));
@@ -194,7 +201,8 @@ fn run(job: &SendJob, dst: &Path, options: Options<'_>) -> Run {
             };
             let limit = options.cancel_receiver_at;
             let while_saving = options.cancel_receiver_while_saving;
-            receive_session(&mut stream, &meta, &setup, &cancel, &mut |event| {
+            let link = receiver_link.as_mut().map(|link| link as &mut dyn DirectLink);
+            receive_session(&mut stream, &meta, &setup, &cancel, link, &mut |event| {
                 if while_saving && matches!(event, SessionEvent::Finishing) {
                     cancel.store(true, Ordering::Relaxed);
                 }
@@ -209,7 +217,8 @@ fn run(job: &SendJob, dst: &Path, options: Options<'_>) -> Run {
         let sent = {
             let mut stream = CancellableStream::new(&mut sender_socket, cancel.clone()).unwrap();
             let limit = options.cancel_sender_at;
-            send_session(&mut stream, job, &cancel, &mut |event| {
+            let link = sender_link.as_mut().map(|link| link as &mut dyn DirectLink);
+            send_session(&mut stream, job, &cancel, link, &mut |event| {
                 if let (SessionEvent::Progress(progress), Some(limit)) = (&event, limit) {
                     if progress.session_bytes >= limit {
                         cancel.store(true, Ordering::Relaxed);
@@ -220,6 +229,87 @@ fn run(job: &SendJob, dst: &Path, options: Options<'_>) -> Run {
         let _ = sender_socket.shutdown(Shutdown::Both);
         Run { sent, received: receiver.join().unwrap() }
     })
+}
+
+/// A "private network" that is really loopback: it exercises everything
+/// about a direct link except the radio.
+struct LoopbackLink {
+    caps: DirectCaps,
+    /// As host: accept the joiner's connection (otherwise the joiner listens).
+    host_listens: bool,
+    fail_host: bool,
+    fail_join: bool,
+    listener: Option<TcpListener>,
+    closed: Arc<AtomicBool>,
+}
+
+impl LoopbackLink {
+    fn new(host_rank: u8, join: bool) -> Self {
+        Self {
+            caps: DirectCaps { host_rank, join },
+            host_listens: false,
+            fail_host: false,
+            fail_join: false,
+            listener: None,
+            closed: Arc::new(AtomicBool::new(false)),
+        }
+    }
+    fn listen(&mut self) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        self.listener = Some(listener);
+        port
+    }
+}
+
+impl DirectLink for LoopbackLink {
+    fn caps(&self) -> DirectCaps {
+        self.caps
+    }
+    fn host(&mut self, tick: &mut dyn FnMut() -> Result<(), String>) -> Result<HostedLink, String> {
+        tick()?;
+        if self.fail_host {
+            return Err("this adapter cannot create a network".into());
+        }
+        let listen_port = self.host_listens.then(|| self.listen());
+        Ok(HostedLink { ssid: "DIRECT-DF-test".into(), passphrase: "secret".into(), listen_port })
+    }
+    fn join(&mut self, offer: &DirectOffer, tick: &mut dyn FnMut() -> Result<(), String>) -> Result<JoinedLink, String> {
+        tick()?;
+        assert_eq!((offer.ssid.as_str(), offer.passphrase.as_str()), ("DIRECT-DF-test", "secret"));
+        if self.fail_join {
+            return Err("could not join the network".into());
+        }
+        let port = if offer.host_port.is_none() { self.listen() } else { 0 };
+        Ok(JoinedLink { address: "127.0.0.1".into(), port })
+    }
+    fn accept(&mut self, wait: Duration) -> Result<Option<TcpStream>, String> {
+        let listener = self.listener.as_ref().ok_or("not listening")?;
+        let deadline = Instant::now() + wait;
+        loop {
+            match listener.accept() {
+                Ok((socket, _)) => {
+                    socket.set_nonblocking(false).unwrap();
+                    return Ok(Some(socket));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return Ok(None);
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+    }
+    fn connect(&mut self, address: Option<&str>, port: u16) -> Result<TcpStream, String> {
+        TcpStream::connect((address.unwrap_or("127.0.0.1"), port)).map_err(|e| e.to_string())
+    }
+    fn close(&mut self) {
+        self.listener = None;
+        self.closed.store(true, Ordering::Relaxed);
+    }
 }
 
 fn mixed_files() -> Vec<(&'static str, Vec<u8>)> {
@@ -294,7 +384,7 @@ fn new_receiver_speaks_unchanged_dfp1_to_an_original_sender() {
             perform_incoming_handshake(&mut stream).unwrap();
             let meta = read_transfer_request(&mut stream).unwrap();
             let setup = ReceiveSetup { receive_dir: &dst, allow_features: true, staging: &registry };
-            receive_session(&mut stream, &meta, &setup, &cancel, &mut |_| {})
+            receive_session(&mut stream, &meta, &setup, &cancel, None, &mut |_| {})
         });
 
         let frame = |socket: &mut TcpStream| {
@@ -395,7 +485,7 @@ fn new_sender_speaks_unchanged_dfp1_to_an_original_receiver() {
     });
     let cancel = Arc::new(AtomicBool::new(false));
     let mut stream = CancellableStream::new(&mut sender_socket, cancel.clone()).unwrap();
-    let summary = send_session(&mut stream, &job, &cancel, &mut |_| {}).unwrap();
+    let summary = send_session(&mut stream, &job, &cancel, None, &mut |_| {}).unwrap();
     assert_eq!(summary.negotiated, Negotiated::default());
     peer.join().unwrap();
 }
@@ -442,7 +532,7 @@ fn a_peer_that_predates_large_manifests_gets_a_clear_explanation() {
         });
         let cancel = Arc::new(AtomicBool::new(false));
         let mut stream = CancellableStream::new(&mut sender_socket, cancel.clone()).unwrap();
-        let error = send_session(&mut stream, &job, &cancel, &mut |_| {}).unwrap_err();
+        let error = send_session(&mut stream, &job, &cancel, None, &mut |_| {}).unwrap_err();
         assert!(error.contains("newer version"), "{count} files: {error}");
         peer.join().unwrap();
     }
@@ -704,4 +794,162 @@ fn many_small_files_over_a_slow_link() {
             row[0].as_secs_f64() / row[1].as_secs_f64()
         );
     }
+}
+
+/// The shared network here drops after 256 KiB, far less than the files, so
+/// the transfer can only succeed if the data really moved to the direct link.
+#[test]
+fn a_transfer_moves_onto_the_direct_link_in_every_arrangement() {
+    // (sender rank, sender joins, receiver rank, receiver joins, host listens)
+    for (s_rank, s_join, r_rank, r_join, host_listens) in [
+        (0, true, 2, false, false), // computer receives and hosts; the phone listens
+        (0, true, 2, false, true),  // same, but the host accepts the connection
+        (2, false, 0, true, false), // computer sends and hosts
+        (2, false, 0, true, true),
+        (1, true, 2, true, false),  // both can host: the higher rank does
+        (2, true, 1, true, true),
+    ] {
+        let sandbox = Sandbox::new();
+        let registry = StagingRegistry::default();
+        let files = vec![("a.bin", bytes(3 * 1024 * 1024, 1)), ("dir/b.bin", bytes(1024 * 1024, 2)), ("c.txt", b"c".to_vec())];
+        let job = sandbox.job(&files, true);
+        let mut options = Options::new(&registry);
+        options.link = Link::CutAfter(256 * 1024);
+        let mut sender = LoopbackLink::new(s_rank, s_join);
+        let mut receiver = LoopbackLink::new(r_rank, r_join);
+        sender.host_listens = host_listens;
+        receiver.host_listens = host_listens;
+        options.sender_link = Some(sender);
+        options.receiver_link = Some(receiver);
+        let case = format!("sender({s_rank},{s_join}) receiver({r_rank},{r_join}) host_listens={host_listens}");
+        let result = run(&job, &sandbox.dst(), options);
+        let sent = result.sent.unwrap_or_else(|e| panic!("{case}: {e}"));
+        let received = result.received.unwrap_or_else(|e| panic!("{case}: {}", e.message));
+        assert!(sent.direct && received.direct, "{case}");
+        assert_eq!(sent.bytes_sent, job.total_bytes(), "{case}");
+        sandbox.assert_received(&files);
+    }
+}
+
+#[test]
+fn a_link_that_cannot_be_set_up_leaves_the_transfer_on_the_shared_network() {
+    for (fail_host, fail_join) in [(true, false), (false, true)] {
+        for host_listens in [false, true] {
+            let sandbox = Sandbox::new();
+            let registry = StagingRegistry::default();
+            let files = mixed_files();
+            let job = sandbox.job(&files, true);
+            let mut options = Options::new(&registry);
+            let sender = LoopbackLink::new(0, true);
+            let mut receiver = LoopbackLink::new(2, false);
+            let (sender_closed, receiver_closed) = (sender.closed.clone(), receiver.closed.clone());
+            let mut sender = sender;
+            receiver.fail_host = fail_host;
+            receiver.host_listens = host_listens;
+            sender.fail_join = fail_join;
+            options.sender_link = Some(sender);
+            options.receiver_link = Some(receiver);
+            let result = run(&job, &sandbox.dst(), options);
+            let case = format!("fail_host={fail_host} fail_join={fail_join} host_listens={host_listens}");
+            let sent = result.sent.unwrap_or_else(|e| panic!("{case}: {e}"));
+            let received = result.received.unwrap_or_else(|e| panic!("{case}: {}", e.message));
+            assert!(!sent.direct && !received.direct, "{case}");
+            assert!(sender_closed.load(Ordering::Relaxed) && receiver_closed.load(Ordering::Relaxed), "{case}: link not released");
+            sandbox.assert_received(&files);
+        }
+    }
+}
+
+#[test]
+fn a_direct_link_is_only_used_when_both_devices_offer_a_workable_pairing() {
+    // Only one side has a link; two joiners; two hosts that cannot join.
+    for (sender, receiver) in [
+        (Some((0, true)), None),
+        (None, Some((2, false))),
+        (Some((0, true)), Some((0, true))),
+        (Some((2, false)), Some((2, false))),
+    ] {
+        let sandbox = Sandbox::new();
+        let registry = StagingRegistry::default();
+        let files = mixed_files();
+        let job = sandbox.job(&files, true);
+        let mut options = Options::new(&registry);
+        options.sender_link = sender.map(|(rank, join)| LoopbackLink::new(rank, join));
+        options.receiver_link = receiver.map(|(rank, join)| LoopbackLink::new(rank, join));
+        let result = run(&job, &sandbox.dst(), options);
+        assert!(!result.sent.unwrap().direct);
+        assert!(!result.received.unwrap().direct);
+        sandbox.assert_received(&files);
+    }
+}
+
+#[test]
+fn an_original_peer_is_never_asked_for_a_direct_link() {
+    for (offer, allow) in [(false, true), (true, false)] {
+        let sandbox = Sandbox::new();
+        let registry = StagingRegistry::default();
+        let files = mixed_files();
+        let job = sandbox.job(&files, offer);
+        let mut options = Options::new(&registry);
+        options.allow_features = allow;
+        options.sender_link = Some(LoopbackLink::new(0, true));
+        options.receiver_link = Some(LoopbackLink::new(2, false));
+        let result = run(&job, &sandbox.dst(), options);
+        assert!(!result.sent.unwrap().direct);
+        assert_eq!(result.received.unwrap().negotiated, Negotiated::default());
+        sandbox.assert_received(&files);
+    }
+}
+
+#[test]
+fn cancelling_while_the_link_is_being_set_up_ends_the_transfer_cleanly() {
+    struct Slow(LoopbackLink, Arc<AtomicBool>);
+    impl DirectLink for Slow {
+        fn caps(&self) -> DirectCaps { self.0.caps }
+        fn host(&mut self, tick: &mut dyn FnMut() -> Result<(), String>) -> Result<HostedLink, String> {
+            // A radio that takes its time; the person cancels meanwhile.
+            self.1.store(true, Ordering::Relaxed);
+            loop {
+                tick()?;
+                thread::sleep(Duration::from_millis(20));
+            }
+        }
+        fn join(&mut self, offer: &DirectOffer, tick: &mut dyn FnMut() -> Result<(), String>) -> Result<JoinedLink, String> { self.0.join(offer, tick) }
+        fn accept(&mut self, wait: Duration) -> Result<Option<TcpStream>, String> { self.0.accept(wait) }
+        fn connect(&mut self, address: Option<&str>, port: u16) -> Result<TcpStream, String> { self.0.connect(address, port) }
+        fn close(&mut self) { self.0.close() }
+    }
+    let sandbox = Sandbox::new();
+    let registry = StagingRegistry::default();
+    let job = sandbox.job(&[("a.bin", bytes(1024 * 1024, 1))], true);
+    let (mut sender_socket, mut receiver_socket) = connect(Link::Direct);
+    let dst = sandbox.dst();
+    let hosting = Arc::new(AtomicBool::new(false));
+    let receiver_cancel = Arc::new(AtomicBool::new(false));
+    thread::scope(|scope| {
+        let receiver = scope.spawn(|| {
+            let mut stream = CancellableStream::new(&mut receiver_socket, receiver_cancel.clone()).unwrap();
+            perform_incoming_handshake(&mut stream).unwrap();
+            let meta = read_transfer_request(&mut stream).unwrap();
+            let setup = ReceiveSetup { receive_dir: &dst, allow_features: true, staging: &registry };
+            let mut link = Slow(LoopbackLink::new(2, false), hosting.clone());
+            receive_session(&mut stream, &meta, &setup, &receiver_cancel, Some(&mut link), &mut |_| {})
+        });
+        let canceller = scope.spawn(|| {
+            while !hosting.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(10));
+            }
+            thread::sleep(Duration::from_millis(100));
+            receiver_cancel.store(true, Ordering::Relaxed);
+        });
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut stream = CancellableStream::new(&mut sender_socket, cancel.clone()).unwrap();
+        let mut link = LoopbackLink::new(0, true);
+        let error = send_session(&mut stream, &job, &cancel, Some(&mut link), &mut |_| {}).unwrap_err();
+        assert!(error.contains("cancelled"), "{error}");
+        let failure = receiver.join().unwrap().unwrap_err();
+        assert_eq!((failure.message.as_str(), failure.resumable), ("Transfer cancelled", false));
+        canceller.join().unwrap();
+    });
+    assert_eq!(fs::read_dir(sandbox.dst()).unwrap().count(), 0);
 }

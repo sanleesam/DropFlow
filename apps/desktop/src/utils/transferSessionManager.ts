@@ -68,6 +68,7 @@ export interface ActiveTransferSession {
   status:
     | "Preparing..."
     | "Waiting..."
+    | "Linking..."
     | "Sending..."
     | "Receiving..."
     | "Finishing..."
@@ -81,6 +82,8 @@ export interface ActiveTransferSession {
   completedFiles: FileMetadataPayload[];
   receiveDir?: string;
   error?: string;
+  /** The data is moving over a private link between the two devices. */
+  direct?: boolean;
 }
 
 export interface RecentTransfer {
@@ -105,7 +108,7 @@ export interface SessionStateStore {
   completedSessionIds: Set<string>;
 }
 
-const LIVE_STATUSES = ["Preparing...", "Waiting...", "Sending...", "Receiving...", "Finishing..."];
+const LIVE_STATUSES = ["Preparing...", "Waiting...", "Linking...", "Sending...", "Receiving...", "Finishing..."];
 
 /** Still running: not completed, failed or cancelled. */
 export function isLive(session: Pick<ActiveTransferSession, "status">): boolean {
@@ -114,7 +117,7 @@ export function isLive(session: Pick<ActiveTransferSession, "status">): boolean 
 
 /** Not moving bytes yet: nothing to measure. */
 export function isPending(session: Pick<ActiveTransferSession, "status">): boolean {
-  return session.status === "Preparing..." || session.status === "Waiting...";
+  return session.status === "Preparing..." || session.status === "Waiting..." || session.status === "Linking...";
 }
 
 /** One line under a running transfer: who, and what it is doing right now. */
@@ -122,10 +125,11 @@ export function transferSubtitle(session: ActiveTransferSession, withEta = false
   const who = `${session.direction === "receive" ? "From" : "To"} ${session.deviceName}`;
   if (session.status === "Waiting...") return `Waiting for ${session.deviceName} to accept`;
   if (session.status === "Preparing...") return `${who} · Connecting`;
+  if (session.status === "Linking...") return `${who} · Setting up a direct link`;
   if (session.status === "Finishing...") {
     return `${who} · ${session.direction === "receive" ? "Saving" : "Confirming"}`;
   }
-  const parts = [who, session.speed];
+  const parts = [who, session.direct ? "Direct link" : "", session.speed];
   if (withEta && session.timeRemaining && session.timeRemaining !== "Calculating...") {
     parts.push(session.timeRemaining);
   }
@@ -134,7 +138,7 @@ export function transferSubtitle(session: ActiveTransferSession, withEta = false
 
 export interface PhasePayload {
   sessionId: string;
-  phase?: "waiting" | "transferring" | "finishing" | string;
+  phase?: "waiting" | "linking" | "direct" | "transferring" | "finishing" | string;
 }
 
 /** Between progress updates: waiting for approval, or verifying and saving. */
@@ -146,6 +150,15 @@ export function applyPhaseEvent(store: SessionStateStore, payload: PhasePayload)
     next = { ...existing, status: "Waiting...", speed: "", timeRemaining: "" };
   } else if (payload.phase === "finishing") {
     next = { ...existing, status: "Finishing...", progress: 100, speed: "", timeRemaining: "" };
+  } else if (payload.phase === "linking") {
+    next = { ...existing, status: "Linking...", speed: "", timeRemaining: "" };
+  } else if (payload.phase === "direct") {
+    next = {
+      ...existing,
+      direct: true,
+      status: existing.direction === "receive" ? "Receiving..." : "Sending...",
+      timeRemaining: "Calculating...",
+    };
   } else if (payload.phase === "transferring") {
     if (existing.status !== "Waiting..." && existing.status !== "Preparing...") return store;
     next = {
@@ -294,6 +307,7 @@ export function applyProgressEvent(
     bytesInfo: bytesStr,
     currentFileLabel: label,
     completedFiles: existing?.completedFiles ?? [],
+    direct: existing?.direct,
   };
 
   return {

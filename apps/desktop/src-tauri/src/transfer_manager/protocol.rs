@@ -30,6 +30,12 @@ pub enum FrameTag {
     TransferRequestLarge = 0x0C,
     /// DFP/1.1: what the receiver already holds from an interrupted attempt.
     ResumeState = 0x0D,
+    /// DFP/1.1 direct link: the private network to join.
+    DirectOffer = 0x0E,
+    /// DFP/1.1 direct link: where the joiner can be reached on that network.
+    DirectJoined = 0x0F,
+    /// DFP/1.1 direct link: `OK`, a token, or `FAILED: reason`.
+    DirectResult = 0x10,
 }
 
 impl TryFrom<u8> for FrameTag {
@@ -50,6 +56,9 @@ impl TryFrom<u8> for FrameTag {
             0x0B => Ok(FrameTag::Error),
             0x0C => Ok(FrameTag::TransferRequestLarge),
             0x0D => Ok(FrameTag::ResumeState),
+            0x0E => Ok(FrameTag::DirectOffer),
+            0x0F => Ok(FrameTag::DirectJoined),
+            0x10 => Ok(FrameTag::DirectResult),
             _ => Err(format!("Unknown frame tag: 0x{value:02X}")),
         }
     }
@@ -87,6 +96,43 @@ pub struct TransferMetadata {
     /// DFP/1.1 capabilities the sender offers. Older peers ignore the field.
     #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "bounded_features")]
     pub features: Vec<String>,
+    /// What this device can do for a direct link. Sent with the `direct` feature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct: Option<DirectCaps>,
+}
+
+/// A device's part in a direct link: it can create the private network
+/// (`host_rank` above zero; the higher rank hosts), join one, or both.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectCaps {
+    #[serde(default)]
+    pub host_rank: u8,
+    #[serde(default)]
+    pub join: bool,
+}
+
+/// Sent by the host over the existing connection once its network is up.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectOffer {
+    pub ssid: String,
+    pub passphrase: String,
+    /// Proves that whoever connects on the new network received this offer.
+    pub token: String,
+    /// Set when the host accepts the connection itself; the joiner then
+    /// connects to the network's gateway on this port. Otherwise the joiner
+    /// listens and answers with `DirectJoined`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_port: Option<u16>,
+}
+
+/// Sent by a listening joiner over the existing connection.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectJoined {
+    pub address: String,
+    pub port: u16,
 }
 
 pub const MAX_FEATURES: usize = 16;
@@ -124,6 +170,10 @@ pub struct AcceptPayload {
     pub status: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub features: Vec<String>,
+    /// With the `direct` feature: which side creates the network,
+    /// `sender` or `receiver`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_host: Option<String>,
 }
 
 /// One staged file the receiver can continue: index, bytes held, and the
@@ -495,6 +545,7 @@ mod tests {
                 },
             ],
             features: Vec::new(),
+            direct: None,
         };
 
         let mut buffer = Vec::new();
@@ -595,6 +646,7 @@ mod tests {
             total_size_bytes: 1,
             files: vec![FileMetadata { final_path: String::new(), ..file(0) }],
             features: vec!["batch".into()],
+            direct: None,
         };
         let mut small = Vec::new();
         assert!(!write_transfer_request(&mut small, &meta).unwrap());

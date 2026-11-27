@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
@@ -20,16 +21,19 @@ use sha2::{Digest, Sha256};
 
 use super::bulk_io::{ChunkReader, ChunkWriter};
 use super::protocol::{
-    encode_frame_header, parse_frame_header, perform_outgoing_handshake, read_payload,
-    write_frame, write_response_frame, write_transfer_ack, write_transfer_request, AcceptPayload,
-    FileCompletePayload, FileHeaderPayload, FileMetadata, FrameTag, ResumeEntry,
-    TransferAckPayload, TransferMetadata, FRAME_HEADER_SIZE, MAX_LARGE_METADATA_SIZE,
+    encode_frame_header, parse_frame_header, perform_incoming_handshake,
+    perform_outgoing_handshake, read_frame_header, read_payload, write_frame,
+    write_response_frame, write_transfer_ack, write_transfer_request, AcceptPayload, DirectCaps,
+    DirectJoined, DirectOffer, FileCompletePayload, FileHeaderPayload, FileMetadata, FrameTag,
+    ResumeEntry, TransferAckPayload, TransferMetadata, FRAME_HEADER_SIZE,
+    MAX_LARGE_METADATA_SIZE,
 };
 use super::security::{publish_received_file, sanitize_relative_path, verify_safe_target_path};
 use super::transport::CancellableStream;
 
 pub const FEATURE_BATCH: &str = "batch";
 pub const FEATURE_RESUME: &str = "resume";
+pub const FEATURE_DIRECT: &str = "direct";
 
 const STREAM_TIMEOUT: Duration = Duration::from_secs(15);
 /// The recipient has 60 seconds to decide; do not time out before that.
@@ -67,6 +71,10 @@ pub enum SessionEvent<'a> {
     /// Sender only: the request is out and the recipient is deciding.
     RequestSent,
     Accepted(Negotiated),
+    /// The two devices are setting up a private link between them.
+    Linking,
+    /// The transfer moved onto the private link.
+    Linked,
     Progress(Progress<'a>),
     /// Every byte has moved; the receiver is saving and confirming.
     Finishing,
@@ -297,6 +305,7 @@ impl SendJob {
             } else {
                 Vec::new()
             },
+            direct: None,
         }
     }
 }
@@ -309,6 +318,8 @@ pub struct SendSummary {
     /// Bytes the receiver already had from an earlier attempt.
     pub bytes_resumed: u64,
     pub elapsed: Duration,
+    /// The data travelled over a private link instead of the shared network.
+    pub direct: bool,
 }
 
 /// Groups outgoing frames. In batch mode small frames share a write; in the
@@ -373,7 +384,9 @@ fn read_reply(stream: &mut CancellableStream<'_>) -> Result<(FrameTag, Vec<u8>),
     loop {
         let (tag, len) = read_header(stream)?;
         let payload = read_body(stream, len)?;
-        if tag != FrameTag::Heartbeat {
+        // A late "the direct link failed" may still be on its way after both
+        // sides have already settled on this connection.
+        if !matches!(tag, FrameTag::Heartbeat | FrameTag::DirectResult) {
             return Ok((tag, payload));
         }
     }
@@ -395,7 +408,7 @@ fn check_peer(stream: &mut CancellableStream<'_>) -> Result<(), Fail> {
     while stream.pending_input().map_err(Fail::network)? {
         let (tag, len) = read_header(stream)?;
         let payload = read_body(stream, len)?;
-        if tag != FrameTag::Heartbeat {
+        if !matches!(tag, FrameTag::Heartbeat | FrameTag::DirectResult) {
             return Err(notice_to_fail(tag, &payload));
         }
     }
@@ -406,52 +419,96 @@ pub fn send_session(
     stream: &mut CancellableStream<'_>,
     job: &SendJob,
     cancel: &AtomicBool,
+    link: Option<&mut dyn DirectLink>,
     on_event: &mut dyn FnMut(SessionEvent<'_>),
 ) -> Result<SendSummary, String> {
     let mut negotiated = Negotiated::default();
-    match send_inner(stream, job, cancel, on_event, &mut negotiated) {
-        Ok(summary) => Ok(summary),
-        Err(mut fail) => {
-            if cancel.load(Ordering::Relaxed) {
-                // Wait for the receiver to read it: closing with its
-                // keep-alives unread would reset the connection and could
-                // turn "cancelled" into "connection lost" on the other side.
-                stream.close_with_notice(&frame_bytes(FrameTag::Cancel, b""));
-                return Err("Transfer cancelled by user".to_string());
-            }
-            if negotiated.batch {
-                match fail.kind {
-                    // The receiver may have said why just before it closed.
-                    FailKind::Network => {
-                        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
-                        if let Ok((tag, payload)) = read_reply(stream) {
-                            if matches!(tag, FrameTag::Cancel | FrameTag::Error) {
-                                fail = notice_to_fail(tag, &payload);
-                            }
-                        }
-                    }
-                    FailKind::Local => {
-                        stream.close_with_notice(&frame_bytes(FrameTag::Error, b"it could not read a file"));
-                    }
-                    FailKind::Peer => {}
-                }
-            }
-            Err(fail.message)
+    let caps = link.as_deref().map(|link| link.caps());
+    let opened = match send_open(stream, job, cancel, caps, on_event, &mut negotiated) {
+        Ok(opened) => opened,
+        Err(fail) => return Err(send_failure(stream, fail, cancel, negotiated)),
+    };
+    let mut direct = None;
+    if let (Some(i_host), Some(link)) = (opened.i_host, link) {
+        on_event(SessionEvent::Linking);
+        match link_phase(stream, link, i_host, cancel) {
+            Ok(socket) => direct = socket,
+            Err(fail) => return Err(send_failure(stream, fail, cancel, negotiated)),
         }
+    }
+    match direct.as_mut() {
+        Some(socket) => {
+            on_event(SessionEvent::Linked);
+            let mut fast = CancellableStream::new(socket, stream.cancellation())
+                .map_err(|e| format!("Failed to use the direct link: {e}"))?;
+            send_stream(&mut fast, job, opened.resume, cancel, on_event, negotiated, true)
+                .map_err(|fail| send_failure(&mut fast, fail, cancel, negotiated))
+        }
+        None => send_stream(stream, job, opened.resume, cancel, on_event, negotiated, false)
+            .map_err(|fail| send_failure(stream, fail, cancel, negotiated)),
     }
 }
 
-fn send_inner(
+/// Ends a failed send on whichever connection is in use: tells the receiver
+/// why when that is possible, and picks up the receiver's own reason.
+fn send_failure(
+    stream: &mut CancellableStream<'_>,
+    mut fail: Fail,
+    cancel: &AtomicBool,
+    negotiated: Negotiated,
+) -> String {
+    if cancel.load(Ordering::Relaxed) {
+        // Wait for the receiver to read it: closing with its keep-alives
+        // unread would reset the connection and could turn "cancelled" into
+        // "connection lost" on the other side.
+        stream.close_with_notice(&frame_bytes(FrameTag::Cancel, b""));
+        return "Transfer cancelled by user".to_string();
+    }
+    if negotiated.batch {
+        match fail.kind {
+            // The receiver may have said why just before it closed.
+            FailKind::Network => {
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                if let Ok((tag, payload)) = read_reply(stream) {
+                    if matches!(tag, FrameTag::Cancel | FrameTag::Error) {
+                        fail = notice_to_fail(tag, &payload);
+                    }
+                }
+            }
+            FailKind::Local => {
+                stream.close_with_notice(&frame_bytes(FrameTag::Error, b"it could not read a file"));
+            }
+            FailKind::Peer => {}
+        }
+    }
+    fail.message
+}
+
+struct SendOpened {
+    resume: HashMap<u32, ResumeEntry>,
+    /// `Some(true)`: a direct link was agreed and this device creates it.
+    i_host: Option<bool>,
+}
+
+/// Everything up to the receiver's answer: handshake, request, approval.
+fn send_open(
     stream: &mut CancellableStream<'_>,
     job: &SendJob,
     cancel: &AtomicBool,
+    caps: Option<DirectCaps>,
     on_event: &mut dyn FnMut(SessionEvent<'_>),
     negotiated: &mut Negotiated,
-) -> Result<SendSummary, Fail> {
+) -> Result<SendOpened, Fail> {
     if job.files.is_empty() {
         return Err(Fail::local("No files selected for transfer"));
     }
-    let meta = job.metadata();
+    check_cancel(cancel)?;
+    let mut meta = job.metadata();
+    let caps = caps.filter(|caps| job.offer_features && (caps.host_rank > 0 || caps.join));
+    if let Some(caps) = caps {
+        meta.features.push(FEATURE_DIRECT.to_string());
+        meta.direct = Some(caps);
+    }
     super::validation::validate_request(&meta).map_err(Fail::local)?;
     let timeouts = |stream: &mut CancellableStream<'_>, read: Duration| {
         stream
@@ -503,6 +560,13 @@ fn send_inner(
     let granted = |name: &str| job.offer_features && accept.features.iter().any(|f| f == name);
     negotiated.batch = granted(FEATURE_BATCH);
     negotiated.resume = negotiated.batch && granted(FEATURE_RESUME);
+    // The receiver names the host; accept only a role this device offered.
+    let i_host = match (caps, accept.direct_host.as_deref()) {
+        (Some(caps), Some("sender")) if caps.host_rank > 0 => Some(true),
+        (Some(caps), Some("receiver")) if caps.join => Some(false),
+        _ => None,
+    }
+    .filter(|_| negotiated.batch && granted(FEATURE_DIRECT));
 
     let mut resume: HashMap<u32, ResumeEntry> = HashMap::new();
     if negotiated.resume {
@@ -515,8 +579,24 @@ fn send_inner(
     }
     on_event(SessionEvent::Accepted(*negotiated));
     timeouts(stream, STREAM_TIMEOUT)?;
+    Ok(SendOpened { resume, i_host })
+}
 
-    let total = meta.total_size_bytes;
+/// The files themselves, on whichever connection was chosen.
+fn send_stream(
+    stream: &mut CancellableStream<'_>,
+    job: &SendJob,
+    mut resume: HashMap<u32, ResumeEntry>,
+    cancel: &AtomicBool,
+    on_event: &mut dyn FnMut(SessionEvent<'_>),
+    negotiated: Negotiated,
+    direct: bool,
+) -> Result<SendSummary, Fail> {
+    stream
+        .set_read_timeout(Some(STREAM_TIMEOUT))
+        .and_then(|_| stream.set_write_timeout(Some(STREAM_TIMEOUT)))
+        .map_err(|e| Fail::local(format!("Failed to set stream timeout: {e}")))?;
+    let total = job.total_bytes();
     let mut meter = Meter::new();
     let mut out = Outbox::new(negotiated.batch);
     let mut chunks = ChunkWriter::new();
@@ -686,11 +766,310 @@ fn send_inner(
     let _ = stream.shutdown(std::net::Shutdown::Write);
 
     Ok(SendSummary {
-        negotiated: *negotiated,
+        negotiated,
         bytes_sent: meter.moved(),
         bytes_resumed: resumed,
         elapsed: meter.elapsed(),
+        direct,
     })
+}
+
+// ─── Direct link ─────────────────────────────────────────────────────────────
+//
+// Two devices on a slow shared network can agree to move the data onto a
+// private Wi-Fi link between them. The existing connection carries only the
+// arrangement; if the link does not come up, the transfer simply stays where
+// it is. The platform part (creating or joining the network) is behind
+// `DirectLink`, so this file never touches a radio.
+
+/// How long the joiner waits for the host's offer.
+const LINK_OFFER_TIMEOUT: Duration = Duration::from_secs(25);
+/// How long the host waits for the joiner; a phone may ask its owner first.
+const LINK_JOIN_TIMEOUT: Duration = Duration::from_secs(75);
+/// How long a listening joiner waits for the host's connection.
+const LINK_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+const LINK_GREETING_TIMEOUT: Duration = Duration::from_secs(5);
+const LINK_POLL: Duration = Duration::from_millis(250);
+
+/// The network a host created.
+pub struct HostedLink {
+    pub ssid: String,
+    pub passphrase: String,
+    /// Set when the host accepts the joiner's connection itself.
+    pub listen_port: Option<u16>,
+}
+
+/// Where a joiner listens on the network it joined. Ignored when the host
+/// listens instead.
+pub struct JoinedLink {
+    pub address: String,
+    pub port: u16,
+}
+
+/// The platform side of a direct link. Every method may take seconds; the
+/// long ones call `tick` at least once a second, and stop when it fails.
+pub trait DirectLink {
+    fn caps(&self) -> DirectCaps;
+    /// Creates the private network.
+    fn host(&mut self, tick: &mut dyn FnMut() -> Result<(), String>) -> Result<HostedLink, String>;
+    /// Joins the network in `offer`, without giving up the current one where
+    /// the platform allows that.
+    fn join(
+        &mut self,
+        offer: &DirectOffer,
+        tick: &mut dyn FnMut() -> Result<(), String>,
+    ) -> Result<JoinedLink, String>;
+    /// Waits up to `wait` for the other device to connect on the private network.
+    fn accept(&mut self, wait: Duration) -> Result<Option<TcpStream>, String>;
+    /// Connects over the private network: to `address`, or to the network's
+    /// gateway (the host) when it is `None`.
+    fn connect(&mut self, address: Option<&str>, port: u16) -> Result<TcpStream, String>;
+    /// Releases the network. Called once the session no longer needs it.
+    fn close(&mut self);
+}
+
+/// Which side creates the network. The higher rank hosts; the other must be
+/// able to join.
+fn choose_host(sender: DirectCaps, receiver: DirectCaps) -> Option<&'static str> {
+    let sender_can = sender.host_rank > 0 && receiver.join;
+    let receiver_can = receiver.host_rank > 0 && sender.join;
+    match (sender_can, receiver_can) {
+        (true, true) if sender.host_rank > receiver.host_rank => Some("sender"),
+        (_, true) => Some("receiver"),
+        (true, false) => Some("sender"),
+        (false, false) => None,
+    }
+}
+
+/// Proves both ends of the new connection belong to this session.
+fn greet(mut socket: TcpStream, token: &str, outgoing: bool) -> Result<TcpStream, String> {
+    let timeouts = socket
+        .set_read_timeout(Some(LINK_GREETING_TIMEOUT))
+        .and_then(|_| socket.set_write_timeout(Some(LINK_GREETING_TIMEOUT)))
+        .and_then(|_| socket.set_nodelay(true));
+    timeouts.map_err(|e| e.to_string())?;
+    let read = |socket: &mut TcpStream| -> Result<Vec<u8>, String> {
+        let (tag, len) = read_frame_header(socket)?;
+        if tag != FrameTag::DirectResult {
+            return Err(format!("unexpected {tag:?} on the direct link"));
+        }
+        read_payload(socket, len)
+    };
+    if outgoing {
+        perform_outgoing_handshake(&mut socket)?;
+        write_frame(&mut socket, FrameTag::DirectResult, token.as_bytes())?;
+        if read(&mut socket)? != b"OK" {
+            return Err("the other device did not confirm the direct link".into());
+        }
+    } else {
+        perform_incoming_handshake(&mut socket)?;
+        if read(&mut socket)? != token.as_bytes() {
+            return Err("an unknown device connected on the direct link".into());
+        }
+        write_frame(&mut socket, FrameTag::DirectResult, b"OK")?;
+    }
+    Ok(socket)
+}
+
+/// Tries to move the session onto a private link. `Ok(None)` means the
+/// transfer stays on the current connection; only a failure of that
+/// connection, or a cancel, is an error.
+fn link_phase(
+    stream: &mut CancellableStream<'_>,
+    link: &mut dyn DirectLink,
+    i_host: bool,
+    cancel: &AtomicBool,
+) -> Result<Option<TcpStream>, Fail> {
+    let outcome = LinkSetup { stream, link, cancel, last_write: Instant::now() }.run(i_host);
+    if !matches!(outcome, Ok(Some(_))) {
+        link.close();
+    }
+    outcome
+}
+
+struct LinkSetup<'s, 'a> {
+    stream: &'s mut CancellableStream<'a>,
+    link: &'s mut dyn DirectLink,
+    cancel: &'s AtomicBool,
+    last_write: Instant,
+}
+
+impl LinkSetup<'_, '_> {
+    fn run(&mut self, i_host: bool) -> Result<Option<TcpStream>, Fail> {
+        self.stream
+            .set_read_timeout(Some(STREAM_TIMEOUT))
+            .map_err(|e| Fail::local(e.to_string()))?;
+        if i_host {
+            self.host()
+        } else {
+            self.join()
+        }
+    }
+
+    /// Gives up on the link, tells the other side, and stays on this connection.
+    fn stay(&mut self, reason: &str) -> Result<Option<TcpStream>, Fail> {
+        check_cancel(self.cancel)?;
+        log::info!("[Link] Staying on the shared network: {reason}");
+        let text: String = format!("FAILED: {reason}").chars().take(200).collect();
+        write_frame(self.stream, FrameTag::DirectResult, text.as_bytes()).map_err(Fail::network)?;
+        Ok(None)
+    }
+
+    fn keep_alive(&mut self) -> Result<(), Fail> {
+        check_cancel(self.cancel)?;
+        if self.last_write.elapsed() >= HEARTBEAT_EVERY {
+            write_frame(self.stream, FrameTag::Heartbeat, b"").map_err(Fail::network)?;
+            self.last_write = Instant::now();
+        }
+        Ok(())
+    }
+
+    /// One frame from the other side on the existing connection, if any.
+    fn pending(&mut self) -> Result<Option<(FrameTag, Vec<u8>)>, Fail> {
+        if !self.stream.pending_input().map_err(Fail::network)? {
+            return Ok(None);
+        }
+        self.next().map(Some)
+    }
+
+    fn next(&mut self) -> Result<(FrameTag, Vec<u8>), Fail> {
+        let (tag, len) = read_header(self.stream)?;
+        let payload = read_body(self.stream, len)?;
+        if tag == FrameTag::Cancel {
+            return Err(Fail::peer("Transfer cancelled by the other device"));
+        }
+        Ok((tag, payload))
+    }
+
+    /// Waits for the other device to connect on the private network, while
+    /// watching the existing connection for "I gave up".
+    fn await_connection(&mut self, token: &str, patience: Duration, late: &str) -> Result<Option<TcpStream>, Fail> {
+        let deadline = Instant::now() + patience;
+        loop {
+            self.keep_alive()?;
+            if Instant::now() >= deadline {
+                return self.stay(late);
+            }
+            match self.pending()? {
+                Some((FrameTag::DirectResult, _)) => return Ok(None),
+                Some((FrameTag::Heartbeat, _)) | None => {}
+                Some((tag, _)) => return self.stay(&format!("unexpected {tag:?} frame")),
+            }
+            match self.link.accept(LINK_POLL) {
+                // A stranger on the link is ignored; the real peer may still arrive.
+                Ok(Some(socket)) => {
+                    if let Ok(socket) = greet(socket, token, false) {
+                        return Ok(Some(socket));
+                    }
+                }
+                Ok(None) => {}
+                Err(reason) => return self.stay(&reason),
+            }
+        }
+    }
+
+    fn host(&mut self) -> Result<Option<TcpStream>, Fail> {
+        let hosted = {
+            let (stream, cancel, last_write) = (&mut *self.stream, self.cancel, &mut self.last_write);
+            self.link.host(&mut || link_tick(stream, cancel, last_write))
+        };
+        let hosted = match hosted {
+            Ok(hosted) => hosted,
+            Err(reason) => return self.stay(&reason),
+        };
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        let offer = DirectOffer {
+            ssid: hosted.ssid,
+            passphrase: hosted.passphrase,
+            token: token.clone(),
+            host_port: hosted.listen_port,
+        };
+        write_frame(self.stream, FrameTag::DirectOffer, &json(&offer)?).map_err(Fail::network)?;
+        self.last_write = Instant::now();
+
+        if hosted.listen_port.is_some() {
+            return self.await_connection(&token, LINK_JOIN_TIMEOUT, "the other device did not join in time");
+        }
+        // The joiner listens and says where; this side connects out.
+        let deadline = Instant::now() + LINK_JOIN_TIMEOUT;
+        loop {
+            self.keep_alive()?;
+            if Instant::now() >= deadline {
+                return self.stay("the other device did not join in time");
+            }
+            let joined: DirectJoined = match self.next()? {
+                (FrameTag::Heartbeat, _) => continue,
+                (FrameTag::DirectResult, _) => return Ok(None),
+                (FrameTag::DirectJoined, payload) => match serde_json::from_slice(&payload) {
+                    Ok(joined) => joined,
+                    Err(_) => return self.stay("the other device's address could not be read"),
+                },
+                (tag, _) => return self.stay(&format!("unexpected {tag:?} frame")),
+            };
+            let connected = self
+                .link
+                .connect(Some(&joined.address), joined.port)
+                .and_then(|socket| greet(socket, &token, true));
+            return match connected {
+                Ok(socket) => Ok(Some(socket)),
+                Err(reason) => self.stay(&reason),
+            };
+        }
+    }
+
+    fn join(&mut self) -> Result<Option<TcpStream>, Fail> {
+        let deadline = Instant::now() + LINK_OFFER_TIMEOUT;
+        let offer: DirectOffer = loop {
+            if Instant::now() >= deadline {
+                return self.stay("the other device did not offer a link in time");
+            }
+            match self.next()? {
+                (FrameTag::Heartbeat, _) => continue,
+                (FrameTag::DirectResult, _) => return Ok(None),
+                (FrameTag::DirectOffer, payload) => match serde_json::from_slice(&payload) {
+                    Ok(offer) => break offer,
+                    Err(_) => return self.stay("the link offer could not be read"),
+                },
+                (tag, _) => return self.stay(&format!("unexpected {tag:?} frame")),
+            }
+        };
+        let joined = {
+            let (stream, cancel, last_write) = (&mut *self.stream, self.cancel, &mut self.last_write);
+            self.link.join(&offer, &mut || link_tick(stream, cancel, last_write))
+        };
+        let joined = match joined {
+            Ok(joined) => joined,
+            Err(reason) => return self.stay(&reason),
+        };
+        if let Some(port) = offer.host_port {
+            let connected =
+                self.link.connect(None, port).and_then(|socket| greet(socket, &offer.token, true));
+            return match connected {
+                Ok(socket) => Ok(Some(socket)),
+                Err(reason) => self.stay(&reason),
+            };
+        }
+        let here = DirectJoined { address: joined.address, port: joined.port };
+        write_frame(self.stream, FrameTag::DirectJoined, &json(&here)?).map_err(Fail::network)?;
+        self.last_write = Instant::now();
+        self.await_connection(&offer.token, LINK_CONNECT_TIMEOUT, "the other device did not connect in time")
+    }
+}
+
+/// Keeps the existing connection alive while the platform works on the link.
+fn link_tick(
+    stream: &mut CancellableStream<'_>,
+    cancel: &AtomicBool,
+    last_write: &mut Instant,
+) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err("cancelled".into());
+    }
+    if last_write.elapsed() >= HEARTBEAT_EVERY {
+        write_frame(stream, FrameTag::Heartbeat, b"")?;
+        *last_write = Instant::now();
+    }
+    Ok(())
 }
 
 // ─── Receiver staging ────────────────────────────────────────────────────────
@@ -898,6 +1277,8 @@ pub struct ReceiveSummary {
     pub bytes_received: u64,
     pub bytes_resumed: u64,
     pub elapsed: Duration,
+    /// The data travelled over a private link instead of the shared network.
+    pub direct: bool,
 }
 
 /// Runs an approved transfer: sends the acceptance, receives and verifies
@@ -908,6 +1289,7 @@ pub fn receive_session(
     meta: &TransferMetadata,
     setup: &ReceiveSetup<'_>,
     cancel: &AtomicBool,
+    mut link: Option<&mut dyn DirectLink>,
     on_event: &mut dyn FnMut(SessionEvent<'_>),
 ) -> Result<ReceiveSummary, ReceiveFailure> {
     let offered = |name: &str| meta.features.iter().any(|feature| feature == name);
@@ -926,20 +1308,42 @@ pub fn receive_session(
         }
     };
 
-    match receive_inner(stream, meta, setup.receive_dir, &stage, negotiated, cancel, on_event) {
+    // A direct link needs both devices to offer it and a workable pairing.
+    let host = match (link.as_deref().map(|link| link.caps()), meta.direct) {
+        (Some(mine), Some(theirs)) if negotiated.batch && offered(FEATURE_DIRECT) => {
+            choose_host(theirs, mine)
+        }
+        _ => None,
+    };
+
+    let result = (|| {
+        let staged = receive_open(stream, meta, &stage, negotiated, host, cancel, on_event)
+            .map_err(|fail| receive_failure(stream, fail, cancel, negotiated))?;
+        let mut direct = None;
+        if let (Some(host), Some(link)) = (host, link.as_deref_mut()) {
+            on_event(SessionEvent::Linking);
+            direct = link_phase(stream, link, host == "receiver", cancel)
+                .map_err(|fail| receive_failure(stream, fail, cancel, negotiated))?;
+        }
+        match direct.as_mut() {
+            Some(socket) => {
+                on_event(SessionEvent::Linked);
+                let mut fast = CancellableStream::new(socket, stream.cancellation())
+                    .map_err(|e| (Fail::local(format!("Failed to use the direct link: {e}")), false))?;
+                receive_stream(&mut fast, meta, setup.receive_dir, &stage, negotiated, staged, cancel, on_event, true)
+                    .map_err(|fail| receive_failure(&mut fast, fail, cancel, negotiated))
+            }
+            None => receive_stream(stream, meta, setup.receive_dir, &stage, negotiated, staged, cancel, on_event, false)
+                .map_err(|fail| receive_failure(stream, fail, cancel, negotiated)),
+        }
+    })();
+
+    match result {
         Ok(summary) => {
             stage.discard();
             Ok(summary)
         }
-        Err(fail) => {
-            let cancelled = cancel.load(Ordering::Relaxed);
-            if negotiated.batch {
-                if cancelled {
-                    stream.close_with_notice(&frame_bytes(FrameTag::Cancel, b""));
-                } else if fail.kind == FailKind::Local {
-                    stream.close_with_notice(&frame_bytes(FrameTag::Error, fail.notice.as_bytes()));
-                }
-            }
+        Err((fail, cancelled)) => {
             let resumable = negotiated.resume && fail.kind == FailKind::Network && !cancelled;
             if resumable {
                 stage.keep();
@@ -954,6 +1358,26 @@ pub fn receive_session(
     }
 }
 
+/// Ends a failed receive on whichever connection is in use, telling the
+/// sender why when that is possible. Returns the failure and whether this
+/// device cancelled.
+fn receive_failure(
+    stream: &mut CancellableStream<'_>,
+    fail: Fail,
+    cancel: &AtomicBool,
+    negotiated: Negotiated,
+) -> (Fail, bool) {
+    let cancelled = cancel.load(Ordering::Relaxed);
+    if negotiated.batch {
+        if cancelled {
+            stream.close_with_notice(&frame_bytes(FrameTag::Cancel, b""));
+        } else if fail.kind == FailKind::Local {
+            stream.close_with_notice(&frame_bytes(FrameTag::Error, fail.notice.as_bytes()));
+        }
+    }
+    (fail, cancelled)
+}
+
 /// The next frame of the stream. Handles the frames that may arrive at any
 /// point: a cancel, and (in batch mode) keep-alives and the sender's errors.
 fn next_frame(stream: &mut CancellableStream<'_>, batch: bool) -> Result<(FrameTag, u32), Fail> {
@@ -964,7 +1388,7 @@ fn next_frame(stream: &mut CancellableStream<'_>, batch: bool) -> Result<(FrameT
                 let _ = read_body(stream, len);
                 return Err(Fail::peer("Transfer cancelled by sender"));
             }
-            FrameTag::Heartbeat if batch => {
+            FrameTag::Heartbeat | FrameTag::DirectResult if batch => {
                 read_body(stream, len)?;
             }
             FrameTag::Error if batch => {
@@ -985,15 +1409,16 @@ fn expect(tag: FrameTag, wanted: FrameTag) -> Result<(), Fail> {
     }
 }
 
-fn receive_inner(
+/// Checks what is already staged and sends the acceptance.
+fn receive_open(
     stream: &mut CancellableStream<'_>,
     meta: &TransferMetadata,
-    receive_dir: &Path,
     stage: &Staging<'_>,
     negotiated: Negotiated,
+    direct_host: Option<&'static str>,
     cancel: &AtomicBool,
     on_event: &mut dyn FnMut(SessionEvent<'_>),
-) -> Result<ReceiveSummary, Fail> {
+) -> Result<HashMap<u32, (u64, Sha256)>, Fail> {
     let timeouts = stream
         .set_read_timeout(Some(STREAM_TIMEOUT))
         .and_then(|_| stream.set_write_timeout(Some(STREAM_TIMEOUT)));
@@ -1012,7 +1437,7 @@ fn receive_inner(
         Ok(())
     };
 
-    let mut staged = if negotiated.resume {
+    let staged = if negotiated.resume {
         stage.scan(meta, &mut scratch, || keepalive(stream))?
     } else {
         HashMap::new()
@@ -1023,7 +1448,14 @@ fn receive_inner(
         if negotiated.resume {
             features.push(FEATURE_RESUME.to_string());
         }
-        let accept = AcceptPayload { status: "ACCEPTED".to_string(), features };
+        if direct_host.is_some() {
+            features.push(FEATURE_DIRECT.to_string());
+        }
+        let accept = AcceptPayload {
+            status: "ACCEPTED".to_string(),
+            features,
+            direct_host: direct_host.map(str::to_string),
+        };
         write_frame(stream, FrameTag::TransferAccept, &json(&accept)?).map_err(Fail::network)?;
     } else {
         write_response_frame(stream, FrameTag::TransferAccept, "ACCEPTED").map_err(Fail::network)?;
@@ -1045,7 +1477,27 @@ fn receive_inner(
         write_frame(stream, FrameTag::ResumeState, &payload).map_err(Fail::network)?;
     }
     on_event(SessionEvent::Accepted(negotiated));
+    Ok(staged)
+}
 
+/// Receives, verifies and saves the files, on whichever connection was chosen.
+#[allow(clippy::too_many_arguments)]
+fn receive_stream(
+    stream: &mut CancellableStream<'_>,
+    meta: &TransferMetadata,
+    receive_dir: &Path,
+    stage: &Staging<'_>,
+    negotiated: Negotiated,
+    mut staged: HashMap<u32, (u64, Sha256)>,
+    cancel: &AtomicBool,
+    on_event: &mut dyn FnMut(SessionEvent<'_>),
+    direct: bool,
+) -> Result<ReceiveSummary, Fail> {
+    stream
+        .set_read_timeout(Some(STREAM_TIMEOUT))
+        .and_then(|_| stream.set_write_timeout(Some(STREAM_TIMEOUT)))
+        .map_err(|e| Fail::local(format!("Failed to set stream timeout: {e}")))?;
+    let mut last_write = Instant::now();
     let total = meta.total_size_bytes;
     let mut meter = Meter::new();
     let mut chunks = ChunkReader::default();
@@ -1248,5 +1700,6 @@ fn receive_inner(
         bytes_received: meter.moved(),
         bytes_resumed: resumed,
         elapsed: meter.elapsed(),
+        direct,
     })
 }

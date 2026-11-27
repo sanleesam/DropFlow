@@ -63,6 +63,9 @@ Every frame sent over a DropFlow TCP socket starts with a 10-byte header:
 | `ERROR` | `0x0B` | Text | Reports why a peer stopped (DFP/1.1 batch mode) |
 | `TRANSFER_REQUEST_LARGE` | `0x0C` | JSON (`TransferMetadata`) | DFP/1.1: a request whose manifest exceeds 64 KB |
 | `RESUME_STATE` | `0x0D` | JSON array | DFP/1.1: what the receiver already holds |
+| `DIRECT_OFFER` | `0x0E` | JSON (`DirectOffer`) | DFP/1.1 direct link: the private network to join |
+| `DIRECT_JOINED` | `0x0F` | JSON (`DirectJoined`) | DFP/1.1 direct link: where a listening joiner can be reached |
+| `DIRECT_RESULT` | `0x10` | Text | DFP/1.1 direct link: a token, `OK`, or `FAILED: reason` |
 
 ---
 
@@ -249,7 +252,64 @@ staged and the hash of it. It gains nothing it could not already send.
 Resume never trusts stored state: both sides hash the actual bytes they hold,
 and the whole-file digest is still verified at the end.
 
-### 7.5 Compatibility matrix
+### 7.5 `direct`: a private link between the two devices
+
+Experimental and off unless the person turns it on. When both devices are on a
+slow shared network, the data can move onto a private Wi-Fi network that one
+of them creates. The shared connection carries only the arrangement, and the
+transfer stays on it if the link does not come up. Requires `batch`.
+
+**Offer.** The sender adds `"direct"` to `features` and
+`"direct": {"hostRank": n, "join": bool}` to the request. `hostRank` above 0
+means the device can create the network (desktop Windows: 2, Android: 1);
+`join` means it can join one. The receiver grants `direct` only when one side
+can host and the other can join, and names the host in the accept:
+`"directHost": "sender"` or `"receiver"`. If both could host, the higher rank
+hosts; on a tie the receiver does. The sender follows a role only if it
+offered it.
+
+**Set-up**, after the accept (and `RESUME_STATE`), on the shared connection.
+Both sides send keep-alives while they work.
+
+1. Host → joiner: `DIRECT_OFFER`
+   `{"ssid","passphrase","token","hostPort"?}`, sent once the network is up.
+   `token` is 32 random hex characters.
+2. The joiner joins that network, without leaving its current one where the
+   platform allows.
+3. One TCP connection is opened on the private network:
+   - `hostPort` present: the host is listening; the joiner connects to the
+     network's gateway on that port.
+   - `hostPort` absent: the joiner listens and sends `DIRECT_JOINED`
+     `{"address","port"}` on the shared connection; the host connects to it.
+     (A Windows host works this way: outgoing connections are not subject to
+     its inbound firewall rules.)
+4. On the new connection the side that connected runs the normal `HELLO`
+   handshake, then sends `DIRECT_RESULT` with the token as payload. The
+   listening side checks the token and answers `DIRECT_RESULT` `OK`. A wrong
+   token is ignored and the listener keeps waiting.
+5. Both sides continue the session (section 7.3 onward) on the new
+   connection. Nothing more is sent on the shared one.
+
+**Giving up.** At any step either side may send `DIRECT_RESULT`
+`FAILED: reason` on the shared connection; both then continue there as if
+`direct` had not been granted. Limits: the joiner waits 25 seconds for the
+offer; the host waits 75 seconds for the joiner (a phone may ask its owner
+first); a listening joiner waits 20 seconds for the host's connection. A
+`DIRECT_RESULT` that arrives after both sides have settled is ignored, like a
+keep-alive. A `TRANSFER_CANCEL` during set-up ends the transfer.
+
+**Rules for the platform side.** Joining must never replace or forget the
+device's own network silently: where a second connection is not possible the
+device does not offer `join` (or asks the person first, every time). The
+private network is released when the session ends, however it ends.
+
+**Limit until devices are authenticated.** The offer, including the network's
+passphrase and the token, crosses the shared network in the clear, like the
+rest of DFP/1. Someone who can read that network could join the private one.
+They gain nothing they could not already read from an unencrypted transfer on
+the shared network; encryption (planned) closes both.
+
+### 7.6 Compatibility matrix
 
 | Sender | Receiver | Exchange |
 | --- | --- | --- |
@@ -257,4 +317,6 @@ and the whole-file digest is still verified at the end.
 | DFP/1.1 | DFP/1 | DFP/1 (accept grants nothing); over 64 KB of manifest fails with a clear message |
 | DFP/1.1 | DFP/1.1 | `batch`, plus `resume` when the receiver grants it |
 
-DropFlow desktop grants and offers both. A peer may grant `batch` alone.
+DropFlow desktop grants and offers `batch` and `resume`. A peer may grant
+`batch` alone. `direct` is offered only when the person has turned it on and
+the device has a way to host or join.

@@ -57,7 +57,7 @@ fn main() -> Result<(), String> {
             let mut socket = TcpStream::connect((args[1].as_str(), port)).map_err(|e| e.to_string())?;
             let mut stream = CancellableStream::new(&mut socket, cancel.clone()).map_err(|e| e.to_string())?;
             println!("sending {} files, {} bytes", job.files.len(), job.total_bytes());
-            let summary = send_session(&mut stream, &job, &cancel, &mut |event| {
+            let summary = send_session(&mut stream, &job, &cancel, None, &mut |event| {
                 if let SessionEvent::Accepted(mode) = event {
                     println!("accepted batch={} resume={}", mode.batch, mode.resume);
                 }
@@ -81,7 +81,7 @@ fn main() -> Result<(), String> {
                     validate_request(&meta)?;
                     println!("request from '{}': {} files, {} bytes", meta.sender_name, meta.total_files, meta.total_size_bytes);
                     let setup = ReceiveSetup { receive_dir: &folder, allow_features: !legacy, staging: &registry };
-                    let summary = receive_session(&mut stream, &meta, &setup, &cancel, &mut |_| {})
+                    let summary = receive_session(&mut stream, &meta, &setup, &cancel, None, &mut |_| {})
                         .map_err(|failure| format!("{} (resumable={})", failure.message, failure.resumable))?;
                     perf("receive", summary.files.len(), summary.bytes_received, summary.bytes_resumed, summary.negotiated.batch, summary.elapsed);
                     Ok(())

@@ -34,6 +34,8 @@ export interface Settings {
   updateChannel: UpdateChannel;
   /** Use the newer transfer engine with devices that support it. */
   fastTransfer: boolean;
+  /** Experimental: use a private Wi-Fi link between the two devices. */
+  directLink: boolean;
   trustedDevices: TrustedDevice[];
 }
 
@@ -222,6 +224,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     darkTheme: systemPrefersDark(),
     reduceAnimations: false,
     fastTransfer: true,
+    directLink: false,
     updateChannel: "beta",
     trustedDevices: [],
   });
@@ -280,6 +283,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           themeMode: rustSet.theme === "dark" || rustSet.theme === "light" ? rustSet.theme : "system",
           darkTheme: rustSet.theme === "dark" || (rustSet.theme !== "light" && systemPrefersDark()),
           fastTransfer: typeof rustSet.fastTransfer === "boolean" ? rustSet.fastTransfer : true,
+          directLink: rustSet.directLink === true,
           updateChannel:
             rustSet.updateChannel === "development" || rustSet.updateChannel === "beta"
               ? rustSet.updateChannel
@@ -353,6 +357,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           autoAcceptTrustedDevices: false,
           updateChannel: next.updateChannel,
           fastTransfer: next.fastTransfer,
+          directLink: next.directLink,
         },
       }).catch(console.error);
       return next;

@@ -61,6 +61,12 @@ impl<'a> CancellableStream<'a> {
         Ok(stream)
     }
 
+    /// The flag that stops this stream; a second connection of the same
+    /// session shares it.
+    pub fn cancellation(&self) -> Arc<AtomicBool> {
+        self.cancellation.clone()
+    }
+
     pub fn set_cancellation(&mut self, cancellation: Arc<AtomicBool>) {
         self.cancellation = cancellation;
     }
@@ -459,6 +465,7 @@ mod tests {
                     final_path: String::new(),
                 }],
                 features: Vec::new(),
+                direct: None,
             },
         )
         .unwrap();

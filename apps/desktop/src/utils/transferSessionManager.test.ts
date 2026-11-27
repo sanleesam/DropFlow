@@ -445,6 +445,17 @@ export function runLifecycleTests() {
     const done=applyCompletionEvent(store,{sessionId:"ph"});
     assertTrue(applyPhaseEvent(done,{sessionId:"ph",phase:"waiting"})===done,"Phase cannot reopen a completed transfer");
   }
+  // 22b: a direct link is shown while it is set up and while it carries the data.
+  {
+    let store=startSendSession(createInitialSessionStore(),"dl","Pixel","a.mov",1);
+    store=applyPhaseEvent(store,{sessionId:"dl",phase:"linking"});
+    assertTrue(isPending(store.activeTransfers["dl"]),"Linking is pending");
+    assertEqual(transferSubtitle(store.activeTransfers["dl"]),"To Pixel · Setting up a direct link","Linking line");
+    store=applyPhaseEvent(store,{sessionId:"dl",phase:"direct"});
+    store=applyProgressEvent(store,{sessionId:"dl",percentage:10,speedBytesPerSec:52428800,sessionBytesSent:10,sessionTotalBytes:100});
+    assertTrue(store.activeTransfers["dl"].direct===true,"Direct survives progress updates");
+    assertTrue(transferSubtitle(store.activeTransfers["dl"]).includes("Direct link"),"Row says it is direct");
+  }
   // 23: 100% only when every byte has moved.
   {
     let store=startSendSession(createInitialSessionStore(),"near","Peer","big.bin",1);
